@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.165.0",
+    "openai>=3.60.0",
     "pydantic-settings>=2.16.3",
     "typer>=0.29.3",
     "uvicorn[standard]>=0.54.0",
@@ -37,11 +38,12 @@ files = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# live 测试调用真实 LLM 端点，默认不运行；用 `pytest -m live` 运行（见 AGENTS.md 第 8 节）。
+addopts = "-ra --strict-markers -m 'not live'"
+markers = ["live: 调用真实 LLM 端点，需要配置 LLM_* 环境变量"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "mypy>=2.4.1",
     "pytest>=9.2.0",
     "ruff>=0.17.6",

@@ -8,13 +8,6 @@ from copilot.config import LLMTask, MissingConfigError, Settings
 ENV_EXAMPLE = Path(__file__).resolve().parents[1] / ".env.example"
 
 
-@pytest.fixture(autouse=True)
-def _isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """清掉进程环境里的同名变量（例如 llm-live job 或开发者 shell 中设置的），只看测试传入的值。"""
-    for name in Settings.model_fields:
-        monkeypatch.delenv(name.upper(), raising=False)
-
-
 def make_settings(**values: object) -> Settings:
     # _env_file=None：不读取开发者本地的 .env，测试只看传入的值
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
