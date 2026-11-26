@@ -112,6 +112,13 @@ def test_form_is_taken_only_from_the_first_message() -> None:
     assert stats.forms == 0
 
 
+def test_numeric_ids_with_same_value_sort_by_spelling() -> None:
+    rows = [SheetRow("01", 1, FORM), SheetRow("1", 1, FORM), SheetRow("SYN", 1, FORM)]
+    forward = [c.id for c in build_cases(rows)[0]]
+    backward = [c.id for c in build_cases(list(reversed(rows)))[0]]
+    assert forward == backward == ["01", "1", "SYN"]
+
+
 def test_duplicate_seq_is_rejected() -> None:
     with pytest.raises(SheetFormatError, match="重复"):
         build_cases([SheetRow("1", 1, FORM), SheetRow("1", 1, AGENT)])

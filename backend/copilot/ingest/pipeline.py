@@ -171,8 +171,9 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
 
 
 def _thread_order(thread_id: str) -> tuple[int, int, str]:
-    """数字 ID 按数值排在前面，其他 ID 按字符串排在后面。"""
-    return (0, int(thread_id), "") if thread_id.isdigit() else (1, 0, thread_id)
+    """数字 ID 按数值排在前面，其他 ID 按字符串排在后面。数值相同（`1` 和 `01`）时按字符串区分，
+    所以顺序只取决于 ID 本身，与输入顺序无关。"""
+    return (0, int(thread_id), thread_id) if thread_id.isdigit() else (1, 0, thread_id)
 
 
 def build_cases(rows: Iterable[SheetRow]) -> tuple[list[Case], IngestStats]:
