@@ -1,0 +1,27 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "case_id": "SYN-0001",
+      "message_seq": 3,
+      "translation_zh": "【合成数据】谢谢回复。购买时间大约是 21:05，订单号是 SYN0000000。",
+      "summary_zh": "玩家购买“ジェム100個”后未到账，已按要求提供购买时间和订单号，等待核查。",
+      "category": "purchase",
+      "intent": "purchase_not_delivered",
+      "sentiment": "neutral",
+      "urgency": "high",
+      "facts": {
+        "item": "ジェム100個",
+        "order_id": "SYN0000000",
+        "purchased_at": "3月10日 21:05ごろ"
+      },
+      "missing_info": [],
+      "sensitivity_tags": [
+        "payment"
+      ],
+      "model": "fake-llm",
+      "created_at": "2024-03-11T12:00:00+09:00"
+    }
+  ]
+}

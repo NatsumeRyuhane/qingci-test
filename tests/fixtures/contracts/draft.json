@@ -1,0 +1,80 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "id": "draft-syn-0001",
+      "case_id": "SYN-0001",
+      "message_seq": 3,
+      "template_refs": [
+        {
+          "template_id": "purchase-not-delivered-ask-receipt",
+          "template_version": 1,
+          "reason_zh": "同一问题的上一轮回复使用了这个模板。"
+        }
+      ],
+      "similar_case_refs": [
+        {
+          "case_id": "SYN-0003",
+          "score": 12.5,
+          "reason_zh": "同样是购买后未到账。"
+        }
+      ],
+      "body_ja": "いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。\n\n【合成データ】注文番号のご連絡ありがとうございます。担当部署にて確認いたします。\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。\n※本メール内容の無断掲載、無断複製、転送はお控えください。",
+      "back_translation_zh": "【合成数据】感谢告知订单号，我们会交由负责部门核查。",
+      "checks": [
+        {
+          "kind": "register",
+          "passed": true
+        },
+        {
+          "kind": "forbidden_promise",
+          "passed": true
+        }
+      ],
+      "confidence": 0.72,
+      "route": "review",
+      "route_reasons": [
+        "涉及付费，需人工审核"
+      ],
+      "model": "fake-llm",
+      "created_at": "2024-03-11T12:00:05+09:00"
+    },
+    {
+      "schema_version": 1,
+      "id": "draft-syn-0004",
+      "case_id": "SYN-0004",
+      "message_seq": 1,
+      "template_refs": [
+        {
+          "template_id": "feedback-thanks",
+          "template_version": 1,
+          "reason_zh": "纯建议，无需调查。"
+        }
+      ],
+      "body_ja": "いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。\n\n貴重なご意見をいただき、誠にありがとうございます。いただいたご意見は開発チームへ共有いたします。\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。\n※本メール内容の無断掲載、無断複製、転送はお控えください。",
+      "back_translation_zh": "感谢您宝贵的意见，我们会转达开发团队。",
+      "checks": [
+        {
+          "kind": "register",
+          "passed": true
+        },
+        {
+          "kind": "forbidden_promise",
+          "passed": true
+        },
+        {
+          "kind": "slots_filled",
+          "passed": true
+        }
+      ],
+      "confidence": 0.95,
+      "route": "auto_send",
+      "route_reasons": [
+        "低风险模板，所有检查通过"
+      ],
+      "model": "fake-llm",
+      "created_at": "2024-03-12T09:00:00+09:00"
+    }
+  ]
+}
