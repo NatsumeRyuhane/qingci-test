@@ -194,6 +194,7 @@ uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档
 | Python 依赖（`uv add` / `uv remove`） | `scripts/export-requirements.sh`。**需要 uv**：依赖版本锁定在 `uv.lock` 中，`requirements*.txt` 由它导出，不要手动编辑。备用路线的贡献者需要改依赖时，请安装 uv，或在 PR 中说明需要的依赖，请他人更新 |
 | 后端 API（路由或模型） | `scripts/gen-api-types.sh` |
 | ORM 模型 | `uv run alembic revision --autogenerate -m "<说明>"`，检查生成的迁移脚本 |
+| 契约模型（`backend/copilot/contracts/`） | 同步 `tests/fixtures/contracts/` 中的合成数据和 [docs/architecture.md](docs/architecture.md)；不兼容的改动要把 `schema_version` 加 1（见该文档的“约定”） |
 | 环境变量 | 同步 `.env.example`（`tests/test_config.py` 会检查） |
 
 文档改动：确认所有相对链接都能正确解析。
@@ -207,8 +208,8 @@ README.md            项目概览与上手指南
 .env.example         应用读取的全部环境变量，不含值
 pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
 alembic.ini          仅供开发时生成数据库迁移
-backend/copilot/     后端：api/（REST API）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
-tests/               后端测试（只用合成数据；tests/live/ 默认不运行）
+backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
 scripts/             辅助脚本（导出 requirements、生成 API 类型）
 .github/workflows/   CI
@@ -216,6 +217,7 @@ data/                仅限本地的数据目录（内容被 git 忽略），见
 docs/
   requirements.md    原始测试题说明
   data.md            样本数据概况与发现
+  architecture.md    数据契约：各实体的作用、关系与约定
   decisions.md       决策记录（D-NNN）
   proposals/         MVP 之后工作的设计提案
 ```

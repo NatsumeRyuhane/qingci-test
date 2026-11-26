@@ -90,5 +90,6 @@ docs/              需求、数据概况、决策记录、设计提案
 | [AGENTS.md](AGENTS.md) | 工作流程、分支保护规则、各项约定 |
 | [docs/requirements.md](docs/requirements.md) | 原始测试题说明 |
 | [docs/data.md](docs/data.md) | 样本数据的结构与发现 |
+| [docs/architecture.md](docs/architecture.md) | 数据契约：各实体的作用、关系与约定 |
 | [docs/decisions.md](docs/decisions.md) | 决策记录：选了什么、为什么 |
 | [docs/proposals/](docs/proposals/) | MVP 之后工作的设计提案 |
