@@ -156,7 +156,7 @@ def test_detect_role(seq: int, raw: str, body: str, role: MessageRole, reason: R
 
 def test_bounce_containing_a_form_is_system() -> None:
     body = (
-        "【合成データ】\nThe mail system\n\n<>: host mx.example.test[192.0.2.1]\n    said: 550\n\n"
+        "The mail system\n\n<>: host mx.example.test[192.0.2.1]\n    said: 550\n\n【合成データ】\n"
         + FORM
     )
     assert detect_role(1, body, body)[0] is MessageRole.SYSTEM
@@ -173,7 +173,7 @@ def test_notification_text_inside_inquiry_is_not_system() -> None:
     "body",
     [
         "Mail Delivery Subsystem から通知が来ました",
-        "【合成データ】\nMail Delivery Subsystem から通知が来ました。\nまだ届きません。",
+        "Mail Delivery Subsystem から通知が来ました。\nまだ届きません。【合成データ】",
     ],
 )
 def test_single_notification_marker_in_follow_up_is_unknown(body: str) -> None:
@@ -186,8 +186,8 @@ def test_single_notification_marker_in_follow_up_is_unknown(body: str) -> None:
         "メールボックス「 テスト」のメール一括返信作業のレポートです。\n\n【合成データ】件名",
         "This is the mail system at host mx.example.test.\n\n【合成データ】",
         "** Address not found **\n\n【合成データ】",
-        "【合成データ】\nThe mail system\n\n<>: host mx.example.test[192.0.2.1] said: 550",
-        "【合成データ】\nThe email account that you tried to reach does not exist.\nReason: 5.1.1",
+        "The mail system\n\n<>: host mx.example.test[192.0.2.1] said: 550\n【合成データ】",
+        "The email account that you tried to reach does not exist.\nReason: 5.1.1\n【合成データ】",
     ],
 )
 def test_structured_system_mail(body: str) -> None:
@@ -201,3 +201,22 @@ def test_notification_text_late_in_follow_up_is_not_system() -> None:
         + "Mail Delivery Subsystem から通知が来ました"
     )
     assert detect_role(2, body, body)[0] is MessageRole.PLAYER
+
+
+def test_reply_with_bounce_pasted_below_own_text_is_player() -> None:
+    bounce = (
+        "This is the mail system at host mx.example.test.\n\nThe mail system\n\n"
+        "<>: host mx.example.test[192.0.2.1] said: 550"
+    )
+    body = "【合成データ】このメールが届きました。どうすればいいですか？\n\n" + bounce
+    assert detect_role(3, body, body) == (MessageRole.PLAYER, RoleReason.FOLLOW_UP)
+
+
+def test_notification_words_after_first_line_are_ignored() -> None:
+    body = "【合成データ】まだ届きません。\nMail Delivery Subsystem と MAILER-DAEMON から通知"
+    assert detect_role(2, body, body) == (MessageRole.PLAYER, RoleReason.FOLLOW_UP)
+
+
+def test_japanese_bounce_header() -> None:
+    body = "次のあて先へのメッセージはエラーのため送信できませんでした。\n\n【合成データ】"
+    assert detect_role(1, body, body) == (MessageRole.SYSTEM, RoleReason.SYSTEM)

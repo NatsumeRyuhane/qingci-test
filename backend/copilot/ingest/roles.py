@@ -29,8 +29,10 @@ HEADER_LINES: tuple[re.Pattern[str], ...] = (
     re.compile(r"メールボックス「[^」\n]*」のメール一括返信作業のレポートです。"),
     re.compile(r"This is the mail system at host \S+", re.IGNORECASE),
     re.compile(r"\*\* Address not found \*\*"),
+    re.compile(r"次のあて先へのメッセージはエラーのため送信できませんでした。"),
 )
-"""系统邮件固定的第一行，必须整行匹配，例如客服工具批量回复报告的开头。"""
+"""系统邮件固定的第一行，必须整行匹配，例如客服工具批量回复报告和各种退信的开头。
+样本中 133 封系统邮件的第一行都是其中之一。"""
 
 SYSTEM_SEARCH_LINES = 15
 """只在正文开头这么多行内找系统邮件的特征。退信和报告的特征都在开头（样本中最多到第 15 行）。"""
@@ -45,10 +47,13 @@ class SystemEvidence(StrEnum):
 
 
 def system_evidence(body: str) -> SystemEvidence:
-    """只看正文开头、并且在第一个表单字段之前的部分。
+    """系统邮件必须“以系统邮件的样子开头”：证据要从第一个非空行开始。
 
-    退信会附上原邮件（常常是表单），但退信说明总在前面；玩家在咨询内容里提到
-    `Mail Delivery Subsystem` 之类的文字时，它出现在表单字段之后，不算。
+    真正的系统邮件以固定的开头或退信说明开头；玩家的邮件以玩家自己的话开头，即使下面粘贴了
+    退信，或在表单内容里提到 `Mail Delivery Subsystem`，也不算。只看正文开头、并且在第一个
+    表单字段之前的部分：退信附带的原表单总在退信说明之后。
+
+    误判的代价有限：案件状态只看最后一封邮件，以系统邮件结束的线程是待判断，不会被当作已结案。
     """
     lines = body.split("\n")
     limit = SYSTEM_SEARCH_LINES
@@ -59,6 +64,8 @@ def system_evidence(body: str) -> SystemEvidence:
     first = next((line.strip() for line in lines[:limit] if line.strip()), "")
     if any(pattern.fullmatch(first) for pattern in HEADER_LINES):
         return SystemEvidence.STRONG
+    if not any(pattern.search(first) for pattern in BOUNCE_MARKERS):
+        return SystemEvidence.NONE
     hits = sum(1 for pattern in BOUNCE_MARKERS if pattern.search(preamble))
     if hits >= 2:
         return SystemEvidence.STRONG
