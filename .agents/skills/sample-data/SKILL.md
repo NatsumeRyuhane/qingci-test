@@ -1,51 +1,38 @@
 ---
 name: sample-data
-description: Rules and practical notes for the Japanese support-mail sample (data/raw/*.xlsx). Covers where it lives, its structure, the parsing pitfalls, and what may and may not be quoted or committed. Use before reading, processing, quoting or writing tests against the sample data.
+description: 日语客服邮件样本（data/raw/*.xlsx）的使用规则与实用说明，包括存放位置、数据结构、解析陷阱，以及哪些内容可以或不可以引用、提交。在读取、处理、引用样本数据或基于它编写测试之前使用。
 ---
 
-# Working with the sample data
+# 使用样本数据
 
-## Rules (non-negotiable)
+## 规则（不可违反）
 
-1. The workbook and anything derived from it **never go into git.** `data/` contents, `*.xlsx` and
-   `*.csv` are ignored. Don't force-add them.
-2. In issues, PRs, commit messages, docs and logs, quote **at most a few lines**, and only when it
-   helps the reader.
-3. The configured LLM provider may receive the data, because that's the product. No other external
-   service may: no pastebins, public notebooks, or uploads to other tools.
-4. Tests use **small synthetic fixtures** written to mimic the format (see below), never real rows.
-   Mark them as synthetic in the file and the PR.
+1. 样本表格及其任何派生产物**永远不进 git**。`data/` 下的内容、`*.xlsx` 和 `*.csv` 都已被忽略，不要强制添加。
+2. 在 issue、PR、提交信息、文档和日志中，**最多引用几行**，而且只在对读者有帮助时引用。
+3. 项目配置的 LLM 服务商可以接收这些数据，因为这就是产品功能本身。其他外部服务都不行：不能用粘贴板网站、公开 notebook，也不能上传到其他工具。
+4. 测试使用模仿数据格式编写的**小规模合成测试数据**（见下文），绝不使用真实数据行。在文件和 PR 中注明是合成数据。
 
-If the file is missing, it is not in the repo by design. Ask your human for it and point them to
-data/README.md. Don't search the internet for it.
+如果找不到数据文件，那是设计如此，它本来就不在仓库里。请向你的人类协作者索取，并告诉对方参考 data/README.md。不要去网上找。
 
-## Where and what
+## 位置与内容
 
-- Path: `data/raw/脱敏数据2026.2.10.xlsx` (also in `.env` as `SAMPLE_DATA_PATH`).
-- One sheet, columns `メールID` (thread), `メールID枝番` (message number), `本文` (body).
-- Full profile and findings: docs/data.md. Read it rather than re-deriving them.
+- 路径：`data/raw/脱敏数据2026.2.10.xlsx`（`.env` 中的 `SAMPLE_DATA_PATH` 也指向它）。
+- 一个工作表，列为 `メールID`（线程）、`メールID枝番`（邮件序号）、`本文`（正文）。
+- 完整概况和发现见 docs/data.md，直接读它，不要重新推导。
 
-## Pitfalls
+## 陷阱
 
-- **Message type isn't a column.** An agent reply starts with
-  `いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。`. Message 1 is the
-  player's form submission. Later non-agent messages are player follow-ups.
-- **Quoted history**: lines starting with `>` (nested `>>`), introduced by headers like
-  `2024年3月29日(金) 16:32 … <>:` or `2024/03/29 12:18、… のメール:`. Sometimes the quote is
-  collapsed onto one long line. Strip it before analysing the new content.
-- **Form fields** are `key : value` lines (the content field uses a full-width `：`). Many are empty.
-  The category values are 不具合について, アイテム購入時に問題が発生した, ご意見・ご要望 and
-  データの引き継ぎについて.
-- **Lost characters**: `・`, `①②③`, and some bullets show up as `?`. Don't treat `?` as a
-  question mark without context.
-- **Full-width vs half-width** characters and `　` spaces are common. Normalize (NFKC) for
-  matching only. Keep the original text for display and drafting.
-- **Leading blank lines** are common in message 1.
+- **邮件类型不是一列。** 客服回复以 `いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。` 开头。第 1 封是玩家提交的表单。之后不是客服写的邮件就是玩家追问。
+- **引用的历史邮件**：以 `>`（或嵌套的 `>>`）开头的行，前面有 `2024年3月29日(金) 16:32 … <>:` 或 `2024/03/29 12:18、… のメール:` 这类引导行。有时整段引用被压缩成一长行。分析新内容前要先去除。
+- **表单字段**是 `key : value` 形式的行（内容字段用的是全角 `：`），很多为空。类别取值有 不具合について、アイテム購入時に問題が発生した、ご意見・ご要望 和 データの引き継ぎについて。
+- **字符丢失**：`・`、`①②③` 和一些项目符号显示成了 `?`。没有上下文时不要把 `?` 当成问号。
+- **全角与半角**字符、`　` 空格很常见。只在匹配时做规范化（NFKC），展示和起草时保留原文。
+- 第 1 封邮件**开头常有空行**。
 
-## Synthetic fixture example
+## 合成测试数据示例
 
 ```text
-# SYNTHETIC: not from the client data
+# SYNTHETIC：合成数据，并非来自客户数据
 いつもご利用いただきありがとうございます。
 『ぽちゃガチョ！』サポート担当です。
 

@@ -1,27 +1,27 @@
 ---
 name: project-docs
-description: Where project knowledge is written down and how to keep it current. Covers the decision log, design proposals, and README and AGENTS.md updates. Use when a change alters behaviour, setup or a decision, or when proposing a design.
+description: 项目知识写在哪里、如何保持最新，涵盖决策记录、设计提案，以及 README 和 AGENTS.md 的更新。在改动影响行为、配置或决策时，或提出设计方案时使用。
 ---
 
-# Keeping the docs current
+# 保持文档最新
 
-The project is meant to be maintained by people who never saw the sessions that built it
-(docs/decisions.md D-006). Write the knowledge down where they will look for it.
+这个项目要能被从未看过构建过程的人维护（docs/decisions.md D-006）。把知识写在他们会去找的地方。
 
-| You… | Update |
+| 你… | 需要更新 |
 |---|---|
-| Made or changed a choice that constrains future work (architecture, library, data rule, process) | Add `D-NNN` to `docs/decisions.md`. Supersede old entries, don't edit them. |
-| Want to build something out of scope or contentious | Open an issue labelled `proposal`. Once the design settles, write `docs/proposals/NNNN-<slug>.md`. |
-| Changed setup, commands or env vars | `README.md` Getting started, `AGENTS.md` §8, `.env.example` |
-| Changed workflow or branch rules | `AGENTS.md` (and the GitHub settings, in the same PR) |
-| Learned something new about the data | `docs/data.md` |
+| 做出或改变了一个会约束后续工作的选择（架构、库、数据规则、流程） | 在 `docs/decisions.md` 中新增 `D-NNN`。用新记录取代旧记录，不要修改旧记录。 |
+| 想做一件超出范围或有争议的事 | 开一个带 `proposal` 标签的 issue。设计确定后，写成 `docs/proposals/NNNN-<slug>.md`。 |
+| 改了配置、命令或环境变量 | `README.md` 的“上手”部分、`AGENTS.md` 第 8 节、`.env.example` |
+| 改了工作流程或分支规则 | `AGENTS.md`（以及 GitHub 设置，在同一个 PR 中） |
+| 对数据有了新的认识 | `docs/data.md` |
 
-Docs changes go in the **same PR** as the change they describe.
+文档改动与它所描述的改动放在**同一个 PR** 中。
 
-## Writing style
+## 写作风格
 
-- Lead with the point. State the decision or fact first, then the reasoning.
-- Say *why*. A rule without its reason gets broken or cargo-culted.
-- Link sources: issues, PRs, decision IDs.
-- Don't write status ("TODO", "next we will…") into docs. Status lives in issues.
-- Keep relative links valid. Check they resolve before committing.
+- 使用简体中文（AGENTS.md 第 3 节）。代码、命令、路径和通用英文术语保持原样。
+- 开门见山，先写决定或事实，再写理由。
+- 写清楚*为什么*。没有理由的规则要么被打破，要么被生搬硬套。
+- 附上来源链接：issue、PR、决策编号。
+- 不要在文档里写进度（“TODO”、“下一步我们会……”），进度放在 issue 里。
+- 保持相对链接有效，提交前确认它们都能正确解析。
