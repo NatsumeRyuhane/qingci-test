@@ -59,6 +59,46 @@ def db_upgrade(
     typer.echo(f"数据库已迁移到 {revision}")
 
 
+@app.command()
+def ingest(
+    input_path: Annotated[
+        Path | None,
+        typer.Option("--input", help="样本表格路径。默认取 SAMPLE_DATA_PATH。"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="输出的 JSONL 路径。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    stats: Annotated[
+        bool, typer.Option("--stats", help="输出完整的清洗统计，可与 docs/data.md 对照。")
+    ] = False,
+) -> None:
+    """读取样本表格，清洗并写出案件（#4）。重复运行产出完全相同的文件。"""
+    from copilot.ingest import (
+        DEFAULT_OUTPUT,
+        SheetFormatError,
+        build_cases,
+        read_sheet,
+        write_cases,
+    )
+
+    source = input_path or Path(get_settings().sample_data_path)
+    if not source.is_file():
+        typer.echo(f"找不到样本表格：{source}（见 data/README.md）", err=True)
+        raise typer.Exit(1)
+    try:
+        cases, ingest_stats = build_cases(read_sheet(source))
+    except SheetFormatError as exc:
+        typer.echo(f"表格格式错误：{exc}", err=True)
+        raise typer.Exit(1) from exc
+    target = out or DEFAULT_OUTPUT
+    write_cases(cases, target)
+    typer.echo(f"已写入 {target}：{ingest_stats.threads} 个案件，{ingest_stats.messages} 封邮件")
+    if stats:
+        for line in ingest_stats.lines():
+            typer.echo(line)
+
+
 @contracts_app.command("export")
 def contracts_export(
     out_dir: Annotated[

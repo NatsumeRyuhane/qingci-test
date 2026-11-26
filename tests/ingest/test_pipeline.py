@@ -1,0 +1,165 @@
+"""从表格到案件的完整流程：组装、发送时间、状态、确定性、xlsx 读取和 CLI。
+
+SYNTHETIC：全部是模仿样本格式编写的合成数据（带 【合成データ】 标记），不来自客户数据（D-002）。
+xlsx 文件在测试中临时生成，不提交到仓库。
+"""
+
+from datetime import datetime
+from pathlib import Path
+
+import openpyxl
+import pytest
+from typer.testing import CliRunner
+
+from copilot.cli import app
+from copilot.contracts import CaseStatus, InquiryCategory, MessageRole
+from copilot.ingest import (
+    SheetFormatError,
+    SheetRow,
+    build_cases,
+    read_cases,
+    read_sheet,
+    write_cases,
+)
+from copilot.ingest.timestamps import JST
+
+FORM = (
+    "\n\n\nお問い合わせ\nアカウントID : \n\nプレイヤー名 : \nアプリバージョン : 9.9.9\n"
+    "お問い合わせ内容の種類 : ご意見?ご要望\nご利用環境 : iOS\n"
+    "問題が発生した日時 : 2099-01-02 09:00\nメールアドレス : \n"
+    "お問い合わせ内容 ：【合成データ】運営?開発チームへの要望です\n\n添付ファイル ：\n\n"
+)
+AGENT = (
+    "いつもご利用いただきありがとうございます。\n『ぽちゃガチョ！』サポート担当です。\n\n"
+    "【合成データ】貴重なご意見をありがとうございます。\n\n"
+    "今後とも『ぽちゃガチョ！』をよろしくお願いいたします。\n"
+    "※本メール内容の無断掲載、無断複製、転送はお控えください。\n\n"
+    "> お問い合わせ内容の種類 : ご意見?ご要望\n"
+)
+FOLLOW_UP = (
+    "【合成データ】ありがとうございます。もう一つ要望があります。\n\n"
+    "2099年1月2日(金) 午後3:04 【ぽちゃガチョ！カスタマーサポート】 <>:\n\n"
+    "> いつもご利用いただきありがとうございます。\n"
+)
+
+ROWS = [
+    # 故意打乱顺序：导入要按 メールID 分组、按 メールID枝番 排序。
+    SheetRow("10", 3, FOLLOW_UP),
+    SheetRow("10", 1, FORM),
+    SheetRow("2", 1, "【合成データ】The mail system\n\nReason: 5.1.1\n"),
+    SheetRow("10", 2, AGENT),
+]
+
+
+def test_build_cases() -> None:
+    cases, stats = build_cases(ROWS)
+    assert [c.id for c in cases] == ["2", "10"]  # 数字 ID 按数值排序
+
+    bounce, case = cases
+    assert bounce.messages[0].role is MessageRole.SYSTEM
+    assert bounce.status is CaseStatus.REPLIED  # 没有待回复的玩家邮件
+
+    form, agent, follow_up = case.messages
+    assert [m.seq for m in case.messages] == [1, 2, 3]
+    assert [m.role for m in case.messages] == [
+        MessageRole.PLAYER,
+        MessageRole.AGENT,
+        MessageRole.PLAYER,
+    ]
+    assert form.raw_body == FORM
+    assert form.body.startswith("お問い合わせ")
+    assert "ご意見・ご要望" in form.body
+    assert case.form is not None
+    assert case.form.category is InquiryCategory.FEEDBACK
+    assert case.form.content == "【合成データ】運営・開発チームへの要望です"
+    assert case.category is InquiryCategory.FEEDBACK
+
+    assert agent.core == "【合成データ】貴重なご意見をありがとうございます。"
+    assert agent.quoted.startswith("> お問い合わせ内容の種類")
+    assert agent.sent_at == datetime(2099, 1, 2, 15, 4, tzinfo=JST)
+
+    assert follow_up.body == "【合成データ】ありがとうございます。もう一つ要望があります。"
+    assert follow_up.sent_at is None
+    assert case.status is CaseStatus.OPEN
+
+    assert stats.threads == 2
+    assert stats.messages == 4
+    assert stats.sent_at_known == 1
+    assert stats.forms == 1
+    assert stats.redacted_fields_not_empty == 0
+
+
+def test_conflicting_quote_headers_are_not_used() -> None:
+    leader = "2099年1月2日(金) {} 【ぽちゃガチョ！カスタマーサポート】 <>:\n> 前"
+    rows = [
+        SheetRow("1", 1, FORM),
+        SheetRow("1", 2, AGENT),
+        SheetRow("1", 3, "【合成データ】a\n" + leader.format("10:00")),
+        SheetRow("1", 4, "【合成データ】b\n" + leader.format("11:00")),
+    ]
+    (case,), stats = build_cases(rows)
+    assert case.messages[1].sent_at is None
+    assert stats.sent_at_conflicts == 1
+
+
+def test_duplicate_seq_is_rejected() -> None:
+    with pytest.raises(SheetFormatError, match="重复"):
+        build_cases([SheetRow("1", 1, FORM), SheetRow("1", 1, AGENT)])
+
+
+def test_write_is_deterministic(tmp_path: Path) -> None:
+    first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    write_cases(build_cases(ROWS)[0], first)
+    write_cases(build_cases(list(reversed(ROWS)))[0], second)
+    assert first.read_bytes() == second.read_bytes()
+    assert read_cases(first) == build_cases(ROWS)[0]
+
+
+def _write_xlsx(
+    path: Path, rows: list[tuple[object, object, object]], header: tuple[str, ...]
+) -> None:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.append(header)
+    for row in rows:
+        sheet.append(row)
+    workbook.save(path)
+
+
+HEADER = ("メールID", "メールID枝番", "本文")
+
+
+def test_read_sheet(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [(10, 1, FORM), (None, None, None), (10.0, 2, None)], HEADER)
+    assert read_sheet(path) == [SheetRow("10", 1, FORM), SheetRow("10", 2, "")]
+
+
+def test_read_sheet_rejects_unexpected_header(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [], ("ID", "seq", "body"))
+    with pytest.raises(SheetFormatError, match="表头"):
+        read_sheet(path)
+
+
+def test_cli_ingest(tmp_path: Path) -> None:
+    source, out = tmp_path / "synthetic.xlsx", tmp_path / "cases.jsonl"
+    _write_xlsx(source, [(r.thread_id, r.seq, r.body) for r in ROWS], HEADER)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["ingest", "--input", str(source), "--out", str(out), "--stats"])
+    assert result.exit_code == 0, result.output
+    assert "2 个案件，4 封邮件" in result.output
+    assert "发送方：player: 2 · agent: 1 · system: 1" in result.output
+    first = out.read_bytes()
+
+    result = runner.invoke(app, ["ingest", "--input", str(source), "--out", str(out)])
+    assert result.exit_code == 0
+    assert out.read_bytes() == first  # 幂等
+
+
+def test_cli_ingest_missing_input(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["ingest", "--input", str(tmp_path / "missing.xlsx")])
+    assert result.exit_code == 1
+    assert "找不到样本表格" in result.output
