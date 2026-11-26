@@ -176,3 +176,53 @@ jobs:
       - if: steps.configured.outputs.ok == 'true'
         name: pytest -m live
         run: uv run pytest -m live
+
+  # 部署资源（#14）：manage.py 的单元测试、compose 配置校验、构建两个镜像（不推送），
+  # 并在空数据库上走一遍完整的部署流程。故意不装 uv，验证 manage.sh 的 venv + pip 路线，
+  # 也就是“服务器上只有 Docker 和 Python 3”的情况。
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 确认运行环境中没有 uv
+        run: |
+          if command -v uv >/dev/null 2>&1; then
+            echo "::error::运行环境中预装了 uv，本 job 无法验证不依赖它的路线"
+            exit 1
+          fi
+      - name: manage.py 单元测试（含依赖声明一致性检查）
+        # pytest 版本与 uv.lock 一致。
+        run: |
+          python3 -m venv "$RUNNER_TEMP/deploy-tests"
+          "$RUNNER_TEMP/deploy-tests/bin/pip" install --quiet -r deploy/requirements.txt pytest==9.2.0
+          "$RUNNER_TEMP/deploy-tests/bin/pytest" deploy/tests
+      - name: 准备 .env（假的 LLM 配置，部署流程不会调用 LLM）
+        run: |
+          cat > .env <<'ENV'
+          LLM_BASE_URL=https://llm.invalid/v1
+          LLM_API_KEY=ci-dummy
+          LLM_MODEL_ANALYZE=ci-dummy
+          LLM_MODEL_DRAFT=ci-dummy
+          LLM_MODEL_BACKTRANSLATE=ci-dummy
+          EMBEDDING_MODEL=ci-dummy
+          ENV
+      - name: compose 配置校验
+        run: docker compose -f deploy/compose.yaml config --quiet
+      - name: 首次部署
+        run: deploy/manage.sh deploy
+      - name: 重新部署后已有数据仍在
+        run: |
+          python3 -c "import sqlite3; c = sqlite3.connect('data/copilot.db'); c.execute('CREATE TABLE ci_marker (v TEXT)'); c.execute(\"INSERT INTO ci_marker VALUES ('kept')\"); c.commit()"
+          deploy/manage.sh redeploy
+          python3 -c "import sqlite3; rows = sqlite3.connect('data/copilot.db').execute('SELECT v FROM ci_marker').fetchall(); assert rows == [('kept',)], rows"
+          ls data/deploy/backups/copilot-*.db
+      - name: 状态与健康
+        run: deploy/manage.sh status
+      - name: down 默认保留数据
+        run: |
+          deploy/manage.sh down
+          test -f data/copilot.db
+      - name: 失败时输出容器日志
+        if: failure()
+        run: docker compose -f deploy/compose.yaml logs --no-color || true
