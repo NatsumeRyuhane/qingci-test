@@ -1,0 +1,29 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "id": "hikitsugi-code",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "term_ja": "引き継ぎコード",
+      "term_zh": "引继码",
+      "reading_ja": "ひきつぎこーど",
+      "note_zh": "跨设备迁移数据时使用的代码。"
+    },
+    {
+      "schema_version": 1,
+      "id": "gacha",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "term_ja": "ガチャ",
+      "term_zh": "抽卡"
+    }
+  ]
+}

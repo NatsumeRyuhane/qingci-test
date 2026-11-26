@@ -143,14 +143,21 @@ def _identify(block: str, candidates: list[_Msg]) -> _Msg | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def recover_sent_at(messages: list[_Msg]) -> tuple[dict[int, datetime], int]:
-    """返回（{seq: 发送时间}, 矛盾次数）。
+@dataclass(frozen=True)
+class QuoteMatch:
+    """第 `quoting_seq` 封邮件的引导行确认引用了第 `target_seq` 封邮件。"""
 
-    第 k 封邮件的引导行给出它直接回复的那封邮件的发送时间。只有同时满足以下条件才采用：
-    引导行能确定发送方；引导行下的引用内容恰好与之前一封该发送方的邮件吻合。两封邮件给
-    同一封邮件推出不同的时间时，视为无法确定，不采用。
-    """
-    found: dict[int, set[datetime]] = {}
+    quoting_seq: int
+    target_seq: int
+    sender_role: MessageRole
+    """引导行标明的发送方，与被引用邮件的角色一致。"""
+    sent_at: datetime
+
+
+def quote_matches(messages: list[_Msg]) -> list[QuoteMatch]:
+    """线程中所有能确认的引用：引导行能确定发送方，并且引导行下的引用内容恰好与之前一封
+    该发送方的邮件吻合。发送时间恢复（`recover_sent_at`）和角色证据的引用佐证都用它。"""
+    matches = []
     for i, msg in enumerate(messages):
         header = outermost_header(msg.quoted) if msg.quoted else None
         if header is None or header.sender_role is None:
@@ -158,7 +165,24 @@ def recover_sent_at(messages: list[_Msg]) -> tuple[dict[int, datetime], int]:
         candidates = [m for m in messages[:i] if m.role is header.sender_role]
         target = _identify(header.block, candidates)
         if target is not None:
-            found.setdefault(target.seq, set()).add(header.sent_at)
+            matches.append(QuoteMatch(msg.seq, target.seq, header.sender_role, header.sent_at))
+    return matches
+
+
+def recover_sent_at(messages: list[_Msg]) -> tuple[dict[int, datetime], int]:
+    """返回（{seq: 发送时间}, 矛盾次数）。
+
+    第 k 封邮件的引导行给出它直接回复的那封邮件的发送时间，只采用 `quote_matches` 能确认的
+    引用。两封邮件给同一封邮件推出不同的时间时，视为无法确定，不采用。
+    """
+    return sent_times(quote_matches(messages))
+
+
+def sent_times(matches: list[QuoteMatch]) -> tuple[dict[int, datetime], int]:
+    """`recover_sent_at` 的后半部分：已经有了 `quote_matches` 的结果时直接用它，不重复计算。"""
+    found: dict[int, set[datetime]] = {}
+    for match in matches:
+        found.setdefault(match.target_seq, set()).add(match.sent_at)
     times = {seq: next(iter(ts)) for seq, ts in found.items() if len(ts) == 1}
     return times, sum(1 for ts in found.values() if len(ts) > 1)
 

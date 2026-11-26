@@ -22,6 +22,7 @@ from copilot.ingest import (
     write_cases,
 )
 from copilot.ingest import sheet as sheet_module
+from copilot.ingest.pipeline import _thread_order
 from copilot.ingest.sheet import MAX_ID_CHARS
 from copilot.ingest.timestamps import JST
 
@@ -157,10 +158,15 @@ STATUS_BOUNCE = (
     ("bodies", "roles", "status"),
     [
         pytest.param([FORM], "P", CaseStatus.OPEN, id="inquiry-unanswered"),
-        pytest.param([FORM, AGENT], "PA", CaseStatus.REPLIED, id="answered-no-follow-up"),
+        # 单独一个线程里的客服回复只有问候语这一弱证据，不能让案件离开待处理队列。
+        pytest.param([FORM, AGENT], "PA", CaseStatus.UNDETERMINED, id="answered-weak-evidence"),
         pytest.param([FORM, AGENT, FOLLOW_UP], "PAP", CaseStatus.OPEN, id="follow-up-unanswered"),
         pytest.param(
-            [FORM, AGENT, FOLLOW_UP, AGENT], "PAPA", CaseStatus.REPLIED, id="follow-up-answered"
+            # 最后一封与同一线程中之前的回复相同（可能是玩家粘贴回来的），不算强证据。
+            [FORM, AGENT, FOLLOW_UP, AGENT],
+            "PAPA",
+            CaseStatus.UNDETERMINED,
+            id="follow-up-answered-paste-back",
         ),
         pytest.param([STATUS_BOUNCE], "S", CaseStatus.UNDETERMINED, id="system-only"),
         pytest.param([FORM, STATUS_BOUNCE], "PS", CaseStatus.UNDETERMINED, id="ends-on-system"),
@@ -219,10 +225,20 @@ def test_numeric_ids_with_same_value_sort_by_spelling() -> None:
 
 
 def test_thread_order_handles_unusual_ids() -> None:
+    # 这些 ID 不是合法的案件 ID（会被 build_cases 拒绝），但排序函数本身不能因此出错。
     long_id = "9" * 5000  # 超过 Python 整数与字符串转换的默认位数上限
-    rows = [SheetRow(i, 1, FORM) for i in ["²", "10", long_id, "9", "１", "SYN"]]
-    ids = [c.id for c in build_cases(rows)[0]]
+    ids = sorted(["²", "10", long_id, "9", "１", "SYN"], key=_thread_order)
     assert ids == ["9", "10", long_id, "SYN", "²", "１"]
+
+
+@pytest.mark.parametrize(
+    "thread_id",
+    ["../1", "a/b", "SYN 1", "SYN\n1", "１２３", "²", "9" * 65],
+    ids=["traversal", "slash", "space", "newline", "fullwidth", "superscript", "too-long"],
+)
+def test_build_cases_rejects_invalid_ids(thread_id: str) -> None:
+    with pytest.raises(SheetFormatError, match="メールID"):
+        build_cases([SheetRow(thread_id, 1, FORM)])
 
 
 def test_duplicate_seq_is_rejected() -> None:
@@ -298,6 +314,17 @@ def test_read_sheet_rejects_overlong_body(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(sheet_module, "MAX_BODY_CHARS", 100)
     with pytest.raises(SheetFormatError, match="超过 100 字符"):
         read_sheet(path)
+
+
+@pytest.mark.parametrize(
+    "thread_id", ["../etc", "a/b", "SYN\n1"], ids=["traversal", "slash", "newline"]
+)
+def test_read_sheet_rejects_invalid_id(tmp_path: Path, thread_id: str) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [(thread_id, 1, FORM)], HEADER)
+    with pytest.raises(SheetFormatError, match="不允许的字符") as excinfo:
+        read_sheet(path)
+    assert "\n" not in str(excinfo.value)
 
 
 def test_read_sheet_rejects_overlong_id(tmp_path: Path) -> None:
@@ -496,7 +523,7 @@ def test_seq_error_does_not_echo_cell_content(tmp_path: Path) -> None:
 
 
 def test_errors_escape_control_characters() -> None:
-    thread_id = "SYN\n伪造的日志行\u202e\x9b"
+    thread_id = "S\n伪\u202e\x9b"  # 足够短，错误信息会显示转义后的原文
     with pytest.raises(SheetFormatError) as info:
         build_cases([SheetRow(thread_id, 1, FORM), SheetRow(thread_id, 1, AGENT)])
     message = str(info.value)

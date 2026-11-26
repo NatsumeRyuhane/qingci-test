@@ -2,7 +2,7 @@
   "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
   "items": [
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "SYN-0001",
       "messages": [
         {
@@ -23,7 +23,21 @@
           "quoted": "",
           "greeting": "いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。",
           "closing": "今後とも『ぽちゃガチョ！』をよろしくお願いいたします。\n※本メール内容の無断掲載、無断複製、転送はお控えください。",
-          "sent_at": "2024-03-11T10:00:00+09:00"
+          "sent_at": "2024-03-11T10:00:00+09:00",
+          "role_evidence": [
+            {
+              "kind": "keyword",
+              "detail": "问候语"
+            },
+            {
+              "kind": "corroborated_text",
+              "source_message_id": "SYN-0009:2"
+            },
+            {
+              "kind": "repeated_text",
+              "thread_count": 4
+            }
+          ]
         },
         {
           "thread_id": "SYN-0001",
@@ -54,7 +68,7 @@
       "assigned_to": "agent-zhang"
     },
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "SYN-0002",
       "messages": [
         {
@@ -67,7 +81,7 @@
       ]
     },
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "SYN-0004",
       "messages": [
         {

@@ -3,11 +3,11 @@
 import re
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, Field, StringConstraints, model_validator
+from pydantic import Field, StringConstraints, model_validator
 
-from copilot.contracts.base import Contract, Document
-from copilot.contracts.case import MessageId
-from copilot.contracts.enums import InquiryCategory, RiskLevel
+from copilot.contracts.base import Contract
+from copilot.contracts.enums import InquiryCategory, ReviewStatus, RiskLevel
+from copilot.contracts.knowledge import EntryId, KnowledgeEntry
 
 SlotName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*$")]
 """占位符名：小写字母开头，只含小写字母、数字和下划线。"""
@@ -29,19 +29,19 @@ class TemplateSlot(Contract):
     """填写示例（日语）。"""
 
 
-class ReplyTemplate(Document):
-    """一个回复模板。由历史客服回复归纳而来，供检索和起草使用。
+class ReplyTemplate(KnowledgeEntry):
+    """一个回复模板：一段完整的答复（客服回复的 `Message.core`），由历史客服回复归纳而来，
+    供检索和起草使用。
 
-    同一个 `id` 的模板可以有多个 `version`。草稿通过（`id`, `version`）引用模板，
-    所以修改模板时要新建版本，而不是改写旧版本。
+    公共字段（版本、有效期、已知时间、出处、审核状态）和版本选择规则见 `KnowledgeEntry`。
+    草稿通过（`id`, `version`）引用模板，所以修改模板时要新建版本，而不是改写旧版本。
+    只适用于某次事故的模板用有效期限定，并由对应的公告与事件（`Notice`）链接。
     """
 
-    schema_version: Literal[1] = 1
-    """本模型的 schema 版本。"""
-    id: str = Field(min_length=1)
-    """模板 ID，跨版本不变。"""
-    version: int = Field(ge=1)
-    """模板版本，从 1 开始。"""
+    schema_version: Literal[2] = 2
+    """本模型的 schema 版本。2：加入知识库的公共字段（审核状态、已知时间等）和 `intent`（#19）。"""
+    intent: EntryId
+    """模板所属的意图（`Intent.id`）。每个模板只属于一个意图。"""
     category: InquiryCategory
     """模板适用的咨询类别。"""
     title_zh: str = Field(min_length=1)
@@ -56,16 +56,11 @@ class ReplyTemplate(Document):
     """回复正文（日语），包含 `{{slot_name}}` 形式的占位符。"""
     slots: list[TemplateSlot] = Field(default_factory=list)
     """`body_ja` 中的占位符。与正文中出现的占位符必须一一对应。"""
-    valid_from: AwareDatetime | None = None
-    """生效时间。只适用于某次事故的模板才需要（见 docs/data.md 关键发现 2）。"""
-    valid_to: AwareDatetime | None = None
-    """失效时间。为空表示一直有效。"""
     risk: RiskLevel = RiskLevel.NORMAL
     """风险等级，例如涉及退款、补偿的模板为 `high`。"""
     auto_send_allowed: bool = False
-    """是否允许不经人工审核自动发送。只有 `risk` 为 `low` 时才能为 true（D-001）。"""
-    source_message_ids: list[MessageId] = Field(default_factory=list)
-    """归纳出这个模板的历史客服回复，格式为 `<thread_id>:<seq>`。"""
+    """是否允许不经人工审核自动发送。只有已批准、`risk` 为 `low` 的通用模板（不含案件特定
+    内容）才能为 true（D-001、D-011）。是否真的自动发送还取决于案件，由 #6 判断。"""
 
     @model_validator(mode="after")
     def _check_consistency(self) -> Self:
@@ -77,8 +72,8 @@ class ReplyTemplate(Document):
             raise ValueError(
                 f"body_ja 中的占位符 {sorted(in_body)} 与 slots {sorted(names)} 不一致"
             )
-        if self.valid_from and self.valid_to and self.valid_from >= self.valid_to:
-            raise ValueError("valid_from 必须早于 valid_to")
         if self.auto_send_allowed and self.risk is not RiskLevel.LOW:
             raise ValueError("只有 risk 为 low 的模板才能允许自动发送")
+        if self.auto_send_allowed and self.review_status is not ReviewStatus.APPROVED:
+            raise ValueError("只有已批准的模板才能允许自动发送")
         return self

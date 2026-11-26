@@ -22,7 +22,7 @@ def test_json_schemas_cover_exported_models() -> None:
 
 def test_schema_carries_field_docs_and_version() -> None:
     case = json_schemas()["Case"]
-    assert case["properties"]["schema_version"]["const"] == 1
+    assert case["properties"]["schema_version"]["const"] == 2
     assert "预留（#13）" in case["properties"]["queue"]["description"]
     assert case["additionalProperties"] is False
 

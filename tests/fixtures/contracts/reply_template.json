@@ -2,9 +2,10 @@
   "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
   "items": [
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "purchase-not-delivered-ask-receipt",
       "version": 1,
+      "intent": "purchase_not_delivered",
       "category": "purchase",
       "title_zh": "购买未到账：请玩家提供购买时间和订单号",
       "description_zh": "玩家付费后道具没有到账，需要订单信息才能核查。",
@@ -29,12 +30,17 @@
       "auto_send_allowed": false,
       "source_message_ids": [
         "SYN-0001:2"
-      ]
+      ],
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "review_status": "approved",
+      "origin": "reconstructed"
     },
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "incident-store-outage",
       "version": 2,
+      "intent": "store_outage_purchase",
       "category": "purchase",
       "title_zh": "【事故】商店故障期间的购买异常",
       "description_zh": "合成示例：某次商店故障期间购买异常的统一说明。",
@@ -46,12 +52,16 @@
       "valid_to": "2024-03-09T23:59:59+09:00",
       "risk": "high",
       "auto_send_allowed": false,
-      "source_message_ids": []
+      "known_from": "2024-03-02T11:30:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "review_status": "approved",
+      "origin": "manual"
     },
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "id": "feedback-thanks",
       "version": 1,
+      "intent": "feedback_general",
       "category": "feedback",
       "title_zh": "感谢意见或建议",
       "description_zh": "玩家提出意见或建议，表示感谢并会转达开发团队。",
@@ -59,7 +69,11 @@
       "avoid_when_zh": "邮件中同时反馈了故障或购买问题。",
       "body_ja": "いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。\n\n貴重なご意見をいただき、誠にありがとうございます。いただいたご意見は開発チームへ共有いたします。\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。\n※本メール内容の無断掲載、無断複製、転送はお控えください。",
       "risk": "low",
-      "auto_send_allowed": true
+      "auto_send_allowed": true,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "review_status": "approved",
+      "origin": "manual"
     }
   ]
 }

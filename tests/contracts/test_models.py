@@ -13,10 +13,17 @@ from copilot.contracts import (
     Contract,
     Document,
     Draft,
+    DraftMode,
+    Fact,
     Feedback,
+    GlossaryEntry,
     InquiryForm,
+    Intent,
     Message,
+    Notice,
+    Policy,
     ReplyTemplate,
+    is_valid_case_id,
 )
 from tests.fixtures import load_items, load_models
 
@@ -25,6 +32,11 @@ FIXTURES: list[tuple[type[Contract], str]] = [
     (InquiryForm, "inquiry_form"),
     (Case, "case"),
     (ReplyTemplate, "reply_template"),
+    (Intent, "intent"),
+    (Fact, "fact"),
+    (Policy, "policy"),
+    (GlossaryEntry, "glossary_entry"),
+    (Notice, "notice"),
     (CaseAnalysis, "case_analysis"),
     (Draft, "draft"),
     (Feedback, "feedback"),
@@ -85,7 +97,18 @@ def test_documents_carry_schema_version(model: type[Document]) -> None:
 def test_persisted_models_are_documents() -> None:
     """持久化和导出的顶层对象带 schema_version；嵌入其中的模型不需要。"""
     documents = {m for m in EXPORTED_MODELS if issubclass(m, Document)}
-    assert documents == {Case, ReplyTemplate, CaseAnalysis, Draft, Feedback}
+    assert documents == {
+        Case,
+        ReplyTemplate,
+        Intent,
+        Fact,
+        Policy,
+        GlossaryEntry,
+        Notice,
+        CaseAnalysis,
+        Draft,
+        Feedback,
+    }
 
 
 def test_unknown_fields_are_rejected() -> None:
@@ -95,7 +118,7 @@ def test_unknown_fields_are_rejected() -> None:
 
 
 def test_other_schema_version_is_rejected() -> None:
-    item = load_items("case")[0] | {"schema_version": 2}
+    item = load_items("case")[0] | {"schema_version": 1}
     with pytest.raises(ValidationError, match="schema_version"):
         Case.model_validate(item)
 
@@ -149,6 +172,42 @@ def test_case_rejects_unordered_messages() -> None:
     item["messages"].reverse()
     with pytest.raises(ValidationError, match="严格递增"):
         Case.model_validate(item)
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    ["../SYN", "SYN/0001", "SYN 0001", "SYN\n0001", "SYN-0001\n", "ＳＹＮ", "", "S" * 65],
+    ids=[
+        "traversal",
+        "slash",
+        "space",
+        "newline",
+        "trailing-newline",
+        "fullwidth",
+        "empty",
+        "long",
+    ],
+)
+def test_case_id_rejects_unsafe_characters(case_id: str) -> None:
+    item = load_items("case")[1]
+    item["id"] = case_id
+    for message in item["messages"]:
+        message["thread_id"] = case_id
+    with pytest.raises(ValidationError):
+        Case.model_validate(item)
+    assert not is_valid_case_id(case_id)
+
+
+@pytest.mark.parametrize("case_id", ["SYN-0001", "1234", "a_b-C9", "9" * 64])
+def test_case_id_accepts_safe_ids(case_id: str) -> None:
+    assert is_valid_case_id(case_id)
+
+
+def test_message_ids_follow_case_id_rules() -> None:
+    item = load_items("reply_template")[0]
+    item["source_message_ids"] = ["../SYN:1"]
+    with pytest.raises(ValidationError, match="source_message_ids"):
+        ReplyTemplate.model_validate(item)
 
 
 def test_case_requires_messages() -> None:
@@ -241,7 +300,101 @@ def test_fixture_cross_references() -> None:
     for draft in drafts.values():
         for ref in draft.template_refs:
             assert (ref.template_id, ref.template_version) in templates
+    intents = {intent.id for intent in load_models(Intent, "intent")}
+    for entry in [
+        *load_models(ReplyTemplate, "reply_template"),
+        *load_models(Fact, "fact"),
+        *load_models(Policy, "policy"),
+        *load_models(Notice, "notice"),
+    ]:
+        used = [entry.intent] if isinstance(entry, ReplyTemplate) else entry.intents
+        assert set(used) <= intents, f"{entry.id} 引用了不存在的意图"
+    entries = {
+        "template": templates,
+        "intent": {(e.id, e.version) for e in load_models(Intent, "intent")},
+        "fact": {(e.id, e.version) for e in load_models(Fact, "fact")},
+        "policy": {(e.id, e.version) for e in load_models(Policy, "policy")},
+        "glossary": {(e.id, e.version) for e in load_models(GlossaryEntry, "glossary_entry")},
+        "notice": {(e.id, e.version) for e in load_models(Notice, "notice")},
+    }
+    for draft in drafts.values():
+        for citation in draft.citations:
+            assert (citation.entry_id, citation.entry_version) in entries[citation.entry_type]
+    template_ids = {template_id for template_id, _ in templates}
+    for notice in load_models(Notice, "notice"):
+        assert set(notice.template_ids) <= template_ids
     for analysis in load_models(CaseAnalysis, "case_analysis"):
         assert f"{analysis.case_id}:{analysis.message_seq}" in messages
     for draft in drafts.values():
         assert f"{draft.case_id}:{draft.message_seq}" in messages
+
+
+# --- 不回复 ---
+
+
+def test_no_reply_proposal_roundtrip() -> None:
+    analysis = load_models(CaseAnalysis, "case_analysis")[1]
+    assert analysis.no_reply is not None
+    assert analysis.no_reply.duplicate_of == "SYN-0003"
+
+
+@pytest.mark.parametrize(
+    "no_reply",
+    [
+        {"reason": "duplicate", "reason_zh": "重复"},
+        {"reason": "system_message", "reason_zh": "退信", "duplicate_of": "SYN-0003"},
+    ],
+    ids=["duplicate-without-target", "target-without-duplicate"],
+)
+def test_duplicate_of_goes_with_duplicate_reason(no_reply: dict[str, str]) -> None:
+    item = load_items("case_analysis")[1] | {"no_reply": no_reply}
+    with pytest.raises(ValidationError, match="duplicate_of"):
+        CaseAnalysis.model_validate(item)
+
+
+def test_case_is_not_its_own_duplicate() -> None:
+    item = load_items("case_analysis")[1]
+    item["no_reply"]["duplicate_of"] = item["case_id"]
+    with pytest.raises(ValidationError, match="自己的重复"):
+        CaseAnalysis.model_validate(item)
+
+
+# --- 草稿的引用、轨迹与时间上下文 ---
+
+
+def test_draft_records_citations_trace_and_time() -> None:
+    draft = load_models(Draft, "draft")[0]
+    assert draft.mode is DraftMode.PIPELINE_WITH_TOOLS
+    assert [step.step for step in draft.trace] == [1, 2]
+    assert draft.trace[1].error  # 越权的调用被拒绝，并记录在轨迹中
+    assert draft.time_context is not None
+    assert draft.time_context.problem_time.time_of_day is not None
+
+
+def test_pipeline_draft_has_no_trace() -> None:
+    item = load_items("draft")[0] | {"mode": "pipeline"}
+    with pytest.raises(ValidationError, match="trace"):
+        Draft.model_validate(item)
+    item = load_items("draft")[1] | {"fallback_reason": "超出步数"}
+    with pytest.raises(ValidationError, match="fallback_reason"):
+        Draft.model_validate(item)
+
+
+def test_fallback_is_recorded_on_tool_drafts() -> None:
+    item = load_items("draft")[0] | {"fallback_reason": "超出步数，回退到固定流水线"}
+    assert Draft.model_validate(item).fallback_reason
+
+
+def test_trace_steps_are_consecutive() -> None:
+    item = load_items("draft")[0]
+    item["trace"][1]["step"] = 3
+    with pytest.raises(ValidationError, match="连续编号"):
+        Draft.model_validate(item)
+
+
+@pytest.mark.parametrize("tool", ["Search", "search facts", "../x", ""])
+def test_tool_name_is_restricted(tool: str) -> None:
+    item = load_items("draft")[0]
+    item["trace"][0]["tool"] = tool
+    with pytest.raises(ValidationError, match="tool"):
+        Draft.model_validate(item)
