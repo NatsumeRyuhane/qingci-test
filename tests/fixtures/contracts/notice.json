@@ -1,0 +1,30 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "id": "incident-store-outage-0302",
+      "version": 1,
+      "known_from": "2024-03-02T11:30:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "kind": "incident",
+      "title_zh": "（合成）商店故障导致购买异常",
+      "description_zh": "合成示例：某平台商店在 3 月 2 日 11:00–14:00 出现故障，期间的购买可能延迟到账。",
+      "event_start": "2024-03-02T11:00:00+09:00",
+      "event_end": "2024-03-02T14:00:00+09:00",
+      "valid_from": "2024-03-02T11:00:00+09:00",
+      "valid_to": "2024-04-01T00:00:00+09:00",
+      "platforms": [
+        "ios"
+      ],
+      "intents": [
+        "store_outage_purchase"
+      ],
+      "template_ids": [
+        "incident-store-outage"
+      ]
+    }
+  ]
+}

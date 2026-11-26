@@ -13,9 +13,14 @@ from copilot.contracts import (
     Contract,
     Document,
     Draft,
+    Fact,
     Feedback,
+    GlossaryEntry,
     InquiryForm,
+    Intent,
     Message,
+    Notice,
+    Policy,
     ReplyTemplate,
     is_valid_case_id,
 )
@@ -26,6 +31,11 @@ FIXTURES: list[tuple[type[Contract], str]] = [
     (InquiryForm, "inquiry_form"),
     (Case, "case"),
     (ReplyTemplate, "reply_template"),
+    (Intent, "intent"),
+    (Fact, "fact"),
+    (Policy, "policy"),
+    (GlossaryEntry, "glossary_entry"),
+    (Notice, "notice"),
     (CaseAnalysis, "case_analysis"),
     (Draft, "draft"),
     (Feedback, "feedback"),
@@ -86,7 +96,18 @@ def test_documents_carry_schema_version(model: type[Document]) -> None:
 def test_persisted_models_are_documents() -> None:
     """持久化和导出的顶层对象带 schema_version；嵌入其中的模型不需要。"""
     documents = {m for m in EXPORTED_MODELS if issubclass(m, Document)}
-    assert documents == {Case, ReplyTemplate, CaseAnalysis, Draft, Feedback}
+    assert documents == {
+        Case,
+        ReplyTemplate,
+        Intent,
+        Fact,
+        Policy,
+        GlossaryEntry,
+        Notice,
+        CaseAnalysis,
+        Draft,
+        Feedback,
+    }
 
 
 def test_unknown_fields_are_rejected() -> None:
@@ -278,6 +299,18 @@ def test_fixture_cross_references() -> None:
     for draft in drafts.values():
         for ref in draft.template_refs:
             assert (ref.template_id, ref.template_version) in templates
+    intents = {intent.id for intent in load_models(Intent, "intent")}
+    for entry in [
+        *load_models(ReplyTemplate, "reply_template"),
+        *load_models(Fact, "fact"),
+        *load_models(Policy, "policy"),
+        *load_models(Notice, "notice"),
+    ]:
+        used = [entry.intent] if isinstance(entry, ReplyTemplate) else entry.intents
+        assert set(used) <= intents, f"{entry.id} 引用了不存在的意图"
+    template_ids = {template_id for template_id, _ in templates}
+    for notice in load_models(Notice, "notice"):
+        assert set(notice.template_ids) <= template_ids
     for analysis in load_models(CaseAnalysis, "case_analysis"):
         assert f"{analysis.case_id}:{analysis.message_seq}" in messages
     for draft in drafts.values():

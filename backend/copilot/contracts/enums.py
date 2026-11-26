@@ -169,3 +169,25 @@ class EntryOrigin(StrEnum):
     """从历史数据中归纳，必须列出来源邮件。"""
     MANUAL = "manual"
     """人工录入，例如政策、公告和意图目录。"""
+
+
+class NoticeKind(StrEnum):
+    """公告与事件的类型（提案 0003 §2）。"""
+
+    INCIDENT = "incident"
+    """事故，例如商店故障导致购买异常。"""
+    MAINTENANCE = "maintenance"
+    """维护。"""
+    FIX = "fix"
+    """修复，例如某个版本修复了某个问题。"""
+    POLICY_CHANGE = "policy_change"
+    """运营政策的变更。"""
+
+
+class PolicyKind(StrEnum):
+    """政策的类型。政策由代码检查，不靠模型自觉遵守（提案 0003 §2）。"""
+
+    FORBIDDEN_PROMISE = "forbidden_promise"
+    """草稿中不允许出现的承诺，例如退款、补偿、具体的修复日期。检查草稿正文。"""
+    ESCALATION_TRIGGER = "escalation_trigger"
+    """需要升级处理的情况，例如法律威胁。检查玩家邮件和分析得出的敏感标签。"""

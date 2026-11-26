@@ -1,0 +1,32 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "id": "data-transfer-needs-code",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "statement_zh": "【合成】跨设备迁移数据前，需要在旧设备上发行引继码。",
+      "statement_ja": "【合成データ】機種変更の前に、旧端末で引き継ぎコードを発行する必要があります。"
+    },
+    {
+      "schema_version": 1,
+      "id": "receipt-in-store-history",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "reconstructed",
+      "review_status": "draft",
+      "source_message_ids": [
+        "SYN-0001:2"
+      ],
+      "statement_zh": "【合成】订单号可以在商店的购买记录中查到。",
+      "intents": [
+        "purchase_not_delivered"
+      ]
+    }
+  ]
+}

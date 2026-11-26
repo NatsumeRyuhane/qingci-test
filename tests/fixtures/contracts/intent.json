@@ -1,0 +1,53 @@
+{
+  "_synthetic": "SYNTHETIC：合成测试数据，不来自真实样本（D-002）。可以随意修改，但要保持能通过对应契约模型的校验。",
+  "items": [
+    {
+      "schema_version": 1,
+      "id": "purchase_not_delivered",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "category": "purchase",
+      "title_zh": "购买未到账",
+      "description_zh": "玩家付费后道具没有到账。",
+      "required_info_zh": [
+        "购买时间",
+        "平台",
+        "订单号"
+      ],
+      "default_risk": "normal"
+    },
+    {
+      "schema_version": 1,
+      "id": "store_outage_purchase",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "category": "purchase",
+      "title_zh": "商店故障期间的购买异常",
+      "description_zh": "合成示例：购买时间落在已知商店故障期间。",
+      "required_info_zh": [
+        "购买时间"
+      ],
+      "default_risk": "high"
+    },
+    {
+      "schema_version": 1,
+      "id": "feedback_general",
+      "version": 1,
+      "known_from": "2024-03-01T10:00:00+09:00",
+      "recorded_at": "2026-11-26T12:00:00+09:00",
+      "origin": "manual",
+      "review_status": "approved",
+      "category": "feedback",
+      "title_zh": "意见或建议",
+      "description_zh": "纯意见、建议，不需要调查。",
+      "default_risk": "low",
+      "auto_send_eligible": true
+    }
+  ]
+}
