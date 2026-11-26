@@ -1,5 +1,6 @@
 """读取样本表格（data/raw/*.xlsx）。表格结构见 docs/data.md。"""
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,16 +20,22 @@ class SheetRow:
     body: str
 
 
+_INT_TEXT = re.compile(r"[+-]?\d+(?:\.0*)?")
+"""文本形式的整数，允许 `3.0` 这样的写法。"""
+
+
 def _as_int(value: object, what: str, row: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
-        raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{value!r}")
-    try:
-        number = float(value)
-    except ValueError as exc:
-        raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{value!r}") from exc
-    if not number.is_integer():
-        raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{value!r}")
-    return int(number)
+    """整数和文本都直接按整数解析，不经过 float，大数也不会丢失精度。
+
+    Excel 的数字单元格本身就是浮点数，只接受没有小数部分的值。
+    """
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and _INT_TEXT.fullmatch(value.strip()):
+        return int(value.strip().split(".")[0])
+    raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{value!r}")
 
 
 def _as_id(value: object, row: int) -> str:

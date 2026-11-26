@@ -153,6 +153,25 @@ def test_read_sheet(tmp_path: Path) -> None:
     assert read_sheet(path) == [SheetRow("10", 1, FORM), SheetRow("10", 2, "")]
 
 
+def test_read_sheet_keeps_integer_precision(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    rows: list[tuple[object, object, object]] = [
+        ("SYN", "9007199254740992", FORM),
+        ("SYN", "9007199254740993", AGENT),
+        ("SYN", "3.0", FOLLOW_UP),
+    ]
+    _write_xlsx(path, rows, HEADER)
+    assert [r.seq for r in read_sheet(path)] == [9007199254740992, 9007199254740993, 3]
+
+
+@pytest.mark.parametrize("seq", ["1.5", 1.5, "abc", True])
+def test_read_sheet_rejects_non_integer_seq(tmp_path: Path, seq: object) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", seq, FORM)], HEADER)
+    with pytest.raises(SheetFormatError, match="不是整数"):
+        read_sheet(path)
+
+
 def test_read_sheet_rejects_unexpected_header(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.xlsx"
     _write_xlsx(path, [], ("ID", "seq", "body"))
