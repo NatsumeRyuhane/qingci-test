@@ -348,6 +348,37 @@ def test_cli_reports_format_error_without_traceback(tmp_path: Path) -> None:
     assert "Traceback" not in result.output
 
 
+def test_header_error_does_not_echo_cell_content(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [], ("SYN", 1, "【合成データ】" + "あ" * 3000))  # 没有表头，第一行就是邮件
+    with pytest.raises(SheetFormatError) as info:
+        read_sheet(path)
+    message = str(info.value)
+    assert "あああ" not in message
+    assert "3007 字符的文本" in message
+    assert len(message) < 120
+
+
+def test_seq_error_does_not_echo_cell_content(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", "【合成データ】" + "い" * 3000, FORM)], HEADER)  # 列错位
+    with pytest.raises(SheetFormatError) as info:
+        read_sheet(path)
+    assert "いいい" not in str(info.value)
+    assert len(str(info.value)) < 80
+
+
+def test_errors_escape_control_characters() -> None:
+    thread_id = "SYN\n伪造的日志行\u202e\x9b"
+    with pytest.raises(SheetFormatError) as info:
+        build_cases([SheetRow(thread_id, 1, FORM), SheetRow(thread_id, 1, AGENT)])
+    message = str(info.value)
+    assert "\n" not in message
+    assert "\u202e" not in message
+    assert "\x9b" not in message
+    assert "\\u202e" in message
+
+
 def test_openpyxl_uses_defusedxml() -> None:
     """表格的 XML 由 defusedxml 解析，防止实体扩展和外部实体（#18）。"""
     import openpyxl.xml

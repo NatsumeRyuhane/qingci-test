@@ -60,15 +60,15 @@ class Message(Contract):
     @model_validator(mode="after")
     def _check_frame(self) -> Self:
         if not self.body.startswith(self.greeting):
-            raise ValueError(f"邮件 {self.id} 的 greeting 不是 body 的开头")
+            raise ValueError(f"邮件 {self.id!r} 的 greeting 不是 body 的开头")
         if not self.body.endswith(self.closing):
-            raise ValueError(f"邮件 {self.id} 的 closing 不是 body 的结尾")
+            raise ValueError(f"邮件 {self.id!r} 的 closing 不是 body 的结尾")
         if (
             self.greeting
             and self.closing
             and len(self.greeting) + len(self.closing) > len(self.body)
         ):
-            raise ValueError(f"邮件 {self.id} 的 greeting 和 closing 重叠")
+            raise ValueError(f"邮件 {self.id!r} 的 greeting 和 closing 重叠")
         return self
 
 
@@ -127,7 +127,7 @@ class Case(Document):
     def _check_messages(self) -> Self:
         for message in self.messages:
             if message.thread_id != self.id:
-                raise ValueError(f"邮件 {message.id} 的 thread_id 与案件 ID {self.id!r} 不一致")
+                raise ValueError(f"邮件 {message.id!r} 的 thread_id 与案件 ID {self.id!r} 不一致")
         seqs = [message.seq for message in self.messages]
         if any(a >= b for a, b in pairwise(seqs)):
             raise ValueError(f"邮件必须按 seq 严格递增排列，实际为 {seqs}")

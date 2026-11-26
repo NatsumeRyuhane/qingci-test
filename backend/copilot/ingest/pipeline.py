@@ -131,7 +131,7 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
     rows = sorted(rows, key=lambda r: r.seq)
     seqs = [r.seq for r in rows]
     if len(set(seqs)) != len(seqs):
-        raise SheetFormatError(f"线程 {thread_id} 中有重复的 メールID枝番：{seqs}")
+        raise SheetFormatError(f"线程 {thread_id!r} 中有重复的 メールID枝番：{seqs}")
 
     built = [build_message(row, stats) for row in rows]
     messages = [m for m, _ in built]

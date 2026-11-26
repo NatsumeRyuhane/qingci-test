@@ -32,6 +32,26 @@ class SheetRow:
     body: str
 
 
+DESCRIBE_CHARS = 20
+"""错误信息中最多原样显示这么多字符的单元格内容。"""
+
+
+def describe_cell(value: object) -> str:
+    """在错误信息里描述一个单元格，不泄露内容（#18）。
+
+    短文本用 `repr` 显示，换行、控制字符和方向控制符都会被转义，不能伪造日志行或终端输出；
+    长文本和其他值只显示类型和长度，避免把整封邮件打印到终端或日志中。
+    """
+    if value is None:
+        return "空"
+    text = repr(value)
+    if isinstance(value, str | int | float) and len(text) <= DESCRIBE_CHARS + 2:
+        return text
+    if isinstance(value, str):
+        return f"{len(value)} 字符的文本"
+    return type(value).__name__
+
+
 _INT_TEXT = re.compile(r"[+-]?[0-9]{1,18}(?:\.0*)?")
 """文本形式的整数，允许 `3.0` 这样的写法。最多 18 位 ASCII 数字，
 远低于 Python 整数与字符串转换的位数上限。"""
@@ -48,7 +68,7 @@ def _as_int(value: object, what: str, row: int) -> int:
         return int(value)
     if isinstance(value, str) and _INT_TEXT.fullmatch(value.strip()):
         return int(value.strip().split(".")[0])
-    raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{value!r}")
+    raise SheetFormatError(f"第 {row} 行的 {what} 不是整数：{describe_cell(value)}")
 
 
 def _as_id(value: object, row: int) -> str:
@@ -96,7 +116,8 @@ def _read_sheet(path: Path) -> list[SheetRow]:
         rows = sheet.iter_rows(max_col=len(COLUMNS), values_only=True)
         header = next(rows, ())
         if tuple(header[:3]) != COLUMNS:
-            raise SheetFormatError(f"表头应为 {COLUMNS}，实际为 {tuple(header[:3])}")
+            actual = "、".join(describe_cell(v) for v in (*header, None, None, None)[:3])
+            raise SheetFormatError(f"表头应为 {'、'.join(COLUMNS)}，实际为 {actual}")
         result: list[SheetRow] = []
         for index, values in enumerate(rows, start=2):
             if index > MAX_ROWS:
