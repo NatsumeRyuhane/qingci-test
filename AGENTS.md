@@ -13,8 +13,8 @@ agent, read all of it before your first change. It is short on purpose.
   [data/README.md](data/README.md) (where it goes and the handling rules).
 - **What to work on:** GitHub Issues. Nothing else is a task list (D-003).
 
-Toolchain, run and check commands: **not decided yet.** They will be added to §8 by the foundation
-issue. Until then there is no build.
+Toolchain, run and check commands: **not decided yet.** They will be added to §8 by the foundation issue
+([#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)). Until then there is no build.
 
 ## 2. Agent setup: instructions and skills
 
@@ -122,7 +122,7 @@ currently enforcing them.** (GitHub Free does not enforce protection on private 
 | No force-pushes or deletion | Never rewrite `main`'s history. Force-pushing your own feature branch is fine before review starts. Avoid it once review has begun. |
 | PR requires 1 approving review | From the repository owner or a designated reviewer. Authors don't approve their own PRs. |
 | Stale approvals dismissed | Pushing new commits after approval requires re-approval. |
-| Required checks must pass | CI (lint, tests, defined by the foundation issue) must be green before merge. |
+| Required checks must pass | CI (lint and tests, defined by the foundation issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)) must be green before merge. |
 | All review threads resolved | By the **reviewer**, not the author (§7). |
 | Signed commits required | Sign every commit (SSH or GPG): `git config commit.gpgsign true`. Unsigned commits are rejected. If signing fails, stop and fix it. Don't bypass it. |
 | Linear history, squash-merge only | The PR title becomes the squash commit message, so it must be a valid Conventional Commit (§6). |
@@ -172,7 +172,7 @@ foundation issue. Keep the two in sync. If you change one, change the other in t
 
 ## 8. Checks and commands
 
-_To be defined by the foundation issue (stack, skeleton, CI)._ Until then, check documentation
+_To be defined by the foundation issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2) (stack, skeleton, CI)._ Until then, check documentation
 changes by confirming that relative links resolve.
 
 ## 9. Repository map

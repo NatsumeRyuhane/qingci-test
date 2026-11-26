@@ -5,7 +5,7 @@ emails for the mobile game 『ぽちゃガチョ！』 (Pochagacho!) quickly, ac
 Japanese business register. It also gets better as agents use it.
 
 > **Status:** scaffolding only. No application code yet. The development plan is tracked in
-> [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues). Start with the roadmap issue.
+> [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues). Start with the [roadmap (#1)](https://github.com/NatsumeRyuhane/qingci-test/issues/1).
 
 ## Background
 
@@ -62,7 +62,7 @@ docs/              Requirements, data profile, decisions, proposals
 1. Clone the repo, then read [AGENTS.md](AGENTS.md).
 2. Get the sample workbook from the repository owner and put it in `data/raw/` ([data/README.md](data/README.md)).
 3. `cp .env.example .env` and fill in the values.
-4. Toolchain and run instructions arrive with the foundation issue (stack decision, skeleton and CI).
+4. Toolchain and run instructions arrive with the foundation issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2) (stack decision, skeleton and CI).
 
 ## Documentation
 
