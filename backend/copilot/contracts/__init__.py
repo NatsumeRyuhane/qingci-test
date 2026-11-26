@@ -9,6 +9,7 @@ from copilot.contracts.case import (
     InquiryForm,
     Message,
     MessageId,
+    RoleEvidence,
     is_valid_case_id,
     message_id,
 )
@@ -22,6 +23,7 @@ from copilot.contracts.draft import (
 )
 from copilot.contracts.entries import Fact, GlossaryEntry, Intent, Notice, Policy
 from copilot.contracts.enums import (
+    ROLE_EVIDENCE_STRENGTH,
     CaseStatus,
     DraftCheckKind,
     DraftMode,
@@ -36,6 +38,8 @@ from copilot.contracts.enums import (
     PolicyKind,
     ReviewStatus,
     RiskLevel,
+    RoleEvidenceKind,
+    RoleEvidenceStrength,
     Route,
     SensitivityTag,
     Sentiment,
@@ -67,6 +71,7 @@ __all__ = [
     "CASE_ID_CHARS",
     "EXPORTED_MODELS",
     "PLACEHOLDER_PATTERN",
+    "ROLE_EVIDENCE_STRENGTH",
     "Case",
     "CaseAnalysis",
     "CaseId",
@@ -102,6 +107,9 @@ __all__ = [
     "ReplyTemplate",
     "ReviewStatus",
     "RiskLevel",
+    "RoleEvidence",
+    "RoleEvidenceKind",
+    "RoleEvidenceStrength",
     "Route",
     "SensitivityTag",
     "Sentiment",

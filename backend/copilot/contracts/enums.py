@@ -231,3 +231,49 @@ class DraftMode(StrEnum):
     """固定流水线：分析 → 检索 → 起草 → 自检 → 分流，不调用工具。"""
     PIPELINE_WITH_TOOLS = "pipeline_with_tools"
     """流水线 + 工具：模型可以在有限步数内调用只读工具，失败时回退到固定流水线。"""
+
+
+class RoleEvidenceStrength(StrEnum):
+    """角色证据的强度（提案 0003 §11）。"""
+
+    STRONG = "strong"
+    """足以确定角色。"""
+    AUXILIARY = "auxiliary"
+    """辅助：单独不能确定角色，例如同一正文在多个线程中重复出现（玩家可以把同一封伪造
+    回复提交到多个线程）。"""
+    WEAK = "weak"
+    """弱：玩家可以直接在正文中写出，例如固定的问候语。"""
+
+
+class RoleEvidenceKind(StrEnum):
+    """判断角色的依据（提案 0003 §11）。强度见 `ROLE_EVIDENCE_STRENGTH`。
+
+    前提：输入中没有发件人元数据，角色只能从文本判断；只靠文本时没有无法伪造的证据，
+    MVP 中由所有者的审核作为知识库的信任根，生产中应提供元数据。
+    """
+
+    METADATA = "metadata"
+    """强：数据来源提供的发件人信息（来自我们、玩家还是已知的邮件系统）。样本中没有。"""
+    QUOTE_CORROBORATION = "quote_corroboration"
+    """强：同一线程中之后的一封邮件用引用引导行标明了客服发件人，并且引用内容与这封邮件吻合。"""
+    CORROBORATED_TEXT = "corroborated_text"
+    """强：正文（`Message.core`，规范化后）与另一封有引用佐证的客服回复相同。与同一线程中
+    之前一封客服回复相同时不算（玩家可能把收到的回复粘贴回来）。"""
+    REPEATED_TEXT = "repeated_text"
+    """辅助：同一正文在多个不同线程的客服回复中出现。"""
+    KEYWORD = "keyword"
+    """弱：固定的问候语或结语。"""
+    SYSTEM_PATTERN = "system_pattern"
+    """系统邮件的固定结构：固定的第一行，或至少两种退信特征。只用于系统邮件。
+    可以被伪造，所以“不回复”只在 #6 同时没有发现玩家的问题时才自动生效。"""
+
+
+ROLE_EVIDENCE_STRENGTH: dict[RoleEvidenceKind, RoleEvidenceStrength] = {
+    RoleEvidenceKind.METADATA: RoleEvidenceStrength.STRONG,
+    RoleEvidenceKind.QUOTE_CORROBORATION: RoleEvidenceStrength.STRONG,
+    RoleEvidenceKind.CORROBORATED_TEXT: RoleEvidenceStrength.STRONG,
+    RoleEvidenceKind.REPEATED_TEXT: RoleEvidenceStrength.AUXILIARY,
+    RoleEvidenceKind.KEYWORD: RoleEvidenceStrength.WEAK,
+    RoleEvidenceKind.SYSTEM_PATTERN: RoleEvidenceStrength.STRONG,
+}
+"""每种依据的强度。"""
