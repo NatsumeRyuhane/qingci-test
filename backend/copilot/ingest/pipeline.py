@@ -136,14 +136,14 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
     built = [build_message(row, stats) for row in rows]
     messages = [m for m, _ in built]
 
+    # 表单只取线程的第 1 封（Case.form 的定义）。后面的邮件即使像表单，也只保留角色和正文。
     form: InquiryForm | None = None
-    for message, reason in built:
-        if reason is RoleReason.FORM:
-            fields = parse_fields(message.body)
-            form = to_inquiry_form(fields)
-            stats.forms += 1
-            stats.redacted_fields_not_empty += sum(1 for k in REDACTED_KEYS if fields.get(k))
-            break
+    first, first_reason = built[0]
+    if first.seq == 1 and first_reason is RoleReason.FORM:
+        fields = parse_fields(first.body)
+        form = to_inquiry_form(fields)
+        stats.forms += 1
+        stats.redacted_fields_not_empty += sum(1 for k in REDACTED_KEYS if fields.get(k))
 
     times, conflicts = recover_sent_at([message_ref(m.seq, m.role, m.quoted) for m in messages])
     if times:

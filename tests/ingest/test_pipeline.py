@@ -102,6 +102,16 @@ def test_conflicting_quote_headers_are_not_used() -> None:
     assert stats.sent_at_conflicts == 1
 
 
+def test_form_is_taken_only_from_the_first_message() -> None:
+    rows = [SheetRow("1", 1, "【合成データ】ご担当者様、質問があります。"), SheetRow("1", 2, FORM)]
+    (case,), stats = build_cases(rows)
+    assert case.form is None
+    assert case.category is None
+    assert case.messages[1].role is MessageRole.PLAYER
+    assert "お問い合わせ内容の種類" in case.messages[1].body
+    assert stats.forms == 0
+
+
 def test_duplicate_seq_is_rejected() -> None:
     with pytest.raises(SheetFormatError, match="重复"):
         build_cases([SheetRow("1", 1, FORM), SheetRow("1", 1, AGENT)])
