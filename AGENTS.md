@@ -97,7 +97,7 @@ git worktree add ../qingci-test-<slug> -b <type>/<issue#>-<slug> --no-track orig
 | 禁止强制 push 和删除 | 永远不要改写 `main` 的历史。评审开始前，可以强制 push 自己的功能分支；评审开始后尽量避免。 |
 | PR 需 1 个批准 | 由仓库所有者或指定的评审人批准。作者不能批准自己的 PR。 |
 | 旧批准自动失效 | 批准后再 push 新提交，需要重新批准。 |
-| 必需检查须通过 | CI 的 `backend`、`backend-pip`、`frontend` job（第 8 节）通过后才能合并。`llm-live` 目前不是必需检查。 |
+| 必需检查须通过 | CI 的 `backend`、`backend-pip`、`frontend`、`frontend-npx` job（第 8 节）通过后才能合并。`llm-live` 目前不是必需检查。 |
 | 所有评审讨论须已解决 | 由**评审人**标记解决，而不是作者（第 7 节）。 |
 | 必须签名提交 | 每个提交都要签名（SSH 或 GPG）：`git config commit.gpgsign true`。未签名的提交会被拒绝。签名失败时停下来修好，不要绕过。 |
 | 线性历史，只允许 squash 合并 | PR 标题会成为 squash 提交信息，因此必须是合法的 Conventional Commit（第 6 节）。 |
@@ -180,6 +180,7 @@ uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档
 | `backend` | `uv run ruff check` · `uv run ruff format --check` · `uv run mypy` · `uv run pytest` · `scripts/export-requirements.sh --check` |
 | `backend-pip` | 按备用路线安装后运行 `pytest` |
 | `frontend` | 在 `frontend/` 中：`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm build`；在仓库根目录：`scripts/gen-api-types.sh --check` |
+| `frontend-npx` | 与 `frontend` 相同，但走备用路线：不装 uv 和 pnpm，用 venv 中的 `copilot` 和 `npx pnpm@10.34.5` |
 | `llm-live` | `uv run pytest -m live`：调用真实 LLM 端点，只用合成数据。本地需要在 `.env` 中配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ANALYZE`；CI 中使用仓库 secret 和 variables，没有配置时跳过 |
 
 备用路线下，除了 `scripts/export-requirements.sh --check`，以上检查都能在激活的 venv 中运行（`scripts/gen-api-types.sh` 会自动改用 venv 中的 `copilot` 和 `npx pnpm`）。`export-requirements.sh` 调用的是 `uv export`，所以必须有 uv。没有改动依赖时可以跳过它，由 CI 的 `backend` job 检查。

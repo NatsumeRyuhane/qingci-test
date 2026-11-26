@@ -95,6 +95,50 @@ jobs:
           uv sync --frozen
           scripts/gen-api-types.sh --check
 
+  # 前端和 API 类型生成的备用路线：不装 uv 和 pnpm，pnpm 通过 npx 按 packageManager
+  # 中固定的版本运行（D-010）。与 backend-pip 一起覆盖整条备用路线。
+  frontend-npx:
+    name: frontend-npx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: 确认运行环境中没有 uv 和 pnpm
+        run: |
+          for tool in uv pnpm; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::运行环境中预装了 $tool，本 job 无法验证不依赖它的备用路线"
+              exit 1
+            fi
+          done
+      - name: 读取固定的 pnpm 版本
+        run: |
+          version="$(node -p "require('./frontend/package.json').packageManager.split('@')[1]")"
+          echo "PNPM=npx --yes pnpm@$version" >> "$GITHUB_ENV"
+      - name: 安装依赖
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+          .venv/bin/pip install --no-deps -e .
+          cd frontend && $PNPM install --frozen-lockfile
+      - name: 前端检查
+        working-directory: frontend
+        run: |
+          $PNPM lint
+          $PNPM typecheck
+          $PNPM test
+          $PNPM build
+      # 走 gen-api-types.sh 中“没有 uv、没有 pnpm”的分支
+      - name: API 类型是最新的
+        run: |
+          . .venv/bin/activate
+          scripts/gen-api-types.sh --check
+
   # 用真实 LLM 端点在合成数据上做结构性检查（D-010）。
   # 配置：仓库 Settings → Secrets and variables → Actions：
   #   secret LLM_API_KEY；variables LLM_BASE_URL、LLM_MODEL_ANALYZE，可选 LLM_JSON_MODE。
