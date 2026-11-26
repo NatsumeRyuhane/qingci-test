@@ -65,3 +65,9 @@ Template:
   inspect and maintain.
 - Decision: Issues, PRs, docs and commit messages must make sense to someone who never saw the chat
   sessions that produced them.
+
+## D-007: AI collaboration log deferred to the end of the test
+- Date: 2026-11-26 · Status: accepted · Source: owner review of the scaffolding
+- Decision: Don't create `docs/ai-log/` or collect session logs during development. Deliverable C
+  is assembled once, at the end of the test, as part of the submission package (issue #9).
+- Consequences: There is no log convention in the repo for now. #9 defines it when the time comes.

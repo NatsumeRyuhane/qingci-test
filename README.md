@@ -73,4 +73,3 @@ docs/              Requirements, data profile, decisions, proposals
 | [docs/data.md](docs/data.md) | Structure and findings for the sample data |
 | [docs/decisions.md](docs/decisions.md) | Decision log: what we chose and why |
 | [docs/proposals/](docs/proposals/) | Design proposals for post-MVP work |
-| [docs/ai-log/](docs/ai-log/) | How the AI collaboration log (deliverable C) is collected |

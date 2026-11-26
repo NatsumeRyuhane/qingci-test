@@ -1,6 +1,6 @@
 ---
 name: project-docs
-description: Where project knowledge is written down and how to keep it current. Covers the decision log, design proposals, README and AGENTS.md updates, and AI collaboration logs. Use when a change alters behaviour, setup or a decision, when proposing a design, or when exporting a session log.
+description: Where project knowledge is written down and how to keep it current. Covers the decision log, design proposals, and README and AGENTS.md updates. Use when a change alters behaviour, setup or a decision, or when proposing a design.
 ---
 
 # Keeping the docs current
@@ -15,7 +15,6 @@ The project is meant to be maintained by people who never saw the sessions that 
 | Changed setup, commands or env vars | `README.md` Getting started, `AGENTS.md` §8, `.env.example` |
 | Changed workflow or branch rules | `AGENTS.md` (and the GitHub settings, in the same PR) |
 | Learned something new about the data | `docs/data.md` |
-| Finished an AI-assisted session worth keeping | Export it to `docs/ai-log/` after the review in docs/ai-log/README.md |
 
 Docs changes go in the **same PR** as the change they describe.
 

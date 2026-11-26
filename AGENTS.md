@@ -188,5 +188,4 @@ docs/
   data.md            sample-data profile and findings
   decisions.md       decision log (D-NNN)
   proposals/         design proposals for post-MVP work
-  ai-log/            AI collaboration logs (deliverable C)
 ```
