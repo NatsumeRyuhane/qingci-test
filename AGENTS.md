@@ -182,13 +182,15 @@ uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档
 | `frontend` | 在 `frontend/` 中：`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm build`；在仓库根目录：`scripts/gen-api-types.sh --check` |
 | `llm-live` | `uv run pytest -m live`：调用真实 LLM 端点，只用合成数据。本地需要在 `.env` 中配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ANALYZE`；CI 中使用仓库 secret 和 variables，没有配置时跳过 |
 
+备用路线下，除了 `scripts/export-requirements.sh --check`，以上检查都能在激活的 venv 中运行（`scripts/gen-api-types.sh` 会自动改用 venv 中的 `copilot` 和 `npx pnpm`）。`export-requirements.sh` 调用的是 `uv export`，所以必须有 uv。没有改动依赖时可以跳过它，由 CI 的 `backend` job 检查。
+
 自动修复格式：`uv run ruff format`、`uv run ruff check --fix`、`(cd frontend && pnpm format)`。
 
 ### 改了这些之后
 
 | 改动 | 运行，并提交生成的文件 |
 |---|---|
-| Python 依赖（`uv add` / `uv remove`） | `scripts/export-requirements.sh` |
+| Python 依赖（`uv add` / `uv remove`） | `scripts/export-requirements.sh`。**需要 uv**：依赖版本锁定在 `uv.lock` 中，`requirements*.txt` 由它导出，不要手动编辑。备用路线的贡献者需要改依赖时，请安装 uv，或在 PR 中说明需要的依赖，请他人更新 |
 | 后端 API（路由或模型） | `scripts/gen-api-types.sh` |
 | ORM 模型 | `uv run alembic revision --autogenerate -m "<说明>"`，检查生成的迁移脚本 |
 | 环境变量 | 同步 `.env.example`（`tests/test_config.py` 会检查） |
