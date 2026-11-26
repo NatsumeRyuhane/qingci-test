@@ -41,13 +41,20 @@ class QuoteFormat(StrEnum):
     """Outlook 等客户端的邮件头块：`From:`/`差出人:` 之后几行内有 `日付:`、`Subject:` 等。"""
 
 
+# 正文是不可信输入，正则必须保持线性（#18）：空白只匹配同一行内的空格，可选部分不与相邻的
+# 空白重叠，发件人名称限制长度，不在同一行里放两个无界的 `[^\n]*`。
+_WS = r"[ \t\u3000]*"
+SENDER_MAX = 200
+"""引导行中发件人名称的最大长度。"""
+
 GMAIL_LEADER = re.compile(
-    r"(?P<y>\d{4})年(?P<mo>\d{1,2})月(?P<d>\d{1,2})日\s*[(（][^)）\n]{1,3}[)）]\s*"
-    r"(?P<ampm>午前|午後)?\s*(?P<h>\d{1,2}):(?P<mi>\d{2})(?P<sender>[^\n]*?)<[^<>\n]*>\s*[:：]"
+    rf"(?P<y>\d{{4}})年(?P<mo>\d{{1,2}})月(?P<d>\d{{1,2}})日{_WS}[(（][^)）\n]{{1,3}}[)）]{_WS}"
+    rf"(?:(?P<ampm>午前|午後){_WS})?(?P<h>\d{{1,2}}):(?P<mi>\d{{2}})"
+    rf"(?P<sender>[^\n]{{0,{SENDER_MAX}}}?)<[^<>\n]*>{_WS}[:：]"
 )
 IPHONE_LEADER = re.compile(
-    r"(?P<y>\d{4})/(?P<mo>\d{1,2})/(?P<d>\d{1,2})\s*(?P<h>\d{1,2}):(?P<mi>\d{2})、"
-    r"(?P<sender>[^\n]*?)のメール\s*[:：]"
+    rf"(?P<y>\d{{4}})/(?P<mo>\d{{1,2}})/(?P<d>\d{{1,2}}){_WS}(?P<h>\d{{1,2}}):(?P<mi>\d{{2}})、"
+    rf"(?P<sender>[^\n]{{0,{SENDER_MAX}}}?)のメール{_WS}[:：]"
 )
 
 SUPPORT_SENDER_NAME = "【ぽちゃガチョ！カスタマーサポート】"
@@ -57,8 +64,8 @@ ADDRESS = r"<(?:[^<>\s@]+@[^<>\s@]+)?>"
 """邮件地址：`<user@example.com>`，或脱敏后的空地址 `<>`。`<Error>` 这类文字不算。"""
 
 GENERIC_LEADER = re.compile(
-    rf"^[^\n]*{ADDRESS}[^\n]*[:：][ \t]*$"
-    rf"|^[^\n]*{re.escape(SUPPORT_SENDER_NAME)}[^\n]*(?:\n[^\n]{{0,80}})?[:：][ \t]*$",
+    rf"^(?=[^\n]*?{ADDRESS})[^\n]*[:：][ \t]*$"
+    rf"|^(?=[^\n]*?{re.escape(SUPPORT_SENDER_NAME)})[^\n]*(?:\n[^\n]{{0,80}})?[:：][ \t]*$",
     re.MULTILINE,
 )
 """其他客户端或语言的引导行：一行中有邮件地址（`ADDRESS`）并以冒号结尾；或有客服发件人名称，
@@ -94,8 +101,24 @@ QUOTE_RULES: tuple[tuple[QuoteFormat, re.Pattern[str]], ...] = (
     ),
 )
 
-_TRAILING_RULE = re.compile(r"(?:\n|^)[ \t]*[-_=]{4,}[ \t]*\s*\Z")
-"""引用前残留的分隔线，例如邮件头块上方的 `----------------`。"""
+_RULE_LINE = re.compile(r"[ \t]*[-_=]{4,}[ \t]*")
+"""只由分隔符组成的一行，例如邮件头块上方的 `----------------`。"""
+
+
+def _strip_trailing_rules(head: str) -> str:
+    """去掉引用前残留的分隔线（可以有多行，中间可以有空行）。
+
+    从结尾向前扫描一次，总耗时与长度成正比。没有分隔线时原样返回，结尾的空白也保留。
+    """
+    end = len(head)
+    while True:
+        stop = end
+        while stop > 0 and head[stop - 1].isspace():
+            stop -= 1
+        start = head.rfind("\n", 0, stop) + 1
+        if stop == start or not _RULE_LINE.fullmatch(head, start, stop):
+            return head[:end]
+        end = max(start - 1, 0)
 
 
 @dataclass(frozen=True)
@@ -128,9 +151,7 @@ def split_quote(text: str) -> QuoteSplit:
     inline = bool(text[line_start:index].strip(" \t\u3000"))
     if not inline:
         index = line_start
-    head = text[:index]
-    while (rule := _TRAILING_RULE.search(head.rstrip())) is not None:
-        head = head.rstrip()[: rule.start()]
+    head = _strip_trailing_rules(text[:index])
     return QuoteSplit(head=head, quoted=text[len(head) :], format=fmt, inline=inline)
 
 
@@ -199,7 +220,6 @@ def fix_chars(text: str) -> tuple[str, Counter[CharFix]]:
 
 # --- 空白 ---------------------------------------------------------------------
 
-_TRAILING_SPACE = re.compile(r"[ \t\u3000]+$", re.MULTILINE)
 _BLANK_RUN = re.compile(r"\n{3,}")
 
 
@@ -209,7 +229,7 @@ def normalize_newlines(text: str) -> str:
 
 def normalize_whitespace(text: str) -> str:
     """去掉行尾空白，连续空行压缩成一个，去掉首尾空行。行首和行内的全角空格保留。"""
-    text = _TRAILING_SPACE.sub("", text)
+    text = "\n".join(line.rstrip(" \t\u3000") for line in text.split("\n"))
     text = _BLANK_RUN.sub("\n\n", text)
     return text.strip("\n")
 
