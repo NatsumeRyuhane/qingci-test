@@ -225,3 +225,5 @@ def test_fixture_cross_references() -> None:
             assert (ref.template_id, ref.template_version) in templates
     for analysis in load_models(CaseAnalysis, "case_analysis"):
         assert f"{analysis.case_id}:{analysis.message_seq}" in messages
+    for draft in drafts.values():
+        assert f"{draft.case_id}:{draft.message_seq}" in messages

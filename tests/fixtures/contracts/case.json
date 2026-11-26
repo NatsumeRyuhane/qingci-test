@@ -63,6 +63,28 @@
           "body": ""
         }
       ]
+    },
+    {
+      "schema_version": 1,
+      "id": "SYN-0004",
+      "messages": [
+        {
+          "thread_id": "SYN-0004",
+          "seq": 1,
+          "role": "player",
+          "raw_body": "【合成データ】ガチョの着せ替えアイテムをもっと増やしてほしいです。",
+          "body": "【合成データ】ガチョの着せ替えアイテムをもっと増やしてほしいです。",
+          "quoted": "",
+          "sent_at": "2024-03-12T08:30:00+09:00"
+        }
+      ],
+      "form": {
+        "category": "feedback",
+        "platform": "google_play",
+        "content": "【合成データ】ガチョの着せ替えアイテムをもっと増やしてほしいです。"
+      },
+      "category": "feedback",
+      "status": "drafted"
     }
   ]
 }
