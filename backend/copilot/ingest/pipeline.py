@@ -117,14 +117,20 @@ def build_message(row: SheetRow, stats: IngestStats) -> tuple[Message, RoleReaso
 
 
 def _status(messages: list[Message]) -> CaseStatus:
-    """最后一封客服回复之后还有玩家（或无法判断发送方的）邮件时为待处理。系统邮件不计。"""
-    pending = False
-    for message in messages:
-        if message.role is MessageRole.AGENT:
-            pending = False
-        elif message.role in (MessageRole.PLAYER, MessageRole.UNKNOWN):
-            pending = True
-    return CaseStatus.OPEN if pending else CaseStatus.REPLIED
+    """只看线程的最后一封邮件。
+
+    - 客服回复 → `replied`：之后没有玩家追问，可以认为已结案。
+    - 玩家邮件 → `open`：玩家的咨询或追问还没有回复。
+    - 系统邮件或无法判断发送方的邮件 → `undetermined`：单看结构无法确定。客服回复后的退信
+      可能是我们的回复没有发出去，也可能是玩家粘贴的内容，或伪装成系统邮件的输入，所以
+      既不能当作已结案，也不能直接忽略，需要语义分析。
+    """
+    last = messages[-1].role
+    if last is MessageRole.AGENT:
+        return CaseStatus.REPLIED
+    if last is MessageRole.PLAYER:
+        return CaseStatus.OPEN
+    return CaseStatus.UNDETERMINED
 
 
 def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case:

@@ -61,7 +61,7 @@ def test_build_cases() -> None:
 
     bounce, case = cases
     assert bounce.messages[0].role is MessageRole.SYSTEM
-    assert bounce.status is CaseStatus.REPLIED  # 没有待回复的玩家邮件
+    assert bounce.status is CaseStatus.UNDETERMINED  # 以系统邮件结束，需要语义分析
 
     form, agent, follow_up = case.messages
     assert [m.seq for m in case.messages] == [1, 2, 3]
@@ -145,6 +145,44 @@ def test_sent_at_is_skipped_when_sender_is_unknown() -> None:
     (case,), stats = build_cases(rows)
     assert [m.sent_at for m in case.messages] == [None] * 3
     assert stats.sent_at_known == 0
+
+
+STATUS_BOUNCE = (
+    "This is the mail system at host mx.example.test.\n\n【合成データ】The mail system\n\n"
+    "<>: host mx.example.test[192.0.2.1] said: 550"
+)
+
+
+@pytest.mark.parametrize(
+    ("bodies", "roles", "status"),
+    [
+        pytest.param([FORM], "P", CaseStatus.OPEN, id="inquiry-unanswered"),
+        pytest.param([FORM, AGENT], "PA", CaseStatus.REPLIED, id="answered-no-follow-up"),
+        pytest.param([FORM, AGENT, FOLLOW_UP], "PAP", CaseStatus.OPEN, id="follow-up-unanswered"),
+        pytest.param(
+            [FORM, AGENT, FOLLOW_UP, AGENT], "PAPA", CaseStatus.REPLIED, id="follow-up-answered"
+        ),
+        pytest.param([STATUS_BOUNCE], "S", CaseStatus.UNDETERMINED, id="system-only"),
+        pytest.param([FORM, STATUS_BOUNCE], "PS", CaseStatus.UNDETERMINED, id="ends-on-system"),
+        pytest.param(
+            [FORM, AGENT, STATUS_BOUNCE], "PAS", CaseStatus.UNDETERMINED, id="bounce-after-reply"
+        ),
+        pytest.param(
+            [FORM, AGENT, STATUS_BOUNCE, FOLLOW_UP],
+            "PASP",
+            CaseStatus.OPEN,
+            id="player-after-system",
+        ),
+        pytest.param([FORM, AGENT, "  "], "PAU", CaseStatus.UNDETERMINED, id="ends-on-unknown"),
+    ],
+)
+def test_status_is_decided_by_the_last_message(
+    bodies: list[str], roles: str, status: CaseStatus
+) -> None:
+    (case,), _ = build_cases([SheetRow("1", i + 1, b) for i, b in enumerate(bodies)])
+    letters = {"player": "P", "agent": "A", "system": "S", "unknown": "U"}
+    assert "".join(letters[m.role.value] for m in case.messages) == roles
+    assert case.status is status
 
 
 def test_conflicting_quote_headers_are_not_used() -> None:
