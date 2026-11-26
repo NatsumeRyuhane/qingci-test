@@ -90,7 +90,8 @@ class OpenAICompatibleClient:
 
     async def _chat(
         self, task: LLMTask, messages: list[Message], response_format: dict[str, Any] | None
-    ) -> str:
+    ) -> str | None:
+        """返回模型回复的文本；没有内容时返回 None，由调用方决定报错还是重试。"""
         endpoint = self._settings.llm_endpoint(task)
         extra: dict[str, Any] = {}
         if response_format is not None:
@@ -101,12 +102,13 @@ class OpenAICompatibleClient:
             **extra,
         )
         content = response.choices[0].message.content if response.choices else None
-        if not content:
-            raise LLMOutputError(f"任务 {task.value} 的模型返回了空内容")
-        return content
+        return content or None
 
     async def complete_text(self, task: LLMTask, messages: list[Message]) -> str:
-        return await self._chat(task, messages, response_format=None)
+        content = await self._chat(task, messages, response_format=None)
+        if content is None:
+            raise LLMOutputError(f"任务 {task.value} 的模型返回了空内容")
+        return content
 
     async def complete_json[T: BaseModel](
         self, task: LLMTask, messages: list[Message], output: type[T]
@@ -116,6 +118,10 @@ class OpenAICompatibleClient:
         last_error: ValidationError | None = None
         for _ in range(self._settings.llm_max_retries + 1):
             content = await self._chat(task, conversation, response_format)
+            if content is None:
+                # 空回复也算一次失败的尝试，用同样的对话重试。不追加空的 assistant 消息，
+                # 部分服务商会拒绝内容为空的消息。
+                continue
             try:
                 return output.model_validate_json(_strip_code_fence(content))
             except ValidationError as error:
@@ -133,7 +139,7 @@ class OpenAICompatibleClient:
                 ]
         raise LLMOutputError(
             f"任务 {task.value} 的输出在 {self._settings.llm_max_retries + 1} 次尝试后"
-            f"仍未通过 {output.__name__} 的校验"
+            f"仍未通过 {output.__name__} 的校验（空回复也计为失败）"
         ) from last_error
 
     def _response_format(self, output: type[BaseModel]) -> dict[str, Any] | None:

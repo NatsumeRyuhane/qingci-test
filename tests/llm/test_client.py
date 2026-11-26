@@ -145,9 +145,32 @@ async def test_gives_up_after_max_retries() -> None:
     assert len(endpoint.requests) == 2  # 首次 + LLM_MAX_RETRIES=1
 
 
-async def test_empty_content_is_an_error() -> None:
+async def test_empty_text_content_fails_immediately() -> None:
+    endpoint = FakeEndpoint(chat_reply(None))
+
     with pytest.raises(LLMOutputError):
-        await make_client(FakeEndpoint(chat_reply(None))).complete_text(LLMTask.ANALYZE, MESSAGES)
+        await make_client(endpoint).complete_text(LLMTask.ANALYZE, MESSAGES)
+    assert len(endpoint.requests) == 1
+
+
+async def test_empty_json_content_is_retried() -> None:
+    endpoint = FakeEndpoint(chat_reply(None), chat_reply(VALID))
+
+    result = await make_client(endpoint).complete_json(LLMTask.ANALYZE, MESSAGES, Triage)
+
+    assert result.category == "不具合について"
+    assert len(endpoint.requests) == 2
+    # 重试时不追加空的 assistant 消息，对话与第一次相同
+    assert endpoint.body(1)["messages"] == endpoint.body(0)["messages"]
+
+
+@pytest.mark.parametrize("content", [None, ""])
+async def test_repeated_empty_json_content_gives_up_after_max_retries(content: str | None) -> None:
+    endpoint = FakeEndpoint(chat_reply(content))
+
+    with pytest.raises(LLMOutputError):
+        await make_client(endpoint).complete_json(LLMTask.ANALYZE, MESSAGES, Triage)
+    assert len(endpoint.requests) == 2  # 首次 + LLM_MAX_RETRIES=1
 
 
 async def test_rate_limit_is_retried_by_transport() -> None:
