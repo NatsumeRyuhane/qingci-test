@@ -43,7 +43,7 @@ AGENTS.md          人类开发者与 AI Agent 共用的贡献指南（请先读
 CLAUDE.md          → 指向 AGENTS.md 的符号链接（供 Claude Code 使用）
 .agents/skills/    共享的 Agent 技能（不绑定特定工具）
 .claude/skills     → 指向 .agents/skills 的符号链接（供 Claude Code 使用）
-src/copilot/       后端（Python + FastAPI，REST API /v1）
+backend/copilot/   后端（Python + FastAPI，REST API /v1）
 tests/             后端测试（只用合成数据）
 frontend/          前端（React + TypeScript），只通过 /v1 访问后端
 scripts/           辅助脚本
