@@ -17,6 +17,7 @@ from copilot.contracts import (
     InquiryForm,
     Message,
     ReplyTemplate,
+    is_valid_case_id,
 )
 from tests.fixtures import load_items, load_models
 
@@ -95,7 +96,7 @@ def test_unknown_fields_are_rejected() -> None:
 
 
 def test_other_schema_version_is_rejected() -> None:
-    item = load_items("case")[0] | {"schema_version": 2}
+    item = load_items("case")[0] | {"schema_version": 1}
     with pytest.raises(ValidationError, match="schema_version"):
         Case.model_validate(item)
 
@@ -149,6 +150,42 @@ def test_case_rejects_unordered_messages() -> None:
     item["messages"].reverse()
     with pytest.raises(ValidationError, match="严格递增"):
         Case.model_validate(item)
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    ["../SYN", "SYN/0001", "SYN 0001", "SYN\n0001", "SYN-0001\n", "ＳＹＮ", "", "S" * 65],
+    ids=[
+        "traversal",
+        "slash",
+        "space",
+        "newline",
+        "trailing-newline",
+        "fullwidth",
+        "empty",
+        "long",
+    ],
+)
+def test_case_id_rejects_unsafe_characters(case_id: str) -> None:
+    item = load_items("case")[1]
+    item["id"] = case_id
+    for message in item["messages"]:
+        message["thread_id"] = case_id
+    with pytest.raises(ValidationError):
+        Case.model_validate(item)
+    assert not is_valid_case_id(case_id)
+
+
+@pytest.mark.parametrize("case_id", ["SYN-0001", "1234", "a_b-C9", "9" * 64])
+def test_case_id_accepts_safe_ids(case_id: str) -> None:
+    assert is_valid_case_id(case_id)
+
+
+def test_message_ids_follow_case_id_rules() -> None:
+    item = load_items("reply_template")[0]
+    item["source_message_ids"] = ["../SYN:1"]
+    with pytest.raises(ValidationError, match="source_message_ids"):
+        ReplyTemplate.model_validate(item)
 
 
 def test_case_requires_messages() -> None:

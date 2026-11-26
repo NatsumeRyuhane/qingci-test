@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from copilot.contracts import Case, CaseStatus, InquiryForm, Message, MessageRole
+from copilot.contracts import Case, CaseStatus, InquiryForm, Message, MessageRole, is_valid_case_id
 from copilot.ingest.form import REDACTED_KEYS, parse_fields, to_inquiry_form
 from copilot.ingest.roles import RoleReason, detect_role
-from copilot.ingest.sheet import SheetFormatError, SheetRow
+from copilot.ingest.sheet import SheetFormatError, SheetRow, describe_cell
 from copilot.ingest.text import (
     CharFix,
     QuoteFormat,
@@ -134,6 +134,9 @@ def _status(messages: list[Message]) -> CaseStatus:
 
 
 def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case:
+    if not is_valid_case_id(thread_id):
+        # read_sheet 已经检查过；直接传入 SheetRow 的调用方也要得到表格格式错误，而不是校验异常。
+        raise SheetFormatError(f"メールID 含有不允许的字符：{describe_cell(thread_id)}")
     rows = sorted(rows, key=lambda r: r.seq)
     seqs = [r.seq for r in rows]
     if len(set(seqs)) != len(seqs):

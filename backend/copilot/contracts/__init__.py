@@ -2,7 +2,16 @@
 
 from copilot.contracts.analysis import CaseAnalysis
 from copilot.contracts.base import Contract, Document
-from copilot.contracts.case import Case, InquiryForm, Message, MessageId, message_id
+from copilot.contracts.case import (
+    CASE_ID_CHARS,
+    Case,
+    CaseId,
+    InquiryForm,
+    Message,
+    MessageId,
+    is_valid_case_id,
+    message_id,
+)
 from copilot.contracts.draft import Draft, DraftCheck, SimilarCaseRef, TemplateRef
 from copilot.contracts.enums import (
     CaseStatus,
@@ -32,10 +41,12 @@ EXPORTED_MODELS: tuple[type[Contract], ...] = (
 """对外发布 JSON Schema 的模型（`copilot contracts export`）。嵌套模型包含在各自的 `$defs` 中。"""
 
 __all__ = [
+    "CASE_ID_CHARS",
     "EXPORTED_MODELS",
     "PLACEHOLDER_PATTERN",
     "Case",
     "CaseAnalysis",
+    "CaseId",
     "CaseStatus",
     "Contract",
     "Document",
@@ -59,5 +70,6 @@ __all__ = [
     "TemplateRef",
     "TemplateSlot",
     "Urgency",
+    "is_valid_case_id",
     "message_id",
 ]

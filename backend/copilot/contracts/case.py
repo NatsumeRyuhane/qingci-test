@@ -1,5 +1,6 @@
 """邮件、游戏内表单与案件。"""
 
+import re
 from itertools import pairwise
 from typing import Annotated, Literal, Self
 
@@ -14,8 +15,24 @@ from copilot.contracts.enums import (
     SensitivityTag,
 )
 
-MessageId = Annotated[str, StringConstraints(pattern=r"^.+:[1-9][0-9]*$")]
+CASE_ID_CHARS = r"[A-Za-z0-9_-]{1,64}"
+"""案件 ID（即线程 ID）允许的字符：ASCII 字母、数字、`_` 和 `-`，1 到 64 个。
+
+案件 ID 会出现在 URL、文件路径和日志中，不能含 `/`、`..`、空白或控制字符（#18 第 8 项）。
+样本中的 ID 都是 3–4 位数字。"""
+
+CaseId = Annotated[str, StringConstraints(pattern=rf"^{CASE_ID_CHARS}$")]
+"""案件 ID，见 `CASE_ID_CHARS`。"""
+
+MessageId = Annotated[str, StringConstraints(pattern=rf"^{CASE_ID_CHARS}:[1-9][0-9]*$")]
 """一封邮件的全局标识，格式为 `<thread_id>:<seq>`，由 `message_id()` 生成。"""
+
+_CASE_ID_RE = re.compile(CASE_ID_CHARS)
+
+
+def is_valid_case_id(value: str) -> bool:
+    """`value` 是否是合法的案件 ID。供导入步骤在构造 `Case` 之前检查，给出更清楚的错误。"""
+    return _CASE_ID_RE.fullmatch(value) is not None
 
 
 def message_id(thread_id: str, seq: int) -> str:
@@ -26,7 +43,7 @@ def message_id(thread_id: str, seq: int) -> str:
 class Message(Contract):
     """线程中的一封邮件。来源：样本表格的一行（见 docs/data.md）。"""
 
-    thread_id: str = Field(min_length=1)
+    thread_id: CaseId
     """所属线程的 ID，来源：`メールID`。与 `Case.id` 相同。"""
     seq: int = Field(ge=1)
     """在线程中的序号，从 1 开始。来源：`メールID枝番`。"""
@@ -104,10 +121,10 @@ class Case(Document):
     不影响谁能看到案件。
     """
 
-    schema_version: Literal[1] = 1
-    """本模型的 schema 版本。"""
-    id: str = Field(min_length=1)
-    """案件 ID，等于线程 ID（`メールID`）。"""
+    schema_version: Literal[2] = 2
+    """本模型的 schema 版本。2：限制 `id` 允许的字符（#19）。"""
+    id: CaseId
+    """案件 ID，等于线程 ID（`メールID`）。允许的字符见 `CASE_ID_CHARS`。"""
     messages: list[Message] = Field(min_length=1)
     """线程中的邮件，按 `seq` 严格递增排列。"""
     form: InquiryForm | None = None

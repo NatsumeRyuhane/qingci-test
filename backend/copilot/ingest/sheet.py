@@ -9,6 +9,8 @@ from xml.etree import ElementTree
 
 import openpyxl
 
+from copilot.contracts import is_valid_case_id
+
 COLUMNS = ("メールID", "メールID枝番", "本文")
 
 # 表格可能来自外部，内容不可信（#18）。以下上限防止构造的文件耗尽时间和内存。
@@ -88,6 +90,11 @@ def _as_id(value: object, row: int) -> str:
         raise SheetFormatError(f"第 {row} 行的 メールID 为空")
     if len(text) > MAX_ID_CHARS:
         raise SheetFormatError(f"第 {row} 行的 メールID 超过 {MAX_ID_CHARS} 字符")
+    if not is_valid_case_id(text):
+        raise SheetFormatError(
+            f"第 {row} 行的 メールID 含有不允许的字符（只允许 ASCII 字母、数字、_ 和 -）："
+            f"{describe_cell(text)}"
+        )
     return text
 
 
