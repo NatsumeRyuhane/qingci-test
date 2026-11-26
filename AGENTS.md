@@ -8,8 +8,7 @@
 - **为什么这样设计：** 见 [docs/decisions.md](docs/decisions.md)。提出架构调整前请先阅读。
 - **数据：** [docs/data.md](docs/data.md)（数据长什么样）和 [data/README.md](data/README.md)（数据放哪里、如何处理）。
 - **做哪些事：** 以 GitHub Issues 为准，除此之外没有其他任务清单（D-003）。
-
-工具链、运行与检查命令：**尚未确定**，将由基础建设 issue（[#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)）补充到第 8 节。在此之前没有构建步骤。
+- **技术栈：** Python 3.12 + FastAPI 后端，React + TypeScript 前端，两者只通过 `/v1` REST API 通信；LLM 支持任意 OpenAI 兼容端点（D-010）。环境准备、运行和检查命令见第 8 节。
 
 ## 2. Agent 配置：指令与技能
 
@@ -98,7 +97,7 @@ git worktree add ../qingci-test-<slug> -b <type>/<issue#>-<slug> --no-track orig
 | 禁止强制 push 和删除 | 永远不要改写 `main` 的历史。评审开始前，可以强制 push 自己的功能分支；评审开始后尽量避免。 |
 | PR 需 1 个批准 | 由仓库所有者或指定的评审人批准。作者不能批准自己的 PR。 |
 | 旧批准自动失效 | 批准后再 push 新提交，需要重新批准。 |
-| 必需检查须通过 | CI（lint 和测试，由基础建设 issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2) 定义）通过后才能合并。 |
+| 必需检查须通过 | CI 的 `backend`、`backend-pip`、`frontend`、`frontend-npx` job（第 8 节）通过后才能合并。`llm-live` 目前不是必需检查。 |
 | 所有评审讨论须已解决 | 由**评审人**标记解决，而不是作者（第 7 节）。 |
 | 必须签名提交 | 每个提交都要签名（SSH 或 GPG）：`git config commit.gpgsign true`。未签名的提交会被拒绝。签名失败时停下来修好，不要绕过。 |
 | 线性历史，只允许 squash 合并 | PR 标题会成为 squash 提交信息，因此必须是合法的 Conventional Commit（第 6 节）。 |
@@ -120,7 +119,7 @@ git worktree add ../qingci-test-<slug> -b <type>/<issue#>-<slug> --no-track orig
 ```
 
 - 类型：`feat`、`fix`、`docs`、`refactor`、`test`、`build`、`chore`、`perf`、`ci`、`style`、`revert`。
-- scope 与代码模块对应：`ingest`、`kb`、`draft`、`eval`、`ui`、`api`、`a2a`、`auth`、`docs`。
+- scope 与代码模块对应：`ingest`、`kb`、`draft`、`eval`、`ui`、`api`、`a2a`、`auth`、`llm`、`storage`、`docs`。
 - 破坏性变更：在冒号前加 `!`，或添加 `BREAKING CHANGE:` 脚注。
 - 每个提交只包含一个逻辑改动，并且每个提交都必须能单独通过检查。
 
@@ -131,6 +130,7 @@ git worktree add ../qingci-test-<slug> -b <type>/<issue#>-<slug> --no-track orig
 - 描述中写明 `Closes #<n>`（部分完成则用 `Refs #<n>`）。
 - 描述包括：改了**什么**、**为什么**改、**如何测试**（命令和结果），以及需要评审人重点关注的地方。默认评审人没看过你的会话。
 - 行为、配置或决策变化时，在同一个 PR 里更新文档（见 `project-docs` 技能）。
+- **真实数据验证结果**：改动流水线行为的 PR（ingest、kb、draft、eval、prompt、模型配置）在 push 前用真实样本数据在本地运行，并在描述中报告结果。评测框架（#7）完成后，报告 `copilot eval` 改动前后的指标；在此之前，报告与本 PR 相关的统计（例如导入后的线程数）。只报汇总数字，不贴数据片段（D-002）。纯文档或纯前端样式的改动不需要。CI 不能代替这一步，因为 CI 中没有样本数据。
 - 改动规模要小。大的工作拆成一系列可以单独评审的 PR。
 
 **评审讨论：**
@@ -143,7 +143,60 @@ git worktree add ../qingci-test-<slug> -b <type>/<issue#>-<slug> --no-track orig
 
 ## 8. 检查与命令
 
-_由基础建设 issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)（技术栈、项目骨架、CI）定义。_ 在此之前，文档改动的检查方式是确认所有相对链接都能正确解析。
+工具链有两条路线（D-010）：推荐用 `uv` 和 `pnpm`；没有它们时用备用路线，只需要 Python 3.12 和 Node 22。两条路线使用同一份锁定的依赖版本，CI 都会跑。
+
+### 环境准备
+
+```sh
+# 推荐路线
+uv sync
+(cd frontend && pnpm install)
+
+# 备用路线（不需要 uv 和 pnpm）
+python3.12 -m venv .venv
+. .venv/bin/activate                    # Windows：.venv\Scripts\activate
+pip install -r requirements-dev.txt
+pip install --no-deps -e .
+(cd frontend && npx pnpm@10.34.5 install)   # 版本与 frontend/package.json 的 packageManager 一致
+```
+
+备用路线下，把下文命令中的 `uv run` 去掉（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
+
+### 运行
+
+```sh
+cp .env.example .env               # 填写 LLM_* 等变量，说明见文件内注释
+uv run copilot db upgrade          # 创建或迁移数据库（DATABASE_URL）
+uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
+(cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
+```
+
+### 检查（与 CI 一致）
+
+提交前运行与改动相关的检查；push 前运行全部检查。
+
+| CI job | 命令 |
+|---|---|
+| `backend` | `uv run ruff check` · `uv run ruff format --check` · `uv run mypy` · `uv run pytest` · `scripts/export-requirements.sh --check` |
+| `backend-pip` | 按备用路线安装后运行 `pytest` |
+| `frontend` | 在 `frontend/` 中：`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm build`；在仓库根目录：`scripts/gen-api-types.sh --check` |
+| `frontend-npx` | 与 `frontend` 相同，但走备用路线：不装 uv 和 pnpm，用 venv 中的 `copilot` 和 `npx pnpm@10.34.5` |
+| `llm-live` | `uv run pytest -m live`：调用真实 LLM 端点，只用合成数据。本地需要在 `.env` 中配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ANALYZE`；CI 中使用仓库 secret 和 variables，没有配置时跳过 |
+
+备用路线下，除了 `scripts/export-requirements.sh --check`，以上检查都能在激活的 venv 中运行（`scripts/gen-api-types.sh` 会自动改用 venv 中的 `copilot` 和 `npx pnpm`）。`export-requirements.sh` 调用的是 `uv export`，所以必须有 uv。没有改动依赖时可以跳过它，由 CI 的 `backend` job 检查。
+
+自动修复格式：`uv run ruff format`、`uv run ruff check --fix`、`(cd frontend && pnpm format)`。
+
+### 改了这些之后
+
+| 改动 | 运行，并提交生成的文件 |
+|---|---|
+| Python 依赖（`uv add` / `uv remove`） | `scripts/export-requirements.sh`。**需要 uv**：依赖版本锁定在 `uv.lock` 中，`requirements*.txt` 由它导出，不要手动编辑。备用路线的贡献者需要改依赖时，请安装 uv，或在 PR 中说明需要的依赖，请他人更新 |
+| 后端 API（路由或模型） | `scripts/gen-api-types.sh` |
+| ORM 模型 | `uv run alembic revision --autogenerate -m "<说明>"`，检查生成的迁移脚本 |
+| 环境变量 | 同步 `.env.example`（`tests/test_config.py` 会检查） |
+
+文档改动：确认所有相对链接都能正确解析。
 
 ## 9. 仓库结构
 
@@ -152,6 +205,13 @@ AGENTS.md            本指南（CLAUDE.md → AGENTS.md）
 README.md            项目概览与上手指南
 .agents/skills/      共享的 Agent 技能（.claude/skills → .agents/skills）
 .env.example         应用读取的全部环境变量，不含值
+pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
+alembic.ini          仅供开发时生成数据库迁移
+backend/copilot/     后端：api/（REST API）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+tests/               后端测试（只用合成数据；tests/live/ 默认不运行）
+frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
+scripts/             辅助脚本（导出 requirements、生成 API 类型）
+.github/workflows/   CI
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
 docs/
   requirements.md    原始测试题说明

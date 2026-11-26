@@ -56,3 +56,17 @@
 - 背景：其他开发者都是中文母语者，产品的使用者（客服人员）也是。
 - 决定：文档、Issue、PR、代码注释和评审回复使用简体中文。代码标识符、命令、路径、配置键名和业内通用的英文术语保持原样；日语数据和日语回复模板保持日语原文。提交信息和 PR 标题的 Conventional Commits `type`/`scope` 保持英文，描述和正文使用中文，因为 PR 标题会成为 squash 提交信息。
 - 影响：此前用英文写成的脚手架文档和 issue 已全部改写为中文。具体规则见 AGENTS.md 第 3 节。
+
+## D-010：技术栈
+- 日期：2026-11-26 · 状态：已采纳 · 来源：[#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)（正文与仓库所有者的评审评论）
+- 编号说明：D-009（会话记录导出）记录在长期分支 `docs/agent-conversations` 上，测试结束时随 #9 合入，所以本文件在 `main` 上暂时从 D-008 跳到 D-010。
+- 背景：其他所有 issue 都依赖技术栈的选择。约束：数据规模小（约 2.9 千个线程），每个案件的耗时主要在 LLM 调用上；样本数据不能进 CI（D-002）；贡献者使用的工具各不相同。
+- 决定：
+  - **后端：** Python 3.12 + FastAPI，对外只提供 REST API（`/v1`）。#3 的 Pydantic 契约直接用于请求校验和 OpenAPI 生成。排除 Rust（性能优势用不上，迭代慢）、Flask（校验和 OpenAPI 需要额外的库）、Django（ORM 模型与 Pydantic 契约重复，对这个规模过重）。
+  - **前端：** React + TypeScript（Vite），作为独立服务只通过 REST API 与后端通信。这套 API 也是之后对外集成（#10、#11）的基础。排除 Jinja + HTMX（前后端耦合，复杂交互难做）。前端的 API 类型由后端 OpenAPI 生成，不手写。
+  - **工具链：** 推荐 `uv` 和 `pnpm`，同时保留不依赖它们的备用路线：venv + pip 安装由 `uv.lock` 导出的 `requirements*.txt`；前端用 `npx pnpm@<固定版本>`。两条路线 CI 都会跑。lint 与格式化用 ruff 和 Biome，类型检查用 mypy 和 `tsc`，测试用 pytest 和 Vitest。
+  - **LLM：** 不绑定服务商，支持任意 OpenAI 兼容端点。每个任务单独配置模型，可单独覆盖端点和 key。结构化输出一律用 Pydantic 校验并在失败时重试，不依赖 `json_schema` 模式，也不依赖 prompt caching。embedding 单独配置。用哪个模型由评测（#7）决定。
+  - **检索与存储：** BM25（日语分词）+ embedding 的混合检索；向量在内存中暴力计算。MVP 用 SQLite（SQLAlchemy + Alembic），业务代码只依赖仓库接口和向量索引接口，为接口写共享测试。多实例部署、并发写入或语料超过约 10 万条时，新增 Postgres + pgvector 实现。
+  - **测试：** CI 只用合成数据：fake LLM 的单元与契约测试，加上用真实 LLM 端点在合成数据上做结构性检查的 `llm-live` job。改动流水线行为的 PR 在 push 前用真实样本数据在本地运行，并在 PR 描述中报告汇总结果（见 AGENTS.md 第 7 节）。
+  - **部署：** Docker Compose 加运维 TUI 脚本，放在 `deploy/` 下（#14）。
+- 影响：#8 包含界面所需的 `/v1` 端点和一个统一的授权钩子；#10 在此基础上补齐对外集成的部分。`.env.example` 用 `LLM_*` 和 `EMBEDDING_*` 取代 `ANTHROPIC_API_KEY`。

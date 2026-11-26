@@ -1,0 +1,175 @@
+# CI：只用合成数据，样本数据永远不进 CI（D-002）。
+# job 名称是分支保护的必需检查名，不要随意改名（AGENTS.md 第 5 节、第 8 节）。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.14"
+
+# astral-sh/setup-uv 不发布浮动的主版本标签（如 v10），只能写完整版本号。
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: ruff check
+        run: uv run ruff check
+      - name: ruff format
+        run: uv run ruff format --check
+      - name: mypy
+        run: uv run mypy
+      - name: pytest
+        run: uv run pytest
+      - name: requirements*.txt 与 uv.lock 一致
+        run: scripts/export-requirements.sh --check
+
+  # 不使用 uv 的备用路线（venv + pip），防止它悄悄失效（D-010）。
+  backend-pip:
+    name: backend-pip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - name: 安装依赖
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: pytest
+        run: .venv/bin/pytest
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: biome
+        run: pnpm lint
+      - name: tsc
+        run: pnpm typecheck
+      - name: vitest
+        run: pnpm test
+      - name: build
+        run: pnpm build
+      # 检查前端 API 类型与后端 OpenAPI 一致，需要后端环境
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: API 类型是最新的
+        working-directory: .
+        run: |
+          uv sync --frozen
+          scripts/gen-api-types.sh --check
+
+  # 前端和 API 类型生成的备用路线：不装 uv 和 pnpm，pnpm 通过 npx 按 packageManager
+  # 中固定的版本运行（D-010）。与 backend-pip 一起覆盖整条备用路线。
+  frontend-npx:
+    name: frontend-npx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: 确认运行环境中没有 uv 和 pnpm
+        run: |
+          for tool in uv pnpm; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::运行环境中预装了 $tool，本 job 无法验证不依赖它的备用路线"
+              exit 1
+            fi
+          done
+      - name: 读取固定的 pnpm 版本
+        run: |
+          version="$(node -p "require('./frontend/package.json').packageManager.split('@')[1]")"
+          echo "PNPM=npx --yes pnpm@$version" >> "$GITHUB_ENV"
+      - name: 安装依赖
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements-dev.txt
+          .venv/bin/pip install --no-deps -e .
+          cd frontend && $PNPM install --frozen-lockfile
+      - name: 前端检查
+        working-directory: frontend
+        run: |
+          $PNPM lint
+          $PNPM typecheck
+          $PNPM test
+          $PNPM build
+      # 走 gen-api-types.sh 中“没有 uv、没有 pnpm”的分支
+      - name: API 类型是最新的
+        run: |
+          . .venv/bin/activate
+          scripts/gen-api-types.sh --check
+
+  # 用真实 LLM 端点在合成数据上做结构性检查（D-010）。
+  # 配置：仓库 Settings → Secrets and variables → Actions：
+  #   secret LLM_API_KEY；variables LLM_BASE_URL、LLM_MODEL_ANALYZE，可选 LLM_JSON_MODE。
+  # 没有配置时（例如来自 fork 的 PR）跳过。目前不是必需检查。
+  llm-live:
+    name: llm-live
+    runs-on: ubuntu-latest
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+      LLM_MODEL_ANALYZE: ${{ vars.LLM_MODEL_ANALYZE }}
+      LLM_JSON_MODE: ${{ vars.LLM_JSON_MODE || 'json_object' }}
+    steps:
+      - name: 检查是否已配置
+        id: configured
+        run: |
+          if [ -n "$LLM_API_KEY" ] && [ -n "$LLM_BASE_URL" ] && [ -n "$LLM_MODEL_ANALYZE" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::未配置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL_ANALYZE，跳过 llm-live。"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.configured.outputs.ok == 'true'
+        uses: actions/checkout@v7
+      - if: steps.configured.outputs.ok == 'true'
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - if: steps.configured.outputs.ok == 'true'
+        run: uv sync --frozen
+      - if: steps.configured.outputs.ok == 'true'
+        name: pytest -m live
+        run: uv run pytest -m live

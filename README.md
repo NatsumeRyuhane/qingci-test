@@ -2,7 +2,7 @@
 
 一个客服坐席助手（Copilot），让**中文客服人员**能够快速、准确地回复手游『ぽちゃガチョ！』**日本玩家**的客服邮件，并使用得体的日语商务敬语。客服人员用得越多，它就越好用。
 
-> **状态：** 目前只有项目脚手架，还没有应用代码。开发计划在 [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues) 中跟踪，请从[路线图（#1）](https://github.com/NatsumeRyuhane/qingci-test/issues/1)开始看。
+> **状态：** 已有项目骨架（后端、前端、CI），业务功能还在开发中。开发计划在 [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues) 中跟踪，请从[路线图（#1）](https://github.com/NatsumeRyuhane/qingci-test/issues/1)开始看。
 
 ## 背景
 
@@ -43,6 +43,10 @@ AGENTS.md          人类开发者与 AI Agent 共用的贡献指南（请先读
 CLAUDE.md          → 指向 AGENTS.md 的符号链接（供 Claude Code 使用）
 .agents/skills/    共享的 Agent 技能（不绑定特定工具）
 .claude/skills     → 指向 .agents/skills 的符号链接（供 Claude Code 使用）
+backend/copilot/   后端（Python + FastAPI，REST API /v1）
+tests/             后端测试（只用合成数据）
+frontend/          前端（React + TypeScript），只通过 /v1 访问后端
+scripts/           辅助脚本
 data/              仅限本地的数据目录（内容永不提交）
 docs/              需求、数据概况、决策记录、设计提案
 ```
@@ -51,8 +55,33 @@ docs/              需求、数据概况、决策记录、设计提案
 
 1. 克隆仓库，然后阅读 [AGENTS.md](AGENTS.md)。
 2. 向仓库所有者索取样本数据表格，放到 `data/raw/`（见 [data/README.md](data/README.md)）。
-3. 执行 `cp .env.example .env` 并填写各项值。
-4. 工具链和运行说明将随基础建设 issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)（技术栈选型、项目骨架、CI）一起补充。
+3. 准备环境。推荐用 [uv](https://docs.astral.sh/uv/) 和 [pnpm](https://pnpm.io/)：
+
+   ```sh
+   uv sync
+   (cd frontend && pnpm install)
+   ```
+
+   不想装 uv 和 pnpm 时，只需要 Python 3.12 和 Node 22：
+
+   ```sh
+   python3.12 -m venv .venv && . .venv/bin/activate
+   pip install -r requirements-dev.txt && pip install --no-deps -e .
+   (cd frontend && npx pnpm@10.34.5 install)
+   ```
+
+4. 执行 `cp .env.example .env`，填写 LLM 端点（任意 OpenAI 兼容服务）等变量，说明见文件内注释。
+5. 启动：
+
+   ```sh
+   uv run copilot db upgrade
+   uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
+   (cd frontend && pnpm dev)          # 前端 http://localhost:5173
+   ```
+
+   备用路线下去掉 `uv run`（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
+
+检查命令和更多细节见 [AGENTS.md](AGENTS.md) 第 8 节。
 
 ## 文档
 
