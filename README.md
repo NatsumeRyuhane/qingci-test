@@ -75,6 +75,7 @@ docs/              需求、数据概况、决策记录、设计提案
 
    ```sh
    uv run copilot db upgrade
+   uv run copilot ingest              # 清洗样本表格，写出 data/interim/cases.jsonl
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
    (cd frontend && pnpm dev)          # 前端 http://localhost:5173
    ```

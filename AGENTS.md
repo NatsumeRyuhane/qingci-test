@@ -167,6 +167,7 @@ pip install --no-deps -e .
 ```sh
 cp .env.example .env               # 填写 LLM_* 等变量，说明见文件内注释
 uv run copilot db upgrade          # 创建或迁移数据库（DATABASE_URL）
+uv run copilot ingest --stats      # 清洗样本表格（SAMPLE_DATA_PATH），写出 data/interim/cases.jsonl
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
