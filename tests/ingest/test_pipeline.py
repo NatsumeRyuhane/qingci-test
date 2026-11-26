@@ -40,6 +40,8 @@ FOLLOW_UP = (
     "【合成データ】ありがとうございます。もう一つ要望があります。\n\n"
     "2099年1月2日(金) 午後3:04 【ぽちゃガチョ！カスタマーサポート】 <>:\n\n"
     "> いつもご利用いただきありがとうございます。\n"
+    "> 『ぽちゃガチョ！』サポート担当です。\n>\n"
+    "> 【合成データ】貴重なご意見をありがとうございます。\n"
 )
 
 ROWS = [
@@ -89,8 +91,65 @@ def test_build_cases() -> None:
     assert stats.redacted_fields_not_empty == 0
 
 
+def _agent_reply(core: str) -> str:
+    return (
+        "いつもご利用いただきありがとうございます。\n『ぽちゃガチョ！』サポート担当です。\n\n"
+        f"{core}\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。"
+    )
+
+
+def _quoting(text: str, time: str, sender: str, quoted_core: str) -> str:
+    return (
+        f"【合成データ】{text}\n\n2099年1月2日(金) {time} {sender} <>:\n\n"
+        f"> いつもご利用いただきありがとうございます。\n> {quoted_core}\n"
+    )
+
+
+SUPPORT = "【ぽちゃガチョ！カスタマーサポート】"
+FIRST_REPLY = "【合成データ】一回目のご案内です。再起動をお試しください。"
+SECOND_REPLY = "【合成データ】二回目のご案内です。再インストールをお試しください。"
+
+
+def test_sent_at_goes_to_the_quoted_message_not_the_latest() -> None:
+    rows = [
+        SheetRow("1", 1, FORM),
+        SheetRow("1", 2, _agent_reply(FIRST_REPLY)),
+        SheetRow("1", 3, _agent_reply(SECOND_REPLY)),
+        SheetRow("1", 4, _quoting("一回目について", "10:00", SUPPORT, FIRST_REPLY)),
+    ]
+    (case,), _ = build_cases(rows)
+    assert case.messages[1].sent_at == datetime(2099, 1, 2, 10, 0, tzinfo=JST)
+    assert case.messages[2].sent_at is None
+
+
+def test_sent_at_is_skipped_when_quoted_message_is_ambiguous() -> None:
+    rows = [
+        SheetRow("1", 1, FORM),
+        SheetRow("1", 2, _agent_reply(FIRST_REPLY)),
+        SheetRow("1", 3, _agent_reply(FIRST_REPLY)),
+        SheetRow("1", 4, _quoting("同じ案内でした", "10:00", SUPPORT, FIRST_REPLY)),
+    ]
+    (case,), stats = build_cases(rows)
+    assert [m.sent_at for m in case.messages] == [None] * 4
+    assert stats.sent_at_known == 0
+
+
+def test_sent_at_is_skipped_when_sender_is_unknown() -> None:
+    rows = [
+        SheetRow("1", 1, FORM),
+        SheetRow("1", 2, _agent_reply(FIRST_REPLY)),
+        SheetRow("1", 3, _quoting("まだです", "10:00", "", FIRST_REPLY)),  # 只有 `<>:`，没有名称
+    ]
+    (case,), stats = build_cases(rows)
+    assert [m.sent_at for m in case.messages] == [None] * 3
+    assert stats.sent_at_known == 0
+
+
 def test_conflicting_quote_headers_are_not_used() -> None:
-    leader = "2099年1月2日(金) {} 【ぽちゃガチョ！カスタマーサポート】 <>:\n> 前"
+    leader = (
+        "2099年1月2日(金) {} 【ぽちゃガチョ！カスタマーサポート】 <>:\n"
+        "> 【合成データ】貴重なご意見をありがとうございます。"
+    )
     rows = [
         SheetRow("1", 1, FORM),
         SheetRow("1", 2, AGENT),

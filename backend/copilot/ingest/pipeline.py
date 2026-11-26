@@ -145,7 +145,9 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
         stats.forms += 1
         stats.redacted_fields_not_empty += sum(1 for k in REDACTED_KEYS if fields.get(k))
 
-    times, conflicts = recover_sent_at([message_ref(m.seq, m.role, m.quoted) for m in messages])
+    times, conflicts = recover_sent_at(
+        [message_ref(m.seq, m.role, m.quoted, m.core) for m in messages]
+    )
     if times:
         messages = [
             m.model_copy(update={"sent_at": times[m.seq]}) if m.seq in times else m
