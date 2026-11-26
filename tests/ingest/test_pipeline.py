@@ -432,6 +432,23 @@ def test_zip64_locator_before_maximum_comment_is_detected(tmp_path: Path) -> Non
         read_sheet(path)
 
 
+def test_read_sheet_rejects_corrupt_deflate_data(tmp_path: Path) -> None:
+    import zipfile
+
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, FORM)], HEADER)
+    data = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as archive:
+        offset = archive.getinfo("[Content_Types].xml").header_offset
+    name_len = int.from_bytes(data[offset + 26 : offset + 28], "little")
+    extra_len = int.from_bytes(data[offset + 28 : offset + 30], "little")
+    start = offset + 30 + name_len + extra_len
+    data[start : start + 8] = b"\xff" * 8  # 损坏压缩数据的开头
+    path.write_bytes(bytes(data))
+    with pytest.raises(SheetFormatError, match="error"):
+        read_sheet(path)
+
+
 def test_read_sheet_rejects_broken_xml(tmp_path: Path) -> None:
     import zipfile
 

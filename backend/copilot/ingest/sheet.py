@@ -2,6 +2,7 @@
 
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -151,6 +152,7 @@ def read_sheet(path: Path) -> list[SheetRow]:
         KeyError,
         IndexError,
         NotImplementedError,  # 不支持的 zip 版本或压缩方法
+        zlib.error,  # 损坏的压缩数据
     ) as exc:
         raise SheetFormatError(f"无法解析表格（{type(exc).__name__}）") from exc
 
