@@ -21,6 +21,8 @@ from copilot.ingest import (
     read_sheet,
     write_cases,
 )
+from copilot.ingest import sheet as sheet_module
+from copilot.ingest.sheet import MAX_ID_CHARS
 from copilot.ingest.timestamps import JST
 
 FORM = (
@@ -242,6 +244,44 @@ def test_read_sheet_rejects_unexpected_header(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.xlsx"
     _write_xlsx(path, [], ("ID", "seq", "body"))
     with pytest.raises(SheetFormatError, match="表头"):
+        read_sheet(path)
+
+
+def test_read_sheet_ignores_declared_extra_columns(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, FORM, "余分な列")], (*HEADER, "extra"))
+    assert read_sheet(path) == [SheetRow("SYN", 1, FORM)]
+
+
+def test_read_sheet_rejects_overlong_body(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # openpyxl 写入时会把字符串截断到 Excel 的上限，所以这里调低上限来模拟构造的文件。
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, "あ" * 101)], HEADER)
+    monkeypatch.setattr(sheet_module, "MAX_BODY_CHARS", 100)
+    with pytest.raises(SheetFormatError, match="超过 100 字符"):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_overlong_id(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("S" * (MAX_ID_CHARS + 1), 1, FORM)], HEADER)
+    with pytest.raises(SheetFormatError, match="超过"):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_archive_bomb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, "あ" * 2000)], HEADER)
+    monkeypatch.setattr(sheet_module, "MAX_UNCOMPRESSED_BYTES", 1000)
+    with pytest.raises(SheetFormatError, match="解压后"):
+        read_sheet(path)
+
+
+def test_read_sheet_stops_at_row_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", i, FORM) for i in range(1, 6)], HEADER)
+    monkeypatch.setattr(sheet_module, "MAX_ROWS", 3)
+    with pytest.raises(SheetFormatError, match="超过 3 行"):
         read_sheet(path)
 
 
