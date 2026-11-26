@@ -1,13 +1,13 @@
-# --- Secrets -----------------------------------------------------------------
-# Real values live in .env (never committed). .env.example lists the names.
+# --- 密钥 ----------------------------------------------------------------------
+# 真实值放在 .env（永不提交），.env.example 列出变量名。
 .env
 .env.*
 !.env.example
 *.pem
 *.key
 
-# --- Data --------------------------------------------------------------------
-# The sample data belongs to the client and is never committed. See data/README.md.
+# --- 数据 ----------------------------------------------------------------------
+# 样本数据属于客户，永不提交。见 data/README.md。
 data/raw/*
 data/interim/*
 data/processed/*
@@ -16,19 +16,19 @@ data/processed/*
 *.xls
 *.csv
 
-# --- Editors / OS ------------------------------------------------------------
+# --- 编辑器 / 操作系统 ---------------------------------------------------------
 .idea/
 .vscode/
 *.swp
 .DS_Store
 Thumbs.db
 
-# --- Agent tooling: local-only files ----------------------------------------
-# Shared agent config lives in AGENTS.md and .agents/. Per-user settings stay local.
+# --- Agent 工具：仅限本地的文件 ------------------------------------------------
+# 共享的 Agent 配置在 AGENTS.md 和 .agents/ 中，个人设置留在本地。
 .claude/settings.local.json
 .claude/worktrees/
 
-# --- Python ------------------------------------------------------------------
+# --- Python --------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 .venv/
@@ -41,12 +41,12 @@ dist/
 build/
 *.egg-info/
 
-# --- Node --------------------------------------------------------------------
+# --- Node ----------------------------------------------------------------------
 node_modules/
 .next/
 .turbo/
 
-# --- Runtime output ----------------------------------------------------------
+# --- 运行时产物 ----------------------------------------------------------------
 *.log
 *.sqlite
 *.sqlite3

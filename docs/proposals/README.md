@@ -1,8 +1,5 @@
-# Proposals
+# 设计提案
 
-Design proposals for work that is out of the current scope or needs agreement before building.
-Each proposal starts as a GitHub issue labelled `proposal`. When the design is worked out, it is
-written up here as `NNNN-<slug>.md` and linked from the issue.
+存放超出当前范围、或需要先达成共识再动手的工作的设计提案。每个提案先以带 `proposal` 标签的 GitHub issue 形式提出。设计确定后，写成 `NNNN-<slug>.md` 放在这里，并在 issue 中附上链接。
 
-A proposal should cover: problem, goals and non-goals, design, alternatives considered, risks, and
-how we would know it works.
+一份提案应包括：问题、目标与非目标、设计方案、考虑过的替代方案、风险，以及如何判断它是否有效。

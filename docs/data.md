@@ -1,26 +1,23 @@
-# Sample data profile
+# 样本数据概况
 
-Source: `data/raw/脱敏数据2026.2.10.xlsx` (not committed, see [data/README.md](../data/README.md)).
-Figures below come from a first exploratory pass on 2026-11-26. Re-verify them once the ingest
-pipeline exists, because the cleaning rules will shift some counts.
+来源：`data/raw/脱敏数据2026.2.10.xlsx`（未提交，见 [data/README.md](../data/README.md)）。以下数字来自 2026-11-26 的首轮探索性分析。导入流水线完成后需要重新核对，因为清洗规则会使部分计数发生变化。
 
-## Shape
+## 结构
 
-One sheet, 5,950 data rows, three columns:
+一个工作表，5,950 行数据，三列：
 
-| Column | Meaning |
+| 列 | 含义 |
 |---|---|
-| `メールID` | Thread ID (2,872 distinct) |
-| `メールID枝番` | Message number within the thread, 1 to 12 |
-| `本文` | Message body (plain text, median about 410 chars, max about 5,900, 5 empty) |
+| `メールID` | 线程 ID（共 2,872 个） |
+| `メールID枝番` | 线程内的邮件序号，1 到 12 |
+| `本文` | 邮件正文（纯文本，中位数约 410 字符，最长约 5,900 字符，5 封为空） |
 
-Thread lengths: 1 message: 670 · 2: 1,705 · 3: 292 · 4: 130 · 5 or more: 75.
-Inquiry dates run from 2024-02 to 2024-09. App versions run from 1.0.x to 1.4.
+线程长度分布：1 封：670 · 2 封：1,705 · 3 封：292 · 4 封：130 · 5 封及以上：75。
+咨询日期为 2024-02 到 2024-09，App 版本为 1.0.x 到 1.4。
 
-## Message types
+## 邮件类型
 
-- **Message 1** is almost always the player's initial inquiry, submitted through an in-game form
-  with fixed fields:
+- **第 1 封**几乎都是玩家的首次咨询，通过游戏内表单提交，字段固定：
 
   ```
   アカウントID / プレイヤー名 / アプリバージョン / ご利用のOSバージョン / ご利用端末名 /
@@ -28,42 +25,28 @@ Inquiry dates run from 2024-02 to 2024-09. App versions run from 1.0.x to 1.4.
   お問い合わせ内容 / 添付ファイル
   ```
 
-  Many fields are blank. The free text is in `お問い合わせ内容`.
-- **Agent replies** (about 2,950) start with `いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。`
-- **Player follow-ups** (about 140) are later messages without that greeting, usually with the
-  previous mail quoted below.
-- 670 threads have no reply at all.
+  很多字段为空，自由文本在 `お問い合わせ内容` 中。
+- **客服回复**（约 2,950 封）以 `いつもご利用いただきありがとうございます。『ぽちゃガチョ！』サポート担当です。` 开头。
+- **玩家追问**（约 140 封）是后续邮件中不带上述问候语的那些，通常在下方引用了上一封邮件。
+- 有 670 个线程完全没有回复。
 
-## Inquiry categories (`お問い合わせ内容の種類`)
+## 咨询类别（`お問い合わせ内容の種類`）
 
-| Category | Messages | Meaning |
+| 类别 | 邮件数 | 含义 |
 |---|---|---|
-| 不具合について | 3,052 | Bug report |
-| アイテム購入時に問題が発生した | 867 | Problem when purchasing items |
-| ご意見・ご要望 | 807 | Feedback or requests |
-| データの引き継ぎについて | 191 | Data transfer between devices |
+| 不具合について | 3,052 | 故障反馈 |
+| アイテム購入時に問題が発生した | 867 | 购买道具时出现问题 |
+| ご意見・ご要望 | 807 | 意见或建议 |
+| データの引き継ぎについて | 191 | 跨设备数据迁移 |
 
-Platform (`ご利用環境`): iOS 2,969 · Google Play 1,948.
-These counts include the forms quoted inside replies, so they over-count threads.
+平台（`ご利用環境`）：iOS 2,969 · Google Play 1,948。
+这些计数包含了回复中引用的表单，因此按线程计会偏高。
 
-## Key findings
+## 关键发现
 
-1. **Replies are heavily templated.** After removing quoted text and the fixed greeting and closing,
-   the 2,951 agent replies reduce to 820 distinct bodies, and **the 50 most common cover 66%**.
-   This is the "small knowledge base": the main job is classifying the inquiry and retrieving the
-   right template, with an LLM adapting the wording.
-2. **Some templates only apply during one incident.** Examples: an App Store outage on
-   3/2 11:00–14:00 that broke purchases, a ranking-reward "構成エラー" error on 3/15, and an
-   ad-reward bug that was "still under investigation". These templates are only valid for a time
-   window and must not be sent for unrelated problems.
-3. **Replies follow a fixed structure:** greeting → apology (when appropriate) → answer → "if the
-   problem persists, please contact us again" → `今後とも『ぽちゃガチョ！』をよろしくお願いいたします。`
-   → `※本メール内容の無断掲載、無断複製、転送はお控えください。` Chinese agents most often get this
-   register wrong, so drafts should follow it.
-4. **Quoted history is noisy.** Follow-ups nest `>` quotes in several mail-client formats (Gmail
-   `2024年3月29日(金) 16:32 … <>:`, iPhone `2024/03/29 12:18、… のメール:`), sometimes collapsed onto
-   one line. These need stripping before analysis.
-5. **Some characters were lost.** Symbols such as `・`, `①②③` and some bullets were replaced by `?`
-   (for example `ご意見?ご要望`). The cleaning step should repair the common cases.
-6. **De-identification left gaps.** Account IDs, player names and email addresses are blank, and
-   sender addresses appear as `<>`.
+1. **回复高度模板化。** 去掉引用内容和固定的开头、结尾后，2,951 封客服回复只剩 820 种不同的正文，**最常见的 50 种覆盖了 66%**。这就是题目所说的“小型知识库”：核心工作是给咨询分类并检索出正确的模板，再由 LLM 调整措辞。
+2. **部分模板只适用于某次事故。** 例如：3/2 11:00–14:00 的 App Store 故障导致购买异常；3/15 排名奖励出现“構成エラー”错误；以及一个“仍在调查中”的广告奖励问题。这些模板只在特定时间窗口内有效，不能用于无关的问题。
+3. **回复遵循固定结构：** 问候 → 致歉（视情况）→ 答复 → “如果问题仍未解决，请再次联系我们” → `今後とも『ぽちゃガチョ！』をよろしくお願いいたします。` → `※本メール内容の無断掲載、無断複製、転送はお控えください。` 中文客服最容易在这类语体上出错，因此起草的回复应遵循这一结构。
+4. **引用的历史邮件很杂乱。** 玩家追问中嵌套了多种邮件客户端格式的 `>` 引用（Gmail 的 `2024年3月29日(金) 16:32 … <>:`、iPhone 的 `2024/03/29 12:18、… のメール:`），有时还被压缩成一行。分析前需要先去除。
+5. **部分字符丢失。** `・`、`①②③` 和一些项目符号被替换成了 `?`（例如 `ご意見?ご要望`）。清洗步骤应修复常见情况。
+6. **脱敏留下了空缺。** 账号 ID、玩家名和邮箱地址都是空的，发件人地址显示为 `<>`。

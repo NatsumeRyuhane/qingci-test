@@ -1,73 +1,58 @@
-# Decision log
+# 决策记录
 
-Short records of decisions that shape the project, newest last. Each entry says what was decided,
-why, and what it rules out. To change a decision, add a new entry that supersedes the old one;
-don't rewrite history. Discussion happens in issues or PRs, and each entry links to its source.
+记录影响项目走向的决策，按时间先后排列，最新的在最后。每条记录写明决定了什么、为什么、排除了什么。要修改某个决策，就新增一条记录取代旧的，不要改写历史。讨论在 issue 或 PR 中进行，每条记录都附上来源链接。
 
-Template:
+模板：
 
 ```
-## D-NNN: <title>
-- Date: YYYY-MM-DD · Status: accepted | superseded by D-NNN · Source: <issue/PR link>
-- Context: …
-- Decision: …
-- Consequences: …
+## D-NNN：<标题>
+- 日期：YYYY-MM-DD · 状态：已采纳 | 已被 D-NNN 取代 · 来源：<issue/PR 链接>
+- 背景：…
+- 决定：…
+- 影响：…
 ```
 
 ---
 
-## D-001: Agent copilot, not a fully automatic responder
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Context: The brief asks for "maximum automation, accuracy and iteration". Wrong answers on
-  purchases, refunds or lost accounts are costly. Agent replies in the sample are highly templated
-  (top 50 templates cover 66%, see [data.md](data.md)).
-- Decision: Build a copilot. It translates and summarises each inquiry into Chinese, classifies it,
-  retrieves templates and similar cases, and drafts a Japanese reply in the correct register with a
-  Chinese back-translation. Risk-based routing sends a case automatically only in narrow low-risk
-  categories. Everything else goes to a human for review or escalation.
-- Consequences: Agent edits are the training signal for iteration. Automation coverage grows by
-  widening the auto-send categories as the offline eval shows they are safe.
+## D-001：做客服坐席助手，而不是全自动回复
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 背景：题目要求“最大限度的回复自动化、精准、迭代”。在购买、退款或账号丢失这类问题上答错，代价很高。样本中的客服回复高度模板化（前 50 个模板覆盖 66%，见 [data.md](data.md)）。
+- 决定：做一个坐席助手。它把每封咨询翻译并摘要成中文、进行分类、检索模板和相似案例，并起草一封措辞得体的日语回复，附带中文回译。按风险分流：只有少数低风险类别会自动发送，其余一律交给人工审核或升级处理。
+- 影响：客服的修改是迭代优化的训练信号。随着离线评测证明某些类别足够安全，再逐步扩大自动发送的范围，以此提高自动化覆盖率。
 
-## D-002: Sample data is never committed; repository is private
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Context: The workbook is de-identified but still belongs to the client.
-- Decision: Keep raw and derived data out of git (`data/*` is ignored). The GitHub repository is
-  private until there is a reason to change that.
-- Consequences: Contributors obtain the data from the owner. Tests use small synthetic fixtures.
-  GitHub Free does not enforce branch protection on private repositories, so the branch rules in
-  AGENTS.md are binding by convention even where GitHub cannot enforce them.
+## D-002：样本数据永不提交，仓库设为私有
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 背景：样本表格虽已脱敏，但仍属于客户。
+- 决定：原始数据和派生数据都不进 git（`data/*` 已忽略）。在有充分理由之前，GitHub 仓库保持私有。
+- 影响：贡献者需要向仓库所有者索取数据，测试只使用小规模的合成测试数据。GitHub 免费版不会对私有仓库强制执行分支保护，因此即使 GitHub 无法强制，AGENTS.md 中的分支规则也作为约定必须遵守。
 
-## D-003: GitHub Issues and PRs are the task tracker
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Decision: All planned work is a GitHub issue. All changes land through PRs that reference an
-  issue. There is no `docs/TODO.md`. Agents read and update work with the `gh` CLI.
-- Consequences: The issue tracker is the source of truth for status. Docs describe how things are,
-  not what is left to do.
+## D-003：以 GitHub Issues 和 PR 作为任务跟踪工具
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 决定：所有计划中的工作都是一个 GitHub issue，所有改动都通过关联 issue 的 PR 合入。不设 `docs/TODO.md`。AI Agent 通过 `gh` CLI 读取和更新工作项。
+- 影响：进度以 issue 跟踪为准。文档只描述事物现在是什么样，不写还剩什么没做。
 
-## D-004: Tool-agnostic agent configuration
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Context: Contributors may use any AI coding agent, or none.
-- Decision: `AGENTS.md` is the single contributor guide. Shared skills live in `.agents/skills/`.
-  Tool-specific locations (for example `CLAUDE.md` and `.claude/skills`) are **symlinks** to these,
-  never copies. Symlinks are best-effort because they break on some Windows setups, and AGENTS.md
-  tells agents how to recover.
-- Consequences: There is one place to edit. A tool that can't follow symlinks reads the canonical
-  files directly.
+## D-004：不绑定特定工具的 Agent 配置
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 背景：贡献者可能使用任意一种 AI 编码 Agent，也可能不用。
+- 决定：`AGENTS.md` 是唯一的贡献指南，共享技能放在 `.agents/skills/`。各工具专用的位置（例如 `CLAUDE.md` 和 `.claude/skills`）都是指向它们的**符号链接**，绝不是副本。由于部分 Windows 环境不支持符号链接，这只是尽力而为，AGENTS.md 说明了如何处理。
+- 影响：只有一个地方需要编辑。无法使用符号链接的工具直接读取规范文件。
 
-## D-005: Secrets only via environment
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Decision: Secrets are read from environment variables, loaded locally from `.env` (ignored).
-  `.env.example` lists every variable, with no values.
+## D-005：密钥只通过环境变量提供
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 决定：密钥从环境变量读取，本地通过 `.env`（已忽略）加载。`.env.example` 列出全部变量，不含值。
 
-## D-006: Write for a maintainer without context
-- Date: 2026-11-26 · Status: accepted · Source: project kickoff
-- Context: This began as a solo assignment, but we treat it as a real project that someone else may
-  inspect and maintain.
-- Decision: Issues, PRs, docs and commit messages must make sense to someone who never saw the chat
-  sessions that produced them.
+## D-006：为没有上下文的维护者写作
+- 日期：2026-11-26 · 状态：已采纳 · 来源：项目启动
+- 背景：这原本是一道独立完成的测试题，但我们把它当作真实项目对待，假设之后会有人检查和维护它。
+- 决定：issue、PR、文档和提交信息，都要让从未看过产生它们的聊天会话的人也能看懂。
 
-## D-007: AI collaboration log deferred to the end of the test
-- Date: 2026-11-26 · Status: accepted · Source: owner review of the scaffolding
-- Decision: Don't create `docs/ai-log/` or collect session logs during development. Deliverable C
-  is assembled once, at the end of the test, as part of the submission package (issue #9).
-- Consequences: There is no log convention in the repo for now. #9 defines it when the time comes.
+## D-007：AI 协作日志推迟到测试结束时再整理
+- 日期：2026-11-26 · 状态：已采纳 · 来源：仓库所有者对脚手架的评审
+- 决定：开发期间不建立 `docs/ai-log/`，也不收集会话日志。交付物 C 在测试结束时作为提交材料（issue #9）的一部分统一整理。
+- 影响：仓库中暂时没有日志相关约定，届时由 #9 定义。
+
+## D-008：项目语言为简体中文
+- 日期：2026-11-26 · 状态：已采纳 · 来源：仓库所有者对脚手架的评审
+- 背景：其他开发者都是中文母语者，产品的使用者（客服人员）也是。
+- 决定：文档、Issue、PR、代码注释和评审回复使用简体中文。代码标识符、命令、路径、配置键名和业内通用的英文术语保持原样；日语数据和日语回复模板保持日语原文。提交信息和 PR 标题的 Conventional Commits `type`/`scope` 保持英文，描述和正文使用中文，因为 PR 标题会成为 squash 提交信息。
+- 影响：此前用英文写成的脚手架文档和 issue 已全部改写为中文。具体规则见 AGENTS.md 第 3 节。

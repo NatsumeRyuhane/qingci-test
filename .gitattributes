@@ -1,4 +1,4 @@
-# Normalize line endings so Windows and Unix checkouts produce identical diffs.
+# 统一换行符，让 Windows 和 Unix 检出产生一致的 diff。
 * text=auto eol=lf
 
 *.png binary

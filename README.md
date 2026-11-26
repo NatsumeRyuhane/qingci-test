@@ -1,75 +1,65 @@
-# qingci-test: Japanese support copilot for Chinese CS agents
+# qingci-test：面向中文客服的日语客服坐席助手
 
-A copilot that lets **Chinese-speaking customer-support agents** answer **Japanese players'** support
-emails for the mobile game 『ぽちゃガチョ！』 (Pochagacho!) quickly, accurately and in the correct
-Japanese business register. It also gets better as agents use it.
+一个客服坐席助手（Copilot），让**中文客服人员**能够快速、准确地回复手游『ぽちゃガチョ！』**日本玩家**的客服邮件，并使用得体的日语商务敬语。客服人员用得越多，它就越好用。
 
-> **Status:** scaffolding only. No application code yet. The development plan is tracked in
-> [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues). Start with the [roadmap (#1)](https://github.com/NatsumeRyuhane/qingci-test/issues/1).
+> **状态：** 目前只有项目脚手架，还没有应用代码。开发计划在 [GitHub Issues](https://github.com/NatsumeRyuhane/qingci-test/issues) 中跟踪，请从[路线图（#1）](https://github.com/NatsumeRyuhane/qingci-test/issues/1)开始看。
 
-## Background
+## 背景
 
-This started as a practical assignment (original brief, in Chinese: [docs/requirements.md](docs/requirements.md)):
+本项目源自一道实践测试题（原始题目：[docs/requirements.md](docs/requirements.md)）：
 
-- A game published in Japan has its customer support staffed from China.
-- **Goal:** overcome the language barrier and Japanese support etiquette, and use a small knowledge
-  base built from past support mail to make replies as **automated, accurate and continuously
-  improving** as possible.
-- **Input:** a de-identified sample of about 5,950 support emails in about 2,870 threads
-  ([docs/data.md](docs/data.md)).
-- **Deliverables:** (A) working source with a README and a screen recording, (B) a write-up of the
-  technical approach, (C) the log of AI-assisted development, which is the part weighted most heavily.
+- 一款在日本发行的游戏，客服由中国团队承担。
+- **目标：** 解决语言障碍和日本客服的语言习惯问题，并基于由历史客服邮件构成的小型知识库，让回复尽可能做到**自动化、精准、可持续迭代**。
+- **输入：** 一份脱敏样本，约 5,950 封客服邮件，约 2,870 个邮件线程（[docs/data.md](docs/data.md)）。
+- **交付物：** (A) 可运行的源代码，附 README 和运行录屏；(B) 技术方案复盘；(C) 与 AI 协作开发的交互日志，这是考察重点。
 
-We treat it as a real, long-lived project: everything a future maintainer needs is written down in
-this repository and its issues, not in anyone's chat history.
+我们把它当作一个真实、长期维护的项目来做：后续维护者需要的一切都写在本仓库和 issue 里，而不是留在某个人的聊天记录中。
 
-## Approach (planned)
+## 方案（规划中）
 
-**Agent copilot with a human in the loop**, not a fully automatic responder
-([why](docs/decisions.md#d-001-agent-copilot-not-a-fully-automatic-responder)).
+**人工参与审核的客服坐席助手**，而不是全自动回复（原因见 [docs/decisions.md](docs/decisions.md) 中的 D-001）。
 
 ```
-Japanese email ──► ingest & clean ──► analyse ─────────────► draft ──────────► route
-                                      · zh translation        · retrieve         · auto-send (low risk)
-                                      · summary & sentiment     templates and    · agent review
-                                      · category & fields       similar cases    · escalate
-                                                              · keigo reply
-                                                              · zh back-translation
-                                                                       │
-                       agent edits / approves ◄────────────────────────┘
-                                 │
-                                 └──► feedback improves the template KB, measured by the offline eval
+日语邮件 ──► 导入与清洗 ──► 分析 ──────────────► 起草 ────────────► 分流
+                            · 中文翻译            · 检索回复模板       · 自动发送（低风险）
+                            · 摘要与情绪          · 检索相似案例       · 人工审核
+                            · 分类与字段提取      · 生成敬语回复       · 升级处理
+                                                  · 中文回译
+                                                         │
+                       客服修改 / 批准 ◄─────────────────┘
+                              │
+                              └──► 反馈用于改进模板知识库，效果由离线评测衡量
 ```
 
-| Phase | Scope |
+| 阶段 | 范围 |
 |---|---|
-| **MVP** | (a) ingest and cleaning · (b) template knowledge base · (c) analysis, retrieval, drafting, routing · (d) offline evaluation and agent web UI |
-| **Next** | (e) REST API and A2A endpoint for integration · proposals: agentic loop core, identity-based access control |
+| **MVP** | (a) 导入与清洗 · (b) 模板知识库 · (c) 分析、检索、起草、分流 · (d) 离线评测与客服 Web 界面 |
+| **后续** | (e) 用于集成的 REST API 和 A2A 端点 · 提案：Agent 循环核心、基于身份的访问控制 |
 
-## Repository layout
+## 仓库结构
 
 ```
-AGENTS.md          Contributor guide for humans and AI agents (read this first)
-CLAUDE.md          → symlink to AGENTS.md (for Claude Code)
-.agents/skills/    Shared agent skills (tool-agnostic)
-.claude/skills     → symlink to .agents/skills (for Claude Code)
-data/              Local-only data directories (contents never committed)
-docs/              Requirements, data profile, decisions, proposals
+AGENTS.md          人类开发者与 AI Agent 共用的贡献指南（请先读）
+CLAUDE.md          → 指向 AGENTS.md 的符号链接（供 Claude Code 使用）
+.agents/skills/    共享的 Agent 技能（不绑定特定工具）
+.claude/skills     → 指向 .agents/skills 的符号链接（供 Claude Code 使用）
+data/              仅限本地的数据目录（内容永不提交）
+docs/              需求、数据概况、决策记录、设计提案
 ```
 
-## Getting started
+## 上手
 
-1. Clone the repo, then read [AGENTS.md](AGENTS.md).
-2. Get the sample workbook from the repository owner and put it in `data/raw/` ([data/README.md](data/README.md)).
-3. `cp .env.example .env` and fill in the values.
-4. Toolchain and run instructions arrive with the foundation issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2) (stack decision, skeleton and CI).
+1. 克隆仓库，然后阅读 [AGENTS.md](AGENTS.md)。
+2. 向仓库所有者索取样本数据表格，放到 `data/raw/`（见 [data/README.md](data/README.md)）。
+3. 执行 `cp .env.example .env` 并填写各项值。
+4. 工具链和运行说明将随基础建设 issue [#2](https://github.com/NatsumeRyuhane/qingci-test/issues/2)（技术栈选型、项目骨架、CI）一起补充。
 
-## Documentation
+## 文档
 
-| Document | Purpose |
+| 文档 | 用途 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Workflow, branch protection rules, conventions |
-| [docs/requirements.md](docs/requirements.md) | Original assignment brief (Chinese) |
-| [docs/data.md](docs/data.md) | Structure and findings for the sample data |
-| [docs/decisions.md](docs/decisions.md) | Decision log: what we chose and why |
-| [docs/proposals/](docs/proposals/) | Design proposals for post-MVP work |
+| [AGENTS.md](AGENTS.md) | 工作流程、分支保护规则、各项约定 |
+| [docs/requirements.md](docs/requirements.md) | 原始测试题说明 |
+| [docs/data.md](docs/data.md) | 样本数据的结构与发现 |
+| [docs/decisions.md](docs/decisions.md) | 决策记录：选了什么、为什么 |
+| [docs/proposals/](docs/proposals/) | MVP 之后工作的设计提案 |
