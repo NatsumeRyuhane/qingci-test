@@ -48,7 +48,7 @@ ROWS = [
     # 故意打乱顺序：导入要按 メールID 分组、按 メールID枝番 排序。
     SheetRow("10", 3, FOLLOW_UP),
     SheetRow("10", 1, FORM),
-    SheetRow("2", 1, "【合成データ】The mail system\n\nReason: 5.1.1\n"),
+    SheetRow("2", 1, "【合成データ】\nThe mail system\n\nReason: 5.1.1\n"),
     SheetRow("10", 2, AGENT),
 ]
 
