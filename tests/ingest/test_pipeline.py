@@ -158,10 +158,15 @@ STATUS_BOUNCE = (
     ("bodies", "roles", "status"),
     [
         pytest.param([FORM], "P", CaseStatus.OPEN, id="inquiry-unanswered"),
-        pytest.param([FORM, AGENT], "PA", CaseStatus.REPLIED, id="answered-no-follow-up"),
+        # 单独一个线程里的客服回复只有问候语这一弱证据，不能让案件离开待处理队列。
+        pytest.param([FORM, AGENT], "PA", CaseStatus.UNDETERMINED, id="answered-weak-evidence"),
         pytest.param([FORM, AGENT, FOLLOW_UP], "PAP", CaseStatus.OPEN, id="follow-up-unanswered"),
         pytest.param(
-            [FORM, AGENT, FOLLOW_UP, AGENT], "PAPA", CaseStatus.REPLIED, id="follow-up-answered"
+            # 最后一封与同一线程中之前的回复相同（可能是玩家粘贴回来的），不算强证据。
+            [FORM, AGENT, FOLLOW_UP, AGENT],
+            "PAPA",
+            CaseStatus.UNDETERMINED,
+            id="follow-up-answered-paste-back",
         ),
         pytest.param([STATUS_BOUNCE], "S", CaseStatus.UNDETERMINED, id="system-only"),
         pytest.param([FORM, STATUS_BOUNCE], "PS", CaseStatus.UNDETERMINED, id="ends-on-system"),

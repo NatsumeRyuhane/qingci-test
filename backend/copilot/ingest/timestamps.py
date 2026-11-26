@@ -175,8 +175,13 @@ def recover_sent_at(messages: list[_Msg]) -> tuple[dict[int, datetime], int]:
     第 k 封邮件的引导行给出它直接回复的那封邮件的发送时间，只采用 `quote_matches` 能确认的
     引用。两封邮件给同一封邮件推出不同的时间时，视为无法确定，不采用。
     """
+    return sent_times(quote_matches(messages))
+
+
+def sent_times(matches: list[QuoteMatch]) -> tuple[dict[int, datetime], int]:
+    """`recover_sent_at` 的后半部分：已经有了 `quote_matches` 的结果时直接用它，不重复计算。"""
     found: dict[int, set[datetime]] = {}
-    for match in quote_matches(messages):
+    for match in matches:
         found.setdefault(match.target_seq, set()).add(match.sent_at)
     times = {seq: next(iter(ts)) for seq, ts in found.items() if len(ts) == 1}
     return times, sum(1 for ts in found.values() if len(ts) > 1)
