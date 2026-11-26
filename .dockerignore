@@ -1,0 +1,34 @@
+# 镜像构建上下文是仓库根目录（deploy/compose.yaml）。
+# 样本数据和密钥绝不能进镜像（D-002、D-005），在运行时挂载或注入。
+data/
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+
+# 与构建无关、或会在镜像中重新生成的内容。
+.git/
+.github/
+.agents/
+.claude/
+agent-conversations/
+docs/
+tests/
+scripts/
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+frontend/dist/
+deploy/
+!deploy/nginx.conf
