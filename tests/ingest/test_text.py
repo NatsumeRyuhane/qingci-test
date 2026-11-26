@@ -103,6 +103,25 @@ def test_split_quote_compressed_into_one_line() -> None:
     assert result.quoted.startswith("2099/01/02")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "【合成データ】エラー <Error>:\n購入できません。",
+        "【合成データ】画面に <通信エラー> と出ます：\n再起動しても同じです。",
+    ],
+)
+def test_angle_bracketed_words_are_not_quote_headers(text: str) -> None:
+    assert split_quote(text).quoted == ""
+
+
+@pytest.mark.parametrize("address", ["<>", "<test@example.test>"])
+def test_generic_header_with_address(address: str) -> None:
+    text = f"【合成データ】了解\n\nLe 2 janv. 2099, Test {address} a écrit :\n> prev"
+    result = split_quote(text)
+    assert result.format is QuoteFormat.OTHER_LEADER
+    assert result.head == "【合成データ】了解\n\n"
+
+
 def test_split_quote_without_quote() -> None:
     result = split_quote("【合成データ】引用なし")
     assert result.format is None
