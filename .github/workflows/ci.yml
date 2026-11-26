@@ -17,13 +17,15 @@ concurrency:
 env:
   UV_VERSION: "0.12.14"
 
+# astral-sh/setup-uv 不发布浮动的主版本标签（如 v10），只能写完整版本号。
+
 jobs:
   backend:
     name: backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -83,7 +85,7 @@ jobs:
       - name: build
         run: pnpm build
       # 检查前端 API 类型与后端 OpenAPI 一致，需要后端环境
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -118,7 +120,7 @@ jobs:
       - if: steps.configured.outputs.ok == 'true'
         uses: actions/checkout@v7
       - if: steps.configured.outputs.ok == 'true'
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.4.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
