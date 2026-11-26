@@ -26,7 +26,8 @@
 保留：用户消息、Agent 回复、工具调用（含输入）及其结果（截断）。
 省略：模型思考过程、系统提示、运行时元数据、Write 写入的文件全文（已在仓库中）。
 隐去：邮箱地址、本地用户名和目录、scratchpad 路径、SSH 密钥信息，
-以及读取样本数据的命令的全部输出（见 data/README.md）。
+GitHub 风格的访问令牌，
+以及读取样本数据或其派生数据的命令的全部输出（见 data/README.md）。
 导出后仍需人工通读一遍再提交。
 """
 import html
@@ -40,11 +41,14 @@ MAX_OUTPUT_LINES = 40      # 工具结果最多保留的行数
 MAX_FIELD_CHARS = 4000     # 单个输入字段最多保留的字符数
 LOCAL_USER = os.path.basename(os.path.expanduser("~"))
 ORG_IDS: set[str] = set()  # 由 main() 预先扫描会话文件填充
-DATA_MARKERS = ("data.json", ".xlsx", "readx.py", "sharedStrings")  # 命中即视为读取了样本数据
+# 命中即视为读取了样本数据或由它派生的数据（导入结果 data/interim/、查看器的 threads.json、
+# 临时复制的 .jsonl），整段输出省略
+DATA_MARKERS = ("data.json", ".xlsx", "readx.py", "sharedStrings", "data/interim", ".jsonl", "threads.json")
 REDACTIONS = [
     "省略模型思考过程与系统提示",
     "隐去邮箱地址、本地用户名与目录、scratchpad 路径、SSH 密钥信息",
-    "读取样本数据的命令输出整段省略",
+    "读取样本数据或其派生数据（data/interim/、.jsonl、threads.json）的命令输出整段省略",
+    "隐去 GitHub 风格的访问令牌（如 CodeRabbit 链接中的 ghh_…）",
     f"工具结果最多保留 {MAX_OUTPUT_LINES} 行，单个输入字段最多 {MAX_FIELD_CHARS} 字符",
     "Write 工具写入的文件内容省略（以仓库中的文件为准）",
 ]
@@ -58,6 +62,8 @@ def redact(s: str) -> str:
     # 本地用户名也会出现在项目目录名（-Users-<user>-…）等处，统一隐去（区分大小写，不影响 GitHub 用户名）
     s = s.replace(LOCAL_USER, "<user>")
     s = re.sub(r"ssh-ed25519 [A-Za-z0-9+/=]+", "ssh-ed25519 [key redacted]", s)
+    # GitHub 风格的令牌，例如 CodeRabbit 评论链接中的 scope=ghh_…
+    s = re.sub(r"\bgh[hopsur]_[A-Za-z0-9_]{16,}", "[token redacted]", s)
     s = re.sub(r"SHA256:[A-Za-z0-9+/=]+", "SHA256:[redacted]", s)
     # 报错链接中的组织 ID：完整 ID 及其前 8 位（排查命令里可能只出现前缀）都隐去
     for org_id in ORG_IDS:
