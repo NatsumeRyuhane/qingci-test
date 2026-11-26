@@ -420,6 +420,18 @@ def test_read_sheet_rejects_unsupported_zip_version(tmp_path: Path) -> None:
         read_sheet(path)
 
 
+def test_zip64_locator_before_maximum_comment_is_detected(tmp_path: Path) -> None:
+    # 注释最长（65,535 字节）时，中央目录结束记录前 20 字节的 zip64 定位记录必须仍在检查范围内。
+    eocd = (
+        b"PK\x05\x06" + bytes(4) + (1).to_bytes(2, "little") * 2
+        + (46).to_bytes(4, "little") + bytes(4) + (0xFFFF).to_bytes(2, "little")
+    )  # fmt: skip
+    path = tmp_path / "synthetic.xlsx"
+    path.write_bytes(bytes(64) + b"PK\x06\x07" + bytes(16) + eocd + bytes(0xFFFF))
+    with pytest.raises(SheetFormatError, match="zip64"):
+        read_sheet(path)
+
+
 def test_read_sheet_rejects_broken_xml(tmp_path: Path) -> None:
     import zipfile
 

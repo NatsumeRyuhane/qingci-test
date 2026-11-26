@@ -93,6 +93,8 @@ def _as_id(value: object, row: int) -> str:
 _EOCD = b"PK\x05\x06"
 """zip 的中央目录结束记录（end of central directory）的签名。"""
 _ZIP64_LOCATOR = b"PK\x06\x07"
+_ZIP64_LOCATOR_SIZE = 20
+"""zip64 定位记录紧挨在中央目录结束记录之前，zipfile 会读取它并改用 zip64 的中央目录。"""
 _EOCD_SIZE = 22
 _MAX_COMMENT = 0xFFFF
 
@@ -104,7 +106,8 @@ def _check_archive_metadata(path: Path) -> None:
     if size > MAX_ARCHIVE_BYTES:
         raise SheetFormatError(f"表格文件共 {size} 字节，超过上限 {MAX_ARCHIVE_BYTES} 字节")
     with path.open("rb") as f:
-        tail_size = min(size, _EOCD_SIZE + _MAX_COMMENT)
+        # 多读 zip64 定位记录的长度：注释最长时，定位记录也一定在读到的范围内。
+        tail_size = min(size, _ZIP64_LOCATOR_SIZE + _EOCD_SIZE + _MAX_COMMENT)
         f.seek(size - tail_size)
         tail = f.read(tail_size)
     position = tail.rfind(_EOCD)
@@ -112,7 +115,8 @@ def _check_archive_metadata(path: Path) -> None:
         raise SheetFormatError("不是有效的 xlsx（zip）文件")
     entries = int.from_bytes(tail[position + 10 : position + 12], "little")
     directory_size = int.from_bytes(tail[position + 12 : position + 16], "little")
-    is_zip64 = position >= 20 and tail[position - 20 : position - 16] == _ZIP64_LOCATOR
+    locator = position - _ZIP64_LOCATOR_SIZE
+    is_zip64 = locator >= 0 and tail[locator : locator + 4] == _ZIP64_LOCATOR
     if is_zip64 or entries == 0xFFFF or directory_size == 0xFFFFFFFF:
         raise SheetFormatError("不支持 zip64 格式的表格")
     if entries > MAX_MEMBERS:
