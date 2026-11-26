@@ -24,10 +24,12 @@ from copilot.contracts.enums import (
     Route,
     SensitivityTag,
     Sentiment,
+    TimeStatus,
     Urgency,
 )
 from copilot.contracts.feedback import Feedback
 from copilot.contracts.template import PLACEHOLDER_PATTERN, ReplyTemplate, TemplateSlot
+from copilot.contracts.timepoint import TimeContext, TimePoint
 
 EXPORTED_MODELS: tuple[type[Contract], ...] = (
     Message,
@@ -69,6 +71,9 @@ __all__ = [
     "SimilarCaseRef",
     "TemplateRef",
     "TemplateSlot",
+    "TimeContext",
+    "TimePoint",
+    "TimeStatus",
     "Urgency",
     "is_valid_case_id",
     "message_id",

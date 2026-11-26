@@ -136,3 +136,14 @@ class FeedbackAction(StrEnum):
     """升级处理。"""
     REJECTED = "rejected"
     """草稿不可用。"""
+
+
+class TimeStatus(StrEnum):
+    """一个时间点的可信程度（提案 0003 §9）。"""
+
+    KNOWN = "known"
+    """已知：有确切的值，例如系统时间、表单中完整的日期和时间。"""
+    ESTIMATED = "estimated"
+    """估计：只知道一个区间，例如按线程 ID 相邻的已知时间推算，或表单中只有时刻没有日期。"""
+    UNAVAILABLE = "unavailable"
+    """没有：不知道，也不估计。没有就是没有，不能用相邻线程或常识猜测填补。"""
