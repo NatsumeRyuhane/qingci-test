@@ -50,6 +50,9 @@ class CaseStatus(StrEnum):
     """已升级，交由高级客服或主管处理。"""
     REPLIED = "replied"
     """已回复：线程以客服回复结束，之后没有玩家追问。玩家再次追问时回到 `open`。"""
+    NO_REPLY_NEEDED = "no_reply_needed"
+    """不需要回复：例如重复提交（对应的线程已回复）、只含系统邮件的线程。由 #6 的分析步骤
+    提议（`CaseAnalysis.no_reply`），是否自动生效见提案 0003 §8。"""
     UNDETERMINED = "undetermined"
     """待判断：线程以系统邮件或无法判断发送方的邮件结束，单看结构无法确定是否已结案，
     需要语义分析。例如客服回复后的退信可能是我们的回复没有发出去，也可能是玩家粘贴的内容
@@ -191,3 +194,14 @@ class PolicyKind(StrEnum):
     """草稿中不允许出现的承诺，例如退款、补偿、具体的修复日期。检查草稿正文。"""
     ESCALATION_TRIGGER = "escalation_trigger"
     """需要升级处理的情况，例如法律威胁。检查玩家邮件和分析得出的敏感标签。"""
+
+
+class NoReplyReason(StrEnum):
+    """不需要回复的原因（提案 0003 §8）。"""
+
+    DUPLICATE = "duplicate"
+    """重复提交：与另一个已回复或正在处理的线程是同一个咨询。"""
+    SYSTEM_MESSAGE = "system_message"
+    """线程只含系统邮件（退信、批量回复报告），不是咨询。"""
+    OTHER = "other"
+    """其他原因。永远不自动生效，交给人工确认。"""

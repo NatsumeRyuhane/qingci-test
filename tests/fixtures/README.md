@@ -17,7 +17,7 @@
 | `policy.json` | `Policy` | 不允许的承诺、升级触发条件 |
 | `glossary_entry.json` | `GlossaryEntry` | 带读音和说明的术语、最简单的术语 |
 | `notice.json` | `Notice` | 链接了事故模板的事故 |
-| `case_analysis.json` | `CaseAnalysis` | 对玩家追问的分析 |
+| `case_analysis.json` | `CaseAnalysis` | 对玩家追问的分析、提议不回复的重复提交 |
 | `draft.json` | `Draft` | 需要审核的草稿、自动发送的草稿 |
 | `feedback.json` | `Feedback` | 批准、修改、升级 |
 

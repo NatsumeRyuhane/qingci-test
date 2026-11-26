@@ -315,3 +315,33 @@ def test_fixture_cross_references() -> None:
         assert f"{analysis.case_id}:{analysis.message_seq}" in messages
     for draft in drafts.values():
         assert f"{draft.case_id}:{draft.message_seq}" in messages
+
+
+# --- 不回复 ---
+
+
+def test_no_reply_proposal_roundtrip() -> None:
+    analysis = load_models(CaseAnalysis, "case_analysis")[1]
+    assert analysis.no_reply is not None
+    assert analysis.no_reply.duplicate_of == "SYN-0003"
+
+
+@pytest.mark.parametrize(
+    "no_reply",
+    [
+        {"reason": "duplicate", "reason_zh": "重复"},
+        {"reason": "system_message", "reason_zh": "退信", "duplicate_of": "SYN-0003"},
+    ],
+    ids=["duplicate-without-target", "target-without-duplicate"],
+)
+def test_duplicate_of_goes_with_duplicate_reason(no_reply: dict[str, str]) -> None:
+    item = load_items("case_analysis")[1] | {"no_reply": no_reply}
+    with pytest.raises(ValidationError, match="duplicate_of"):
+        CaseAnalysis.model_validate(item)
+
+
+def test_case_is_not_its_own_duplicate() -> None:
+    item = load_items("case_analysis")[1]
+    item["no_reply"]["duplicate_of"] = item["case_id"]
+    with pytest.raises(ValidationError, match="自己的重复"):
+        CaseAnalysis.model_validate(item)

@@ -1,6 +1,6 @@
 """各工作线（#4–#8）共享的数据契约（#3）。实体说明见 docs/architecture.md。"""
 
-from copilot.contracts.analysis import CaseAnalysis
+from copilot.contracts.analysis import CaseAnalysis, NoReplyProposal
 from copilot.contracts.base import Contract, Document
 from copilot.contracts.case import (
     CASE_ID_CHARS,
@@ -21,6 +21,7 @@ from copilot.contracts.enums import (
     FeedbackAction,
     InquiryCategory,
     MessageRole,
+    NoReplyReason,
     NoticeKind,
     Platform,
     PolicyKind,
@@ -79,6 +80,8 @@ __all__ = [
     "Message",
     "MessageId",
     "MessageRole",
+    "NoReplyProposal",
+    "NoReplyReason",
     "Notice",
     "NoticeKind",
     "Platform",
