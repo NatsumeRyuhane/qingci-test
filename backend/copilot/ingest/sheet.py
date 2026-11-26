@@ -140,7 +140,14 @@ def read_sheet(path: Path) -> list[SheetRow]:
         return _read_sheet(path)
     except SheetFormatError:
         raise
-    except (zipfile.BadZipFile, ElementTree.ParseError, ValueError, KeyError, IndexError) as exc:
+    except (
+        zipfile.BadZipFile,
+        ElementTree.ParseError,
+        ValueError,
+        KeyError,
+        IndexError,
+        NotImplementedError,  # 不支持的 zip 版本或压缩方法
+    ) as exc:
         raise SheetFormatError(f"无法解析表格（{type(exc).__name__}）") from exc
 
 

@@ -409,6 +409,17 @@ def test_read_sheet_rejects_non_zip(tmp_path: Path) -> None:
         read_sheet(path)
 
 
+def test_read_sheet_rejects_unsupported_zip_version(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, FORM)], HEADER)
+    data = bytearray(path.read_bytes())
+    entry = data.find(b"PK\x01\x02")  # 第一个中央目录项
+    data[entry + 6 : entry + 8] = (99).to_bytes(2, "little")  # 解压所需版本 9.9
+    path.write_bytes(bytes(data))
+    with pytest.raises(SheetFormatError, match="NotImplementedError"):
+        read_sheet(path)
+
+
 def test_read_sheet_rejects_broken_xml(tmp_path: Path) -> None:
     import zipfile
 
