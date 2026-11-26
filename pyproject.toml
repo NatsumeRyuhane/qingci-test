@@ -5,9 +5,11 @@ description = "面向中文客服的日语客服坐席助手（后端）"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "fastapi>=0.165.0",
     "openai>=3.60.0",
     "pydantic-settings>=2.16.3",
+    "sqlalchemy>=2.1.9",
     "typer>=0.29.3",
     "uvicorn[standard]>=0.54.0",
 ]
