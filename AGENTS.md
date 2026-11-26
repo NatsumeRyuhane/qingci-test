@@ -153,6 +153,8 @@ README.md            项目概览与上手指南
 .agents/skills/      共享的 Agent 技能（.claude/skills → .agents/skills）
 .env.example         应用读取的全部环境变量，不含值
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
+agent-conversations/ 与 AI Agent 协作的会话记录（D-009）
+scripts/             辅助脚本（例如会话导出脚本）
 docs/
   requirements.md    原始测试题说明
   data.md            样本数据概况与发现

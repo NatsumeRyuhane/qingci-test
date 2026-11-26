@@ -44,6 +44,8 @@ CLAUDE.md          → 指向 AGENTS.md 的符号链接（供 Claude Code 使用
 .agents/skills/    共享的 Agent 技能（不绑定特定工具）
 .claude/skills     → 指向 .agents/skills 的符号链接（供 Claude Code 使用）
 data/              仅限本地的数据目录（内容永不提交）
+agent-conversations/  与 AI Agent 协作的会话记录
+scripts/           辅助脚本
 docs/              需求、数据概况、决策记录、设计提案
 ```
 
@@ -63,3 +65,4 @@ docs/              需求、数据概况、决策记录、设计提案
 | [docs/data.md](docs/data.md) | 样本数据的结构与发现 |
 | [docs/decisions.md](docs/decisions.md) | 决策记录：选了什么、为什么 |
 | [docs/proposals/](docs/proposals/) | MVP 之后工作的设计提案 |
+| [agent-conversations/](agent-conversations/) | 与 AI Agent 协作开发的会话记录 |
