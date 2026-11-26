@@ -70,6 +70,7 @@ pydantic==2.14.4 \
     --hash=sha256:7c19f1d46f8accf55a4617a6116e1ade64840870f397b846a2c53fb9019414ba
     # via
     #   fastapi
+    #   pydantic-settings
     #   typer
 pydantic-core==2.50.5 \
     --hash=sha256:004c784d4642bd1112a9fa9a022543aa17793fd32004f7e903ee97df2086bad4 \
@@ -93,6 +94,10 @@ pydantic-core==2.50.5 \
     --hash=sha256:baa107902f8e38011a5f79836d905eb6bfaac1d4b0bd09fc86509b711d0b09c8 \
     --hash=sha256:fa66340c6d3e08a276803812e7665312dfc75dd24eedfa8e09f18a0f8e3e0e8f
     # via pydantic
+pydantic-settings==2.16.3 \
+    --hash=sha256:10e36f616623ebb586c05ca3d3cd22927146869db413d4f14c20c514442a1337 \
+    --hash=sha256:d1db16a2d34006323a1b42c0640898da58adfbad7ec30baaa9e2b18aafc08999
+    # via copilot
 pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
     --hash=sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c
@@ -100,7 +105,9 @@ pygments==2.21.0 \
 python-dotenv==1.2.4 \
     --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc \
     --hash=sha256:f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0
-    # via uvicorn
+    # via
+    #   pydantic-settings
+    #   uvicorn
 pyyaml==6.0.4 \
     --hash=sha256:1088ad740f50c13178dad16fbc2fa1f634c791d42c7009fdb390e38e5b90b788 \
     --hash=sha256:131d11bd9b60d705a6388366d77ed67850995a4d2be85fe149785a257c17e531 \
@@ -139,6 +146,7 @@ typing-extensions==4.16.0 \
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
+    #   pydantic-settings
     #   starlette
     #   typing-inspection
 typing-inspection==0.4.5 \
@@ -147,6 +155,7 @@ typing-inspection==0.4.5 \
     # via
     #   fastapi
     #   pydantic
+    #   pydantic-settings
 uvicorn==0.54.0 \
     --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf \
     --hash=sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620
