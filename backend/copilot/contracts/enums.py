@@ -10,6 +10,8 @@ class MessageRole(StrEnum):
     """玩家（首次咨询或追问）。"""
     AGENT = "agent"
     """客服。样本中以固定问候语开头的邮件（见 docs/data.md）。"""
+    SYSTEM = "system"
+    """系统自动生成的邮件，例如退信和客服工具的批量回复报告。不是咨询，不需要回复。"""
     UNKNOWN = "unknown"
     """无法判断，例如正文为空。"""
 

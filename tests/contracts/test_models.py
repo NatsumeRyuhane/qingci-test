@@ -116,6 +116,24 @@ def test_message_id() -> None:
     assert "id" not in message.model_dump()
 
 
+def test_message_core_strips_greeting_and_closing() -> None:
+    agent = next(m for m in load_models(Message, "message") if m.greeting)
+    assert agent.core
+    assert not agent.core.startswith("いつもご利用")
+    assert "今後とも" not in agent.core
+    assert "core" not in agent.model_dump()
+    player = load_models(Message, "message")[0]
+    assert player.core == player.body.strip()
+
+
+@pytest.mark.parametrize("field", ["greeting", "closing"])
+def test_message_frame_must_be_part_of_body(field: str) -> None:
+    item = next(m for m in load_items("message") if m.get("greeting"))
+    item[field] = "【合成データ】本文にない文"
+    with pytest.raises(ValidationError, match=field):
+        Message.model_validate(item)
+
+
 # --- 校验规则 ---
 
 
