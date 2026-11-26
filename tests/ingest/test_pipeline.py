@@ -305,3 +305,10 @@ def test_cli_ingest_missing_input(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["ingest", "--input", str(tmp_path / "missing.xlsx")])
     assert result.exit_code == 1
     assert "找不到样本表格" in result.output
+
+
+def test_openpyxl_uses_defusedxml() -> None:
+    """表格的 XML 由 defusedxml 解析，防止实体扩展和外部实体（#18）。"""
+    import openpyxl.xml
+
+    assert openpyxl.xml.DEFUSEDXML
