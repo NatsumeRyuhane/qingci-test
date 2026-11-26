@@ -11,6 +11,13 @@ import openpyxl
 COLUMNS = ("メールID", "メールID枝番", "本文")
 
 # 表格可能来自外部，内容不可信（#18）。以下上限防止构造的文件耗尽时间和内存。
+MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
+"""xlsx 文件本身的大小上限。样本约 1.4 MB。"""
+MAX_MEMBERS = 1_000
+"""xlsx（zip）中的文件数上限。样本有 17 个。"""
+MAX_CENTRAL_DIRECTORY_BYTES = 1024 * 1024
+"""zip 中央目录（文件索引）的大小上限。Python 打开 zip 时会把整个中央目录读进内存并建立索引，
+所以必须在打开之前限制它。"""
 MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 """xlsx（zip）中所有文件解压后的总大小上限。样本表格解压后约 10 MB。"""
 MAX_ROWS = 1_048_576
@@ -83,8 +90,40 @@ def _as_id(value: object, row: int) -> str:
     return text
 
 
+_EOCD = b"PK\x05\x06"
+"""zip 的中央目录结束记录（end of central directory）的签名。"""
+_ZIP64_LOCATOR = b"PK\x06\x07"
+_EOCD_SIZE = 22
+_MAX_COMMENT = 0xFFFF
+
+
+def _check_archive_metadata(path: Path) -> None:
+    """在 `zipfile.ZipFile` 建立索引之前，直接读取中央目录结束记录，限制文件大小、文件数和
+    中央目录大小，防止包含海量空文件的压缩包耗尽内存。不支持 zip64（xlsx 用不到）。"""
+    size = path.stat().st_size
+    if size > MAX_ARCHIVE_BYTES:
+        raise SheetFormatError(f"表格文件共 {size} 字节，超过上限 {MAX_ARCHIVE_BYTES} 字节")
+    with path.open("rb") as f:
+        tail_size = min(size, _EOCD_SIZE + _MAX_COMMENT)
+        f.seek(size - tail_size)
+        tail = f.read(tail_size)
+    position = tail.rfind(_EOCD)
+    if position < 0 or len(tail) - position < _EOCD_SIZE:
+        raise SheetFormatError("不是有效的 xlsx（zip）文件")
+    entries = int.from_bytes(tail[position + 10 : position + 12], "little")
+    directory_size = int.from_bytes(tail[position + 12 : position + 16], "little")
+    is_zip64 = position >= 20 and tail[position - 20 : position - 16] == _ZIP64_LOCATOR
+    if is_zip64 or entries == 0xFFFF or directory_size == 0xFFFFFFFF:
+        raise SheetFormatError("不支持 zip64 格式的表格")
+    if entries > MAX_MEMBERS:
+        raise SheetFormatError(f"表格中有 {entries} 个文件，超过上限 {MAX_MEMBERS}")
+    if directory_size > MAX_CENTRAL_DIRECTORY_BYTES:
+        raise SheetFormatError(f"表格的文件索引超过 {MAX_CENTRAL_DIRECTORY_BYTES} 字节")
+
+
 def _check_archive(path: Path) -> None:
-    """打开前检查解压后的总大小，防止压缩炸弹。zip 头中声明的大小在解压时会被校验。"""
+    """打开前检查元数据和解压后的总大小，防止压缩炸弹。zip 头中声明的大小在解压时会被校验。"""
+    _check_archive_metadata(path)
     with zipfile.ZipFile(path) as archive:
         total = sum(info.file_size for info in archive.infolist())
     if total > MAX_UNCOMPRESSED_BYTES:

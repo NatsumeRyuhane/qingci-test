@@ -315,6 +315,55 @@ def test_read_sheet_rejects_archive_bomb(tmp_path: Path, monkeypatch: pytest.Mon
         read_sheet(path)
 
 
+def _many_member_zip(path: Path, members: int) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        for i in range(members):
+            archive.writestr(f"empty/{i}", b"")
+
+
+def test_read_sheet_rejects_too_many_members(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _many_member_zip(path, sheet_module.MAX_MEMBERS + 1)
+    with pytest.raises(SheetFormatError, match="个文件"):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_large_central_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _many_member_zip(path, 50)
+    monkeypatch.setattr(sheet_module, "MAX_CENTRAL_DIRECTORY_BYTES", 100)
+    with pytest.raises(SheetFormatError, match="文件索引"):
+        read_sheet(path)
+
+
+def test_metadata_is_checked_before_zipfile_builds_its_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+
+    path = tmp_path / "synthetic.xlsx"
+    _many_member_zip(path, sheet_module.MAX_MEMBERS + 1)
+
+    def fail(*_: object, **__: object) -> None:
+        raise AssertionError("ZipFile 不应在元数据检查之前被打开")
+
+    monkeypatch.setattr(zipfile, "ZipFile", fail)
+    with pytest.raises(SheetFormatError):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_oversized_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", 1, FORM)], HEADER)
+    monkeypatch.setattr(sheet_module, "MAX_ARCHIVE_BYTES", 100)
+    with pytest.raises(SheetFormatError, match="表格文件共"):
+        read_sheet(path)
+
+
 def test_read_sheet_stops_at_row_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "synthetic.xlsx"
     _write_xlsx(path, [("SYN", i, FORM) for i in range(1, 6)], HEADER)
@@ -356,7 +405,7 @@ def test_read_sheet_rejects_invalid_seq(tmp_path: Path, seq: object) -> None:
 def test_read_sheet_rejects_non_zip(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.xlsx"
     path.write_bytes(b"not a zip file")
-    with pytest.raises(SheetFormatError, match="BadZipFile"):
+    with pytest.raises(SheetFormatError, match="zip"):
         read_sheet(path)
 
 
