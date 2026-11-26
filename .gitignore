@@ -1,0 +1,53 @@
+# --- Secrets -----------------------------------------------------------------
+# Real values live in .env (never committed). .env.example lists the names.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Data --------------------------------------------------------------------
+# The sample data belongs to the client and is never committed. See data/README.md.
+data/raw/*
+data/interim/*
+data/processed/*
+!data/**/.gitkeep
+*.xlsx
+*.xls
+*.csv
+
+# --- Editors / OS ------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Agent tooling: local-only files ----------------------------------------
+# Shared agent config lives in AGENTS.md and .agents/. Per-user settings stay local.
+.claude/settings.local.json
+.claude/worktrees/
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- Node --------------------------------------------------------------------
+node_modules/
+.next/
+.turbo/
+
+# --- Runtime output ----------------------------------------------------------
+*.log
+*.sqlite
+*.sqlite3
+*.db
