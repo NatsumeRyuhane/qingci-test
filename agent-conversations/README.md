@@ -5,6 +5,7 @@
 | 文件 | 内容 |
 |---|---|
 | [2026-11-26-project-kickoff.json](2026-11-26-project-kickoff.json) | 项目启动：阅读题目与数据、确定坐席助手方案、搭建仓库脚手架、在 issue 中写出开发计划、改为中文、导出会话 |
+| [2026-11-26-foundation-stack.json](2026-11-26-foundation-stack.json) | 基础建设（#2）：仓库所有者评审技术栈（LLM 不绑定服务商、改用 React、存储预留迁移接口、测试策略、uv/pnpm 之外的备用路线），新开部署 issue #14 并调整 #1、#6、#8、#10；实现 D-010 与项目骨架、CI（PR #15）；`src/` 改名为 `backend/`；处理 CodeRabbit 的三条评审意见。会话开头是一次 `/clear`，之前的上下文不在本记录中 |
 
 ## 格式
 
