@@ -147,3 +147,25 @@ class TimeStatus(StrEnum):
     """估计：只知道一个区间，例如按线程 ID 相邻的已知时间推算，或表单中只有时刻没有日期。"""
     UNAVAILABLE = "unavailable"
     """没有：不知道，也不估计。没有就是没有，不能用相邻线程或常识猜测填补。"""
+
+
+class ReviewStatus(StrEnum):
+    """知识库条目的审核状态（提案 0003 §4）。"""
+
+    DRAFT = "draft"
+    """未审核。只作为客服的参考，不提供给模型，永远不会自动发送。"""
+    APPROVED = "approved"
+    """已由仓库所有者批准。只有已批准的条目会提供给模型。"""
+    RETIRED = "retired"
+    """已下线。最新版本为 `retired` 时，整个条目不再被选中。"""
+    NEEDS_REREVIEW = "needs_rereview"
+    """引用的政策或事实发生了变化，需要重新审核。重新审核前按未审核处理。"""
+
+
+class EntryOrigin(StrEnum):
+    """知识库条目的来源方式。"""
+
+    RECONSTRUCTED = "reconstructed"
+    """从历史数据中归纳，必须列出来源邮件。"""
+    MANUAL = "manual"
+    """人工录入，例如政策、公告和意图目录。"""

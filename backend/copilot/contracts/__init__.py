@@ -16,10 +16,12 @@ from copilot.contracts.draft import Draft, DraftCheck, SimilarCaseRef, TemplateR
 from copilot.contracts.enums import (
     CaseStatus,
     DraftCheckKind,
+    EntryOrigin,
     FeedbackAction,
     InquiryCategory,
     MessageRole,
     Platform,
+    ReviewStatus,
     RiskLevel,
     Route,
     SensitivityTag,
@@ -28,6 +30,7 @@ from copilot.contracts.enums import (
     Urgency,
 )
 from copilot.contracts.feedback import Feedback
+from copilot.contracts.knowledge import EntryId, KnowledgeEntry, current_version, select_valid
 from copilot.contracts.template import PLACEHOLDER_PATTERN, ReplyTemplate, TemplateSlot
 from copilot.contracts.timepoint import TimeContext, TimePoint
 
@@ -55,15 +58,19 @@ __all__ = [
     "Draft",
     "DraftCheck",
     "DraftCheckKind",
+    "EntryId",
+    "EntryOrigin",
     "Feedback",
     "FeedbackAction",
     "InquiryCategory",
     "InquiryForm",
+    "KnowledgeEntry",
     "Message",
     "MessageId",
     "MessageRole",
     "Platform",
     "ReplyTemplate",
+    "ReviewStatus",
     "RiskLevel",
     "Route",
     "SensitivityTag",
@@ -75,6 +82,8 @@ __all__ = [
     "TimePoint",
     "TimeStatus",
     "Urgency",
+    "current_version",
     "is_valid_case_id",
     "message_id",
+    "select_valid",
 ]
