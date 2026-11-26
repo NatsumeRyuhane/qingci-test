@@ -205,3 +205,29 @@ class NoReplyReason(StrEnum):
     """线程只含系统邮件（退信、批量回复报告），不是咨询。"""
     OTHER = "other"
     """其他原因。永远不自动生效，交给人工确认。"""
+
+
+class EntryType(StrEnum):
+    """知识库条目的类型，用于草稿的引用（`Citation`）。"""
+
+    TEMPLATE = "template"
+    """回复模板（`ReplyTemplate`）。"""
+    INTENT = "intent"
+    """意图（`Intent`）。"""
+    FACT = "fact"
+    """游戏事实（`Fact`）。"""
+    POLICY = "policy"
+    """政策（`Policy`）。"""
+    GLOSSARY = "glossary"
+    """术语表条目（`GlossaryEntry`）。"""
+    NOTICE = "notice"
+    """公告与事件（`Notice`）。"""
+
+
+class DraftMode(StrEnum):
+    """草稿的生成方式（提案 0003 §10）。#7 对比两种方式。"""
+
+    PIPELINE = "pipeline"
+    """固定流水线：分析 → 检索 → 起草 → 自检 → 分流，不调用工具。"""
+    PIPELINE_WITH_TOOLS = "pipeline_with_tools"
+    """流水线 + 工具：模型可以在有限步数内调用只读工具，失败时回退到固定流水线。"""

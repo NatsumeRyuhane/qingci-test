@@ -12,12 +12,21 @@ from copilot.contracts.case import (
     is_valid_case_id,
     message_id,
 )
-from copilot.contracts.draft import Draft, DraftCheck, SimilarCaseRef, TemplateRef
+from copilot.contracts.draft import (
+    Citation,
+    Draft,
+    DraftCheck,
+    SimilarCaseRef,
+    TemplateRef,
+    TraceStep,
+)
 from copilot.contracts.entries import Fact, GlossaryEntry, Intent, Notice, Policy
 from copilot.contracts.enums import (
     CaseStatus,
     DraftCheckKind,
+    DraftMode,
     EntryOrigin,
+    EntryType,
     FeedbackAction,
     InquiryCategory,
     MessageRole,
@@ -62,13 +71,16 @@ __all__ = [
     "CaseAnalysis",
     "CaseId",
     "CaseStatus",
+    "Citation",
     "Contract",
     "Document",
     "Draft",
     "DraftCheck",
     "DraftCheckKind",
+    "DraftMode",
     "EntryId",
     "EntryOrigin",
+    "EntryType",
     "Fact",
     "Feedback",
     "FeedbackAction",
@@ -99,6 +111,7 @@ __all__ = [
     "TimeContext",
     "TimePoint",
     "TimeStatus",
+    "TraceStep",
     "Urgency",
     "current_version",
     "is_valid_case_id",

@@ -37,6 +37,54 @@
       "route_reasons": [
         "涉及付费，需人工审核"
       ],
+      "citations": [
+        {
+          "entry_type": "template",
+          "entry_id": "purchase-not-delivered-ask-receipt",
+          "entry_version": 1,
+          "claim_zh": "请玩家提供购买时间和订单号。"
+        },
+        {
+          "entry_type": "fact",
+          "entry_id": "receipt-in-store-history",
+          "entry_version": 1,
+          "claim_zh": "订单号可以在商店的购买记录中查到。"
+        }
+      ],
+      "mode": "pipeline_with_tools",
+      "trace": [
+        {
+          "step": 1,
+          "tool": "search_facts",
+          "arguments": {
+            "query": "订单号 在哪里查"
+          },
+          "result_summary_zh": "找到 1 条事实：订单号可以在商店的购买记录中查到。"
+        },
+        {
+          "step": 2,
+          "tool": "read_thread",
+          "arguments": {
+            "case_id": "SYN-9999",
+            "seq": "1"
+          },
+          "error": "超出范围：只能读取当前案件。"
+        }
+      ],
+      "time_context": {
+        "now": {
+          "status": "known",
+          "value": "2024-03-11T12:00:00+09:00",
+          "basis_zh": "系统时间"
+        },
+        "problem_time": {
+          "status": "estimated",
+          "earliest": "2024-03-10T00:00:00+09:00",
+          "latest": "2024-03-11T00:00:00+09:00",
+          "time_of_day": "21:05:00+09:00",
+          "basis_zh": "玩家邮件（只有时刻）"
+        }
+      },
       "model": "fake-llm",
       "created_at": "2024-03-11T12:00:05+09:00"
     },

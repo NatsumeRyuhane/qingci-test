@@ -13,6 +13,7 @@ from copilot.contracts import (
     Contract,
     Document,
     Draft,
+    DraftMode,
     Fact,
     Feedback,
     GlossaryEntry,
@@ -308,6 +309,17 @@ def test_fixture_cross_references() -> None:
     ]:
         used = [entry.intent] if isinstance(entry, ReplyTemplate) else entry.intents
         assert set(used) <= intents, f"{entry.id} 引用了不存在的意图"
+    entries = {
+        "template": templates,
+        "intent": {(e.id, e.version) for e in load_models(Intent, "intent")},
+        "fact": {(e.id, e.version) for e in load_models(Fact, "fact")},
+        "policy": {(e.id, e.version) for e in load_models(Policy, "policy")},
+        "glossary": {(e.id, e.version) for e in load_models(GlossaryEntry, "glossary_entry")},
+        "notice": {(e.id, e.version) for e in load_models(Notice, "notice")},
+    }
+    for draft in drafts.values():
+        for citation in draft.citations:
+            assert (citation.entry_id, citation.entry_version) in entries[citation.entry_type]
     template_ids = {template_id for template_id, _ in templates}
     for notice in load_models(Notice, "notice"):
         assert set(notice.template_ids) <= template_ids
@@ -345,3 +357,44 @@ def test_case_is_not_its_own_duplicate() -> None:
     item["no_reply"]["duplicate_of"] = item["case_id"]
     with pytest.raises(ValidationError, match="自己的重复"):
         CaseAnalysis.model_validate(item)
+
+
+# --- 草稿的引用、轨迹与时间上下文 ---
+
+
+def test_draft_records_citations_trace_and_time() -> None:
+    draft = load_models(Draft, "draft")[0]
+    assert draft.mode is DraftMode.PIPELINE_WITH_TOOLS
+    assert [step.step for step in draft.trace] == [1, 2]
+    assert draft.trace[1].error  # 越权的调用被拒绝，并记录在轨迹中
+    assert draft.time_context is not None
+    assert draft.time_context.problem_time.time_of_day is not None
+
+
+def test_pipeline_draft_has_no_trace() -> None:
+    item = load_items("draft")[0] | {"mode": "pipeline"}
+    with pytest.raises(ValidationError, match="trace"):
+        Draft.model_validate(item)
+    item = load_items("draft")[1] | {"fallback_reason": "超出步数"}
+    with pytest.raises(ValidationError, match="fallback_reason"):
+        Draft.model_validate(item)
+
+
+def test_fallback_is_recorded_on_tool_drafts() -> None:
+    item = load_items("draft")[0] | {"fallback_reason": "超出步数，回退到固定流水线"}
+    assert Draft.model_validate(item).fallback_reason
+
+
+def test_trace_steps_are_consecutive() -> None:
+    item = load_items("draft")[0]
+    item["trace"][1]["step"] = 3
+    with pytest.raises(ValidationError, match="连续编号"):
+        Draft.model_validate(item)
+
+
+@pytest.mark.parametrize("tool", ["Search", "search facts", "../x", ""])
+def test_tool_name_is_restricted(tool: str) -> None:
+    item = load_items("draft")[0]
+    item["trace"][0]["tool"] = tool
+    with pytest.raises(ValidationError, match="tool"):
+        Draft.model_validate(item)

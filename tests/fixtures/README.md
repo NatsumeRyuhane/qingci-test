@@ -18,7 +18,7 @@
 | `glossary_entry.json` | `GlossaryEntry` | 带读音和说明的术语、最简单的术语 |
 | `notice.json` | `Notice` | 链接了事故模板的事故 |
 | `case_analysis.json` | `CaseAnalysis` | 对玩家追问的分析、提议不回复的重复提交 |
-| `draft.json` | `Draft` | 需要审核的草稿、自动发送的草稿 |
+| `draft.json` | `Draft` | 带引用、工具调用轨迹（含一次被拒绝的越权调用）和时间上下文的待审核草稿、自动发送的草稿 |
 | `feedback.json` | `Feedback` | 批准、修改、升级 |
 
 文件格式：
