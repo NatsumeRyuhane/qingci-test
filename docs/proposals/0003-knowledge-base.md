@@ -220,12 +220,16 @@
 
   ```python
   class ToolAction(Contract):
-      tool: Literal["search_facts", "search_similar_cases", "read_thread", "lookup_events", "glossary"]
-      args: dict[str, str]   # 每个工具有自己的参数模型，在执行前再校验一次
+      tool: Literal[
+          "search_facts", "search_similar_cases", "read_thread", "lookup_events", "glossary"
+      ]
+      args: dict[str, str]  # 每个工具有自己的参数模型，在执行前再校验一次
+
 
   class FinalAnswer(Contract):
       body_ja: str
-      citations: list[Citation]   # 草稿中的说法引用了哪些知识库条目（类型、id、version）
+      citations: list[Citation]  # 草稿中的说法引用了哪些知识库条目（类型、id、version）
+
 
   class Step(Contract):
       action: ToolAction | FinalAnswer
