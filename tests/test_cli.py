@@ -17,3 +17,11 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.output.strip() == __version__
+
+
+def test_openapi_outputs_spec() -> None:
+    import json
+
+    result = runner.invoke(app, ["openapi"])
+    assert result.exit_code == 0
+    assert "/v1/health" in json.loads(result.output)["paths"]

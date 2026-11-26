@@ -33,6 +33,16 @@ def serve(
     uvicorn.run("copilot.api:create_app", factory=True, host=host, port=port, reload=reload)
 
 
+@app.command()
+def openapi() -> None:
+    """输出 API 的 OpenAPI 规范（JSON）。前端据此生成类型，见 scripts/gen-api-types.sh。"""
+    import json
+
+    from copilot.api import create_app
+
+    typer.echo(json.dumps(create_app().openapi(), ensure_ascii=False, indent=2, sort_keys=True))
+
+
 @db_app.command("upgrade")
 def db_upgrade(
     revision: str = typer.Argument("head", help="目标版本，默认最新。"),
