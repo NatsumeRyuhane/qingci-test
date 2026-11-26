@@ -45,6 +45,11 @@ def looks_like_form(text: str) -> bool:
     return _CATEGORY_MARKER.search(text) is not None
 
 
+def first_field_line(text: str) -> int | None:
+    """第一个表单字段所在的行号（从 0 开始），没有表单字段时为 None。"""
+    return next((i for i, line in enumerate(text.split("\n")) if _FIELD_LINE.match(line)), None)
+
+
 def parse_fields(text: str) -> dict[str, str]:
     """解析字段，返回 {字段名: 值}。
 

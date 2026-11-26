@@ -4,7 +4,7 @@ import re
 from enum import StrEnum
 
 from copilot.contracts import MessageRole
-from copilot.ingest.form import looks_like_form
+from copilot.ingest.form import first_field_line, looks_like_form
 from copilot.ingest.text import CLOSING_MARK, has_greeting
 
 SYSTEM_PATTERN = re.compile(
@@ -15,6 +15,23 @@ SYSTEM_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 """退信和客服工具批量回复报告的特征。"""
+
+SYSTEM_SEARCH_LINES = 15
+"""只在正文开头这么多行内找系统邮件的特征。退信和报告的特征都在开头（样本中最多到第 15 行）。"""
+
+
+def _looks_like_system(body: str) -> bool:
+    """特征必须出现在开头，并且在第一个表单字段之前。
+
+    退信会附上原邮件（常常是表单），但退信说明总在前面；玩家在咨询内容里提到
+    `Mail Delivery Subsystem` 之类的文字时，它出现在表单字段之后，不算。
+    """
+    lines = body.split("\n")
+    limit = SYSTEM_SEARCH_LINES
+    field = first_field_line(body)
+    if field is not None:
+        limit = min(limit, field)
+    return SYSTEM_PATTERN.search("\n".join(lines[:limit])) is not None
 
 
 class RoleReason(StrEnum):
@@ -44,7 +61,7 @@ def detect_role(seq: int, raw_body: str, body: str) -> tuple[MessageRole, RoleRe
         return MessageRole.UNKNOWN, RoleReason.EMPTY
     if has_greeting(body):
         return MessageRole.AGENT, RoleReason.GREETING
-    if SYSTEM_PATTERN.search(body):
+    if _looks_like_system(body):
         return MessageRole.SYSTEM, RoleReason.SYSTEM
     if looks_like_form(body):
         return MessageRole.PLAYER, RoleReason.FORM

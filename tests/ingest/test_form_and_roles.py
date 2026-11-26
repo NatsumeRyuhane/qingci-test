@@ -160,3 +160,19 @@ def test_bounce_containing_a_form_is_system() -> None:
         + FORM
     )
     assert detect_role(1, body, body)[0] is MessageRole.SYSTEM
+
+
+def test_notification_text_inside_inquiry_is_not_system() -> None:
+    body = FORM.replace(
+        "【合成データ】一行目", "【合成データ】Mail Delivery Subsystem というメールが届きました"
+    )
+    assert detect_role(1, body, body) == (MessageRole.PLAYER, RoleReason.FORM)
+
+
+def test_notification_text_late_in_follow_up_is_not_system() -> None:
+    body = (
+        "【合成データ】\n"
+        + "まだ直りません。\n" * 20
+        + "Mail Delivery Subsystem から通知が来ました"
+    )
+    assert detect_role(2, body, body)[0] is MessageRole.PLAYER
