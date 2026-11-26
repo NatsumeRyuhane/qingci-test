@@ -12,6 +12,8 @@ data/raw/*
 data/interim/*
 data/processed/*
 data/logs/
+# deploy/manage.py 的数据库备份和部署记录
+data/deploy/
 !data/**/.gitkeep
 *.xlsx
 *.xls

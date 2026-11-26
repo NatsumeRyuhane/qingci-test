@@ -1,0 +1,4 @@
+# deploy/manage.py 的依赖，供不用 uv 的路线（deploy/manage.sh 会自动安装）。
+# 必须与 manage.py 开头 PEP 723 元数据中的 dependencies 完全一致，deploy/tests 会检查。
+questionary==2.1.1
+rich==15.0.0

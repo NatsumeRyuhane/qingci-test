@@ -32,6 +32,8 @@ line-length = 100
 target-version = "py312"
 # 后端包在 backend/ 下，告诉 ruff 的 import 排序 copilot 是第一方包。
 src = ["backend"]
+# deploy/ 的运维脚本在服务器自带的 Python 3 上运行（不一定是 3.12），按 3.9 检查语法。
+per-file-target-version = { "deploy/**/*.py" = "py39" }
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
