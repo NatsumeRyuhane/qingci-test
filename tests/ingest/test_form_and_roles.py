@@ -79,7 +79,23 @@ def test_attachment(value: str, expected: bool) -> None:
 
 def test_repeated_field_keeps_first() -> None:
     fields = parse_fields("アプリバージョン : 1.0\nアプリバージョン : 2.0")
-    assert fields["アプリバージョン"] == "1.0"
+    assert fields["アプリバージョン"] == "1.0\nアプリバージョン : 2.0"
+
+
+def test_field_like_lines_inside_content_are_kept() -> None:
+    text = (
+        "アプリバージョン : 9.9.9\nお問い合わせ内容 ：【合成データ】一行目\n"
+        "アプリバージョン : 1.0 から不具合があります\nご利用端末名 : 別の端末でも同じ\n最後の行\n"
+        "添付ファイル ："
+    )
+    fields = parse_fields(text)
+    assert fields["アプリバージョン"] == "9.9.9"
+    assert fields["お問い合わせ内容"] == (
+        "【合成データ】一行目\nアプリバージョン : 1.0 から不具合があります\n"
+        "ご利用端末名 : 別の端末でも同じ\n最後の行"
+    )
+    assert "ご利用端末名" not in fields
+    assert fields["添付ファイル"] == ""
 
 
 # --- 发送方 -------------------------------------------------------------------

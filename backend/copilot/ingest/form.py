@@ -50,17 +50,18 @@ def parse_fields(text: str) -> dict[str, str]:
 
     值可以跨行（直到下一个字段），去掉首尾空白；空值保留为空字符串。
 
-    同一字段出现多次时取第一次。字段之前的行（例如标题 `お問い合わせ`）忽略。
+    表单字段总是按 `FORM_KEYS` 的顺序出现，所以只有排在当前字段之后的字段名才开始新字段。
+    其他看起来像字段的行（例如玩家在咨询内容里写了 `アプリバージョン : 1.4`）是当前字段
+    的内容，原样保留。字段之前的行（例如标题 `お問い合わせ`）忽略。
     """
     fields: dict[str, list[str]] = {}
     current: list[str] | None = None
+    position = -1
     for line in text.split("\n"):
         match = _FIELD_LINE.match(line)
-        if match:
+        if match and FORM_KEYS.index(match[1]) > position:
             key, value = match.groups()
-            if key in fields:
-                current = None
-                continue
+            position = FORM_KEYS.index(key)
             current = fields[key] = [value]
         elif current is not None:
             current.append(line)
