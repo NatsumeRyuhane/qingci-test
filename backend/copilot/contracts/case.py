@@ -38,6 +38,10 @@ class Message(Contract):
     """去除引用的历史邮件、修复常见乱码后的正文。分析和检索都使用它。"""
     quoted: str = ""
     """从 `raw_body` 中去除的引用文本，没有引用时为空字符串。保留它用于核对清洗效果。"""
+    greeting: str = ""
+    """客服回复开头的固定问候语，是 `body` 的开头部分；其他邮件为空字符串。由 #4 拆出。"""
+    closing: str = ""
+    """客服回复结尾的固定结语和禁止转载声明，是 `body` 的结尾部分；其他邮件为空字符串。"""
     sent_at: AwareDatetime | None = None
     """发送时间，必须带时区。样本中大多没有，只能从后续邮件的引用头中推断。"""
 
@@ -45,6 +49,27 @@ class Message(Contract):
     def id(self) -> str:
         """邮件标识 `<thread_id>:<seq>`。不参与序列化。"""
         return message_id(self.thread_id, self.seq)
+
+    @property
+    def core(self) -> str:
+        """去掉 `greeting` 和 `closing` 后的正文，即客服回复中随案件变化的部分（#5 据此归纳模板）。
+        不参与序列化。"""
+        end = len(self.body) - len(self.closing)
+        return self.body[len(self.greeting) : end].strip()
+
+    @model_validator(mode="after")
+    def _check_frame(self) -> Self:
+        if not self.body.startswith(self.greeting):
+            raise ValueError(f"邮件 {self.id!r} 的 greeting 不是 body 的开头")
+        if not self.body.endswith(self.closing):
+            raise ValueError(f"邮件 {self.id!r} 的 closing 不是 body 的结尾")
+        if (
+            self.greeting
+            and self.closing
+            and len(self.greeting) + len(self.closing) > len(self.body)
+        ):
+            raise ValueError(f"邮件 {self.id!r} 的 greeting 和 closing 重叠")
+        return self
 
 
 class InquiryForm(Contract):
@@ -102,7 +127,7 @@ class Case(Document):
     def _check_messages(self) -> Self:
         for message in self.messages:
             if message.thread_id != self.id:
-                raise ValueError(f"邮件 {message.id} 的 thread_id 与案件 ID {self.id!r} 不一致")
+                raise ValueError(f"邮件 {message.id!r} 的 thread_id 与案件 ID {self.id!r} 不一致")
         seqs = [message.seq for message in self.messages]
         if any(a >= b for a, b in pairwise(seqs)):
             raise ValueError(f"邮件必须按 seq 严格递增排列，实际为 {seqs}")

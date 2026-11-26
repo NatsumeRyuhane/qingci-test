@@ -8,7 +8,7 @@
 
 | 文件 | 模型 | 覆盖的情况 |
 |---|---|---|
-| `message.json` | `Message` | 带表单的首次咨询、客服回复、带引用的玩家追问 |
+| `message.json` | `Message` | 带表单的首次咨询、拆出问候语和结尾的客服回复、带引用的玩家追问、系统退信 |
 | `inquiry_form.json` | `InquiryForm` | 字段齐全的表单、空表单 |
 | `case.json` | `Case` | 完整线程（含预留字段）、只有一封空邮件的最小案件、只有一封意见建议的案件（`draft.json` 中自动发送的草稿回复它） |
 | `reply_template.json` | `ReplyTemplate` | 带占位符的模板、限定事故期间的模板、允许自动发送的低风险模板 |
