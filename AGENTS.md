@@ -194,6 +194,7 @@ scripts/demo.sh                    # 本地演示：每次启动把演示数据�
 | `frontend` | 在 `frontend/` 中：`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm build`；在仓库根目录：`scripts/gen-api-types.sh --check` |
 | `frontend-npx` | 与 `frontend` 相同，但走备用路线：不装 uv 和 pnpm，用 venv 中的 `copilot` 和 `npx pnpm@10.34.5` |
 | `llm-live` | `uv run pytest -m live`：调用真实 LLM 端点，只用合成数据。本地需要在 `.env` 中配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_ANALYZE`；CI 中使用仓库 secret 和 variables，没有配置时跳过 |
+| `deploy` | 不装 uv，走 `deploy/manage.sh` 的 venv + pip 路线：`deploy/tests` 单元测试 · `docker compose -f deploy/compose.yaml config` · `deploy/manage.sh deploy`、`redeploy`（检查数据仍在）、`status`、`down`。本地需要 Docker，详见 [deploy/README.md](deploy/README.md) |
 
 备用路线下，除了 `scripts/export-requirements.sh --check`，以上检查都能在激活的 venv 中运行（`scripts/gen-api-types.sh` 会自动改用 venv 中的 `copilot` 和 `npx pnpm`）。`export-requirements.sh` 调用的是 `uv export`，所以必须有 uv。没有改动依赖时可以跳过它，由 CI 的 `backend` job 检查。
 
@@ -226,6 +227,7 @@ backend/copilot/     后端：api/（REST API）、contracts/（共享数据契�
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
 scripts/             辅助脚本（一键演示、导出 requirements、生成 API 类型、会话导出与 HTML 渲染）
+deploy/              部署：Dockerfile、compose.yaml、nginx.conf、运维脚本 manage.py（见 deploy/README.md）
 .github/workflows/   CI
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
 knowledge/           人工编写、不含客户原文的知识（意图、政策、公告、术语、风格指南），见 knowledge/README.md

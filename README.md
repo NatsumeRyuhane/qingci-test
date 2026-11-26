@@ -111,6 +111,7 @@ knowledge/         人工编写、不含客户原文的运营知识（意图、�
 tests/             后端单元、契约与对抗测试（只用合成数据）
 frontend/          前端（React + TypeScript），只通过 /v1 访问后端
 scripts/           辅助脚本（demo.sh 一键本地演示、导出锁定依赖、生成前端类型、会话导出与 HTML 渲染）
+deploy/            部署：docker compose 与运维脚本（见 deploy/README.md）
 data/              仅限本地的数据与数据库目录（内容永不提交）
 agent-conversations/  与 AI Agent 协作的原始会话记录、HTML 审阅器与工程实践导读（交付物 C）
 docs/              方案复盘、需求、数据概况、契约与防线、评测基线、决策记录、设计提案
@@ -195,6 +196,8 @@ uv run pytest
   - **模拟邮箱**（`http://localhost:5173/#sim`）与**指标**（`#metrics`）：独立页面，可与工作台并排摆放。在模拟邮箱投递来信（内置 26 封合成示例，含格式异常和恶意提示注入来信）后，案件立即出现在工作台；批准或自动发送（`WORKBENCH_AUTO_SEND`）的回复只进入发件箱，**不会真正发出任何邮件**。
 
 完整检查命令与开发规范见 [AGENTS.md](AGENTS.md) 第 8 节。
+
+部署到服务器（只需要 Docker 和 Python 3）：见[部署指南](deploy/README.md)。
 
 ## 文档
 
