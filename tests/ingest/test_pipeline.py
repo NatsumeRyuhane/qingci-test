@@ -178,6 +178,13 @@ def test_numeric_ids_with_same_value_sort_by_spelling() -> None:
     assert forward == backward == ["01", "1", "SYN"]
 
 
+def test_thread_order_handles_unusual_ids() -> None:
+    long_id = "9" * 5000  # 超过 Python 整数与字符串转换的默认位数上限
+    rows = [SheetRow(i, 1, FORM) for i in ["²", "10", long_id, "9", "１", "SYN"]]
+    ids = [c.id for c in build_cases(rows)[0]]
+    assert ids == ["9", "10", long_id, "SYN", "²", "１"]
+
+
 def test_duplicate_seq_is_rejected() -> None:
     with pytest.raises(SheetFormatError, match="重复"):
         build_cases([SheetRow("1", 1, FORM), SheetRow("1", 1, AGENT)])

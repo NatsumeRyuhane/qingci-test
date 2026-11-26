@@ -172,10 +172,17 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
     return case
 
 
-def _thread_order(thread_id: str) -> tuple[int, int, str]:
-    """数字 ID 按数值排在前面，其他 ID 按字符串排在后面。数值相同（`1` 和 `01`）时按字符串区分，
-    所以顺序只取决于 ID 本身，与输入顺序无关。"""
-    return (0, int(thread_id), thread_id) if thread_id.isdigit() else (1, 0, thread_id)
+def _thread_order(thread_id: str) -> tuple[int, int, str, str]:
+    """ASCII 数字 ID 按数值排在前面，其他 ID 按字符串排在后面。
+
+    数值比较不调用 `int()`：先比去掉前导零后的位数，再比字符串，所以 `²` 这类 `int()`
+    不接受的字符、以及超过 Python 整数转换位数上限的长 ID 都不会出错。数值相同（`1` 和
+    `01`）时按原字符串区分，顺序只取决于 ID 本身，与输入顺序无关。
+    """
+    if thread_id.isascii() and thread_id.isdecimal():
+        digits = thread_id.lstrip("0") or "0"
+        return (0, len(digits), digits, thread_id)
+    return (1, 0, "", thread_id)
 
 
 def build_cases(rows: Iterable[SheetRow]) -> tuple[list[Case], IngestStats]:
