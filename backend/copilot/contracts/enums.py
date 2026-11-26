@@ -49,7 +49,11 @@ class CaseStatus(StrEnum):
     ESCALATED = "escalated"
     """已升级，交由高级客服或主管处理。"""
     REPLIED = "replied"
-    """已回复。玩家再次追问时回到 `open`。"""
+    """已回复：线程以客服回复结束，之后没有玩家追问。玩家再次追问时回到 `open`。"""
+    UNDETERMINED = "undetermined"
+    """待判断：线程以系统邮件或无法判断发送方的邮件结束，单看结构无法确定是否已结案，
+    需要语义分析。例如客服回复后的退信可能是我们的回复没有发出去，也可能是玩家粘贴的内容
+    或伪装成系统邮件的输入。"""
 
 
 class SensitivityTag(StrEnum):
