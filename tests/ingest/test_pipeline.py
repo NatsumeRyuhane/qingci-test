@@ -307,6 +307,47 @@ def test_cli_ingest_missing_input(tmp_path: Path) -> None:
     assert "找不到样本表格" in result.output
 
 
+@pytest.mark.parametrize("seq", [0, -1, "0", "1" * 19])
+def test_read_sheet_rejects_invalid_seq(tmp_path: Path, seq: object) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    _write_xlsx(path, [("SYN", seq, FORM)], HEADER)
+    with pytest.raises(SheetFormatError):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_non_zip(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.xlsx"
+    path.write_bytes(b"not a zip file")
+    with pytest.raises(SheetFormatError, match="BadZipFile"):
+        read_sheet(path)
+
+
+def test_read_sheet_rejects_broken_xml(tmp_path: Path) -> None:
+    import zipfile
+
+    source, broken = tmp_path / "synthetic.xlsx", tmp_path / "broken.xlsx"
+    _write_xlsx(source, [("SYN", 1, FORM)], HEADER)
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(broken, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                data = data[: len(data) // 2]  # 截断成不完整的 XML
+            dst.writestr(info, data)
+    with pytest.raises(SheetFormatError, match="无法解析表格"):
+        read_sheet(broken)
+
+
+def test_cli_reports_format_error_without_traceback(tmp_path: Path) -> None:
+    source = tmp_path / "synthetic.xlsx"
+    _write_xlsx(source, [("SYN", 0, FORM)], HEADER)
+    result = CliRunner().invoke(
+        app, ["ingest", "--input", str(source), "--out", str(tmp_path / "o")]
+    )
+    assert result.exit_code == 1
+    assert "表格格式错误" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_openpyxl_uses_defusedxml() -> None:
     """表格的 XML 由 defusedxml 解析，防止实体扩展和外部实体（#18）。"""
     import openpyxl.xml

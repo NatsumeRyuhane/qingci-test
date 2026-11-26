@@ -4,6 +4,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree
 
 import openpyxl
 
@@ -31,8 +32,9 @@ class SheetRow:
     body: str
 
 
-_INT_TEXT = re.compile(r"[+-]?\d+(?:\.0*)?")
-"""文本形式的整数，允许 `3.0` 这样的写法。"""
+_INT_TEXT = re.compile(r"[+-]?[0-9]{1,18}(?:\.0*)?")
+"""文本形式的整数，允许 `3.0` 这样的写法。最多 18 位 ASCII 数字，
+远低于 Python 整数与字符串转换的位数上限。"""
 
 
 def _as_int(value: object, what: str, row: int) -> int:
@@ -70,10 +72,25 @@ def _check_archive(path: Path) -> None:
 
 
 def read_sheet(path: Path) -> list[SheetRow]:
-    """读取第一个工作表的前 3 列。跳过完全为空的行；正文为空的单元格读作空字符串。"""
+    """读取第一个工作表的前 3 列。跳过完全为空的行；正文为空的单元格读作空字符串。
+
+    任何格式问题（包括损坏的 zip 或 XML、被 defusedxml 拒绝的实体）都报告为
+    `SheetFormatError`，而不是让原始异常中止导入。错误信息只包含异常类型，不包含单元格内容。
+    """
+    try:
+        return _read_sheet(path)
+    except SheetFormatError:
+        raise
+    except (zipfile.BadZipFile, ElementTree.ParseError, ValueError, KeyError, IndexError) as exc:
+        raise SheetFormatError(f"无法解析表格（{type(exc).__name__}）") from exc
+
+
+def _read_sheet(path: Path) -> list[SheetRow]:
     _check_archive(path)
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
+        if not workbook.worksheets:
+            raise SheetFormatError("表格中没有工作表")
         sheet = workbook.worksheets[0]
         # 只读需要的 3 列：工作表声明的尺寸不可信，否则每行都会被补齐到声明的列数。
         rows = sheet.iter_rows(max_col=len(COLUMNS), values_only=True)
@@ -91,10 +108,13 @@ def read_sheet(path: Path) -> list[SheetRow]:
                 continue
             if thread_id is None or seq is None:
                 raise SheetFormatError(f"第 {index} 行缺少 メールID 或 メールID枝番")
+            number = _as_int(seq, "メールID枝番", index)
+            if number < 1:
+                raise SheetFormatError(f"第 {index} 行的 メールID枝番 必须从 1 开始")
             result.append(
                 SheetRow(
                     thread_id=_as_id(thread_id, index),
-                    seq=_as_int(seq, "メールID枝番", index),
+                    seq=number,
                     body="" if body is None else str(body),
                 )
             )
