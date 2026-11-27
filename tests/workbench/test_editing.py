@@ -34,6 +34,7 @@ def test_translate_reply_uses_fixed_phrases_and_treats_chinese_as_data(guide: St
     assert result == "訳文"
     system, user = fake.calls[0].messages
     assert guide.closing.ja in system["content"] and guide.notice.ja in system["content"]
+    assert "段落一一对应" in system["content"]
     assert user["content"].startswith("<reply_zh>")
     assert "</reply_zh>" not in user["content"].removesuffix("</reply_zh>")  # 伪造的结束标记已转义
 
