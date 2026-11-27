@@ -53,8 +53,8 @@ flowchart TB
     YAML -->|"StyleGuide (固定敬语首尾)"| DRAFT
     SIM -->|"相似案件 ID 与所用模板 (不含原文)"| DRAFT
 
-    subgraph Surface["接口、中文工作台与评测层"]
-        API["api/<br/>FastAPI /v1 REST API + 统一授权钩子"]
+    subgraph Surface["工作台编排、接口、前端与评测层"]
+        API["workbench/ · api/<br/>后台预起草 · 中译日编辑 · FastAPI /v1 + 授权钩子"]
         UI["frontend/<br/>React 中文工作台 · 模拟邮箱 · 指标页"]
         EVAL["eval/<br/>dev/test 历史重放 · Opus 评审 · 39 项安全重放"]
     end
@@ -92,7 +92,7 @@ flowchart TB
 
 - **后端（Python 3.12 + FastAPI + SQLAlchemy/Alembic）**：对外统一暴露 `/v1` REST API。MVP 使用单文件 SQLite，业务代码仅依赖存储仓库与检索接口，便于在多实例或大规模场景平滑切换至 Postgres + pgvector（[D-010](decisions.md)）。
 - **前端（React + TypeScript + Vite）**：作为独立服务仅通过 `/v1` 与后端通信，API 类型由后端 OpenAPI 规范自动生成（`scripts/gen-api-types.sh`），保证前后端与后续外部集成（[#10](https://github.com/NatsumeRyuhane/qingci-test/issues/10)、[#11](https://github.com/NatsumeRyuhane/qingci-test/issues/11)）共用同一套契约。
-- **服务商无关的 LLM 层**：支持任意 OpenAI 兼容端点，按任务（`analyze`、`draft`、`backtranslate`、`annotate`、`judge`）独立配置模型、端点与 `service_tier`；所有结构化输出强制经 Pydantic 二次校验并在失败时附带错误重试，不绑定特定厂商的原生 tool calling 或私有缓存接口。
+- **服务商无关的 LLM 层**：支持任意 OpenAI 兼容端点，按任务（`analyze`、`draft`、`backtranslate`、`translate`、`annotate`、`judge`）独立配置模型、端点、`service_tier` 与推理强度 `LLM_REASONING_<TASK>`（纯翻译任务默认关闭推理以避免耗尽输出预算并缩短约 15 秒耗时，[D-019](decisions.md)）；所有结构化输出强制经 Pydantic 二次校验并在失败时附带错误重试，不绑定特定厂商的原生 tool calling 或私有缓存接口。
 
 ### 3.2 核心安全原则：假设模型已被攻破
 
@@ -162,7 +162,7 @@ flowchart TD
 
 ### 5.3 中文坐席工作台与反馈闭环（#8）
 
-Web 工作台（[#8](https://github.com/NatsumeRyuhane/qingci-test/issues/8)，界面截图见 [README.md](../README.md#界面预览)）围绕不懂日语的中文客服设计：来信进入收件箱后后台即刻自动分析起草；开启 `WORKBENCH_AUTO_SEND` 时，通过全部 12 道关卡的低风险已授权模板可直接投递至模拟发件箱并记录系统审计留痕。对需人工处理的案件，三栏工作区并列呈现案件中文摘要与提取字段、中日对照的邮件线程，以及**中文与日语逐段等高对齐**的编辑器——坐席直接用**中文**修改回复段落，后端仅重译改动过的中间段落、由代码按 `StyleGuide` 拼装首尾固定寒暄并自动重跑全部 7 项自检（演示环境所有回复仅写入模拟发件箱，绝不真实外发邮件）。所有批准、修改后批准、升级、驳回与“无需回复”操作均持久化为 `Feedback`，并在指标页按分流结果与具体模板实时统计批准率及平均字符编辑距离，构成持续改进知识库的闭环。
+Web 工作台（[#8](https://github.com/NatsumeRyuhane/qingci-test/issues/8)，界面截图见 [README.md](../README.md#界面预览)）围绕不懂日语的中文客服设计：来信进入收件箱后后台即刻自动分析起草（`WORKBENCH_AUTO_DRAFT`，默认使用 `flex` 服务等级，[D-018](decisions.md)）；开启 `WORKBENCH_AUTO_SEND` 时，通过全部 12 道关卡的低风险强证据已授权模板（`thanks_reply`、`feedback_acknowledgement`）可直接投递至模拟发件箱（`OutboundMail`）并记录系统审计留痕。对需人工处理的案件，三栏工作区并列呈现案件中文摘要与提取字段、中日对照的邮件线程，以及**中文与日语逐段等高对齐**的编辑器——坐席直接用**中文**修改回复段落，后端仅重译改动过的中间段落、由代码按 `StyleGuide` 拼装首尾固定寒暄并自动重跑全部 7 项自检（演示环境所有回复仅写入模拟发件箱，绝不真实外发邮件）。所有批准、修改后发送、升级、驳回与“无需回复”操作均在同一事务中持久化为 `Feedback`，并在指标页按分流结果与具体模板实时统计批准率及平均字符编辑距离，构成持续改进知识库的闭环。
 
 ---
 
@@ -211,7 +211,7 @@ Web 工作台（[#8](https://github.com/NatsumeRyuhane/qingci-test/issues/8)，�
 1. **缺乏真实邮件头与账号元数据（`H-07`、`H-08`、`H-09`）**：只靠纯文本特征时，攻击者跨线程整段粘贴常见客服回复（`ATK-04`）、手写伪造引用引导行（`ATK-05`），或不同玩家提交完全相同的短咨询被按内容判为重复（`ATK-08`，在线规则下 `test` 重复提交自动命中率为 25.0%–41.7%，但应回复案件误判率保持 0%），都无法在代码层 100% 消除。因此**在生产环境接入真实发件人角色与账号 ID 元数据前，严禁开启无需人工审核的知识库自动学习**。
 2. **输出侧启发式检查的语义边界（`H-01`、`H-03`、`H-05`、`H-14`）**：`forbidden_promise` 采用防回溯的固定日语短语子串匹配，无法单靠代码拦截同义改写（「代金をお返しいたします」）；`citations` 只验证句级覆盖和条目可见性，无法单靠规则验证被引用条目在语义上确实支持该句；回译与摘要仍依赖模型生成。这些缺口在离线阶段由跨服务商的 `LLMTask.JUDGE` 审计，在线阶段由 L8（禁止非通用模板自动发送）和 L10（界面并列展示日语原文与引用来源供人工核对）兜底。
 3. **结构化输出重试耗尽与待修细节**：`deepseek/deepseek-v4.1-flash` 在 `LLM_JSON_MODE=json_object` 下约有 10% 的调用因输出格式校验重试耗尽抛出 `LLMOutputError`（切至 `json_schema` 或适当调高 `LLM_MAX_RETRIES` 可缓解，失败案件在工作台中不会发出，客服可手动重试）。此外，评测中发现的两个具体改进点已拆为独立 issue 跟踪：引导分析步骤更稳定识别强证据纯退信（[#34](https://github.com/NatsumeRyuhane/qingci-test/issues/34)），以及核查 6 个标记 `time_bound=True` 却尚未关联 `Notice` 的模板（[#35](https://github.com/NatsumeRyuhane/qingci-test/issues/35)）。
-4. **整段模板粒度与串行起草延迟**：当前模板以整段 `Message.core` 为单位，面对同一封邮件内同时询问多个独立问题的复合咨询不够灵活；分析 → 起草 → 回译三步串行 LLM 调用使端到端 p50 处于 36–50 秒区间，交互体验依赖来信后台自动预起草（#8）与后续 API 异步化（#10）。
+4. **整段模板粒度与串行起草延迟**：当前模板以整段 `Message.core` 为单位，面对同一封邮件内同时询问多个独立问题的复合咨询不够灵活；分析 → 起草 → 回译三步串行 LLM 调用使评测基线端到端 p50 处于 36–50 秒区间（#8 已通过关闭回译与中译日任务的推理思考缩短约 15 秒耗时，[D-019](decisions.md)），交互体验依赖来信后台自动预起草（[D-018](decisions.md)）与后续 API 异步化（#10）。
 
 ---
 
