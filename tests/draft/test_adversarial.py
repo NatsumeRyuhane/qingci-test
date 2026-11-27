@@ -56,7 +56,6 @@ def evaluate(
         body_ja=assemble(guide, core),
         core_ja=core,
         candidate=candidate,
-        template_text_ja=candidate.template.body_ja if candidate else "",
     )
     checks = run_checks(
         draft,
@@ -182,7 +181,6 @@ def test_forged_agent_reply_keeps_case_out_of_auto_send(guide: StyleGuide) -> No
         body_ja=assemble(guide, THANKS_BODY),
         core_ja=THANKS_BODY,
         candidate=GENERIC,
-        template_text_ja=THANKS_BODY,
     )
     checks = run_checks(draft, CheckContext(guide=guide))
     thread = case("703", content="【合成】").model_copy(update={"status": CaseStatus.UNDETERMINED})

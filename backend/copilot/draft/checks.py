@@ -5,15 +5,23 @@
 
     问候 →（致歉）→ 答复 →（请再次联系）→ 结语 → 禁止转载声明
 
-**模板原文与新增文字分开检查。** 已批准的模板正文（填入占位符后）是所有者审核过的措辞，
-其中出现的政策短语（例如事故公告中写明已发放的补偿）不算模型做出的承诺；模型在模板之外
-新增的文字（`added_text`）才按政策、链接、其他案件的信息检查。模型改写了模板原文时，
-整段答复都按新增文字处理，结果只会更严格。
+**模板原文与新增文字分开检查。** 已批准的模板正文是所有者审核过的措辞，其中出现的政策
+短语（例如事故公告中写明已发放的补偿）不算模型做出的承诺。只有模板的**原文措辞**可以豁免：
+
+- 模型在模板之外新增的文字（`added_text`）按政策、链接、其他案件的信息检查，新增的句子
+  还要检查语体和引用；
+- 模型填入占位符的值同样是不可信的文字（`untrusted_text`），按政策、链接、其他案件的信息
+  检查。它们来自玩家的咨询，不需要知识库的引用；
+- 模型改写了模板原文时，整段答复都按新增文字处理，结果只会更严格。
+
+**引用按整句对应。** 一条引用覆盖的是与它的 `sentence_ja` 规范化后完全相同的句子，不按子串
+匹配，否则一个标点或一个共同的词就能“覆盖”另一句话。不需要引用的只有代码确认的“索要信息”
+句式（`is_info_request`），模型不能自己声明哪句话不需要引用。
 """
 
 import re
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from copilot.contracts import (
@@ -41,6 +49,15 @@ _URL = re.compile(r"https?://|www\.", re.IGNORECASE)
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _HTML = re.compile(r"[<＜]\s*/?\s*[A-Za-z!]")
 _SPACE = re.compile(r"\s+")
+_REQUEST_END = re.compile(
+    r"(ください|下さい|いただけますでしょうか|いただけますか|いただけないでしょうか|"
+    r"いただけませんでしょうか|いただけませんか|お願いいたします|お願い致します|お願いします|"
+    r"お願い申し上げます)$"
+)
+_STATEMENT_MARK = re.compile(
+    r"ました|でした|おります|ています|済み|完了|予定|修正|返金|返還|補償|補填|付与|配布|"
+    r"プレゼント|お詫びの品"
+)
 
 
 def normalize(text: str) -> str:
@@ -51,6 +68,14 @@ def normalize(text: str) -> str:
 def sentences(text: str) -> list[str]:
     """按句号、问号、感叹号和换行切分，去掉空白，丢弃空句。"""
     return [s.strip() for s in _SENTENCE.findall(text) if s.strip()]
+
+
+def is_info_request(sentence: str) -> bool:
+    """是否是代码确认的“向玩家索要信息或请玩家操作”的句子：以请求的句式结尾，并且不含
+    陈述已经发生或将要发生的事的标记（例如“已修复”“预定”“退款”）。这样的句子不是
+    事实性说法，不需要引用。"""
+    core = _TRAILING.sub("", unicodedata.normalize("NFKC", sentence))
+    return bool(_REQUEST_END.search(core)) and not _STATEMENT_MARK.search(core)
 
 
 def fill_slots(body: str, values: dict[str, str]) -> str:
@@ -103,26 +128,39 @@ class ComposedDraft:
     """模型写的答复部分。"""
     candidate: Candidate | None
     """使用的模板；没有合适的模板时为空。"""
-    template_text_ja: str = ""
-    """模板正文填入占位符后的文字（未填的占位符保持原样）。"""
+    slot_values: Mapping[str, str] = field(default_factory=dict)
+    """模型为模板占位符填写的值。"""
     citations: Sequence[CitedClaim] = ()
-    info_requests_ja: Sequence[str] = ()
-    """模型声明为“向玩家索要信息”的句子：不是事实性说法，不需要引用。"""
+
+    @property
+    def template_text_ja(self) -> str:
+        """模板正文填入占位符后的文字（未填的占位符保持原样）。没有模板时为空。"""
+        if self.candidate is None:
+            return ""
+        return fill_slots(self.candidate.template.body_ja, dict(self.slot_values))
 
     @property
     def added_text(self) -> str:
-        """模型在模板和固定结构之外新增的文字（见模块说明）。"""
-        core = self.core_ja
-        if self.template_text_ja and self.template_text_ja.strip() in core:
-            core = core.replace(self.template_text_ja.strip(), "\n")
-        return core
+        """模型在模板和固定结构之外新增的文字，不含填入占位符的值（见模块说明）。"""
+        template = self.template_text_ja.strip()
+        if template and template in self.core_ja:
+            return self.core_ja.replace(template, "\n")
+        return self.core_ja
+
+    @property
+    def untrusted_text(self) -> str:
+        """需要按政策、链接、其他案件的信息检查的文字：新增文字加上填入占位符的值。"""
+        values = [v for v in self.slot_values.values() if v.strip()] if self.candidate else []
+        return "\n".join([self.added_text, *values])
 
     def added_sentences(self, guide: StyleGuide) -> list[str]:
-        """新增的句子：既不在模板原文中，也不是风格指南的固定措辞。"""
-        known = normalize(self.template_text_ja) + "".join(
-            normalize(p.ja) for p in (*guide.apologies, *guide.contact_again)
-        )
-        return [s for s in sentences(self.added_text) if normalize(s) not in known]
+        """新增的句子，不含与风格指南的固定措辞（致歉、请再次联系）完全相同的句子。"""
+        fixed = {
+            normalize(s)
+            for phrase in (*guide.apologies, *guide.contact_again)
+            for s in sentences(phrase.ja)
+        }
+        return [s for s in sentences(self.added_text) if normalize(s) not in fixed]
 
 
 @dataclass(frozen=True)
@@ -176,10 +214,13 @@ def _phrases(policies: Iterable[Policy], text: str) -> list[str]:
 
 
 def check_forbidden_promise(draft: ComposedDraft, context: CheckContext) -> DraftCheck:
-    added = _phrases(context.forbidden_promises, draft.added_text)
+    added = _phrases(context.forbidden_promises, draft.untrusted_text)
     if added:
-        return _check(DraftCheckKind.FORBIDDEN_PROMISE, [f"新增文字中出现 {', '.join(added)}"])
-    in_template = _phrases(context.forbidden_promises, draft.template_text_ja)
+        return _check(
+            DraftCheckKind.FORBIDDEN_PROMISE, [f"新增文字或占位符的值中出现 {', '.join(added)}"]
+        )
+    literal = draft.candidate.template.body_ja if draft.candidate else ""
+    in_template = _phrases(context.forbidden_promises, literal)
     note = f"只在已批准的模板原文中出现：{', '.join(in_template)}" if in_template else None
     return _check(DraftCheckKind.FORBIDDEN_PROMISE, [], note)
 
@@ -212,12 +253,11 @@ def check_citations(draft: ComposedDraft, context: CheckContext) -> DraftCheck:
     )
     if unknown:
         problems.append(f"引用了没有提供给模型的条目：{', '.join(unknown)}")
-    covered = [normalize(c.sentence_ja) for c in draft.citations if c.sentence_ja.strip()]
-    requests = [normalize(s) for s in draft.info_requests_ja if s.strip()]
+    covered = {normalize(s) for c in draft.citations for s in sentences(c.sentence_ja)}
     uncited = [
         s
         for s in draft.added_sentences(context.guide)
-        if not any(normalize(s) in ref or ref in normalize(s) for ref in (*covered, *requests))
+        if not is_info_request(s) and normalize(s) not in covered
     ]
     if uncited:
         problems.append(f"{len(uncited)} 句新增的说法没有引用")
@@ -225,12 +265,12 @@ def check_citations(draft: ComposedDraft, context: CheckContext) -> DraftCheck:
 
 
 def check_content_safety(draft: ComposedDraft, context: CheckContext) -> DraftCheck:
-    added = draft.added_text
+    added = draft.untrusted_text
     problems = []
     if _URL.search(added):
-        problems.append("新增文字中有链接")
+        problems.append("新增文字或占位符的值中有链接")
     if _EMAIL.search(added):
-        problems.append("新增文字中有邮箱地址")
+        problems.append("新增文字或占位符的值中有邮箱地址")
     if _HTML.search(draft.body_ja):
         problems.append("有 HTML 或脚本标记")
     if clean_untrusted(draft.body_ja) != draft.body_ja:
