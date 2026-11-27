@@ -98,3 +98,14 @@ async def test_embedding_cache_avoids_repeat_calls(tmp_path: Path) -> None:
 async def test_empty_query_returns_nothing() -> None:
     assert await SimilarCaseRetriever(corpus()).search("\u200b ") == []
     assert await SimilarCaseRetriever([]).search("ジェム") == []
+
+
+async def test_cache_separates_endpoints_with_same_model(tmp_path: Path) -> None:
+    """评审意见（PR #28）：同名模型、不同端点的向量不能混用。"""
+    cache = EmbeddingCache(tmp_path / "emb.jsonl")
+    first = FakeEmbeddingClient(model_name="same")
+    other = FakeEmbeddingClient(model_name="same", namespace="https://other.example/v1|same")
+    await embed_cached(first, cache, ["a"])
+    await embed_cached(other, cache, ["a"])
+    await embed_cached(first, cache, ["a"])
+    assert first.calls == [["a"]] and other.calls == [["a"]]

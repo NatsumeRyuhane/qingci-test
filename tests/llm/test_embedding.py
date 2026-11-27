@@ -119,3 +119,9 @@ async def test_fake_is_deterministic_unit_vectors_and_records_calls() -> None:
     assert first[1] == [1.0, 0.0]
     assert fake.calls == [["ガチャ", "固定"], ["ガチャ"]]
     assert fake.model_name == "fake-embedding"
+
+
+def test_cache_namespace_has_endpoint_and_model_but_no_key() -> None:
+    client = OpenAIEmbeddingClient(make_settings())
+    assert client.cache_namespace == f"{BASE_URL}|embed-model"
+    assert "test-key" not in client.cache_namespace

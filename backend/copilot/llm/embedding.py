@@ -24,7 +24,13 @@ class EmbeddingClient(Protocol):
 
     @property
     def model_name(self) -> str:
-        """当前使用的模型名，用于区分缓存。"""
+        """当前使用的模型名。"""
+        ...
+
+    @property
+    def cache_namespace(self) -> str:
+        """区分 embedding 缓存的命名空间：端点和模型，不含 key。不同服务商的同名模型
+        给出的向量不能混用。"""
         ...
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
@@ -60,6 +66,11 @@ class OpenAIEmbeddingClient:
     @property
     def model_name(self) -> str:
         return self._get_endpoint().model
+
+    @property
+    def cache_namespace(self) -> str:
+        endpoint = self._get_endpoint()
+        return f"{endpoint.base_url.rstrip('/')}|{endpoint.model}"
 
     def _get_client(self) -> AsyncOpenAI:
         endpoint = self._get_endpoint()
@@ -116,15 +127,21 @@ class FakeEmbeddingClient:
         *,
         model_name: str = "fake-embedding",
         dim: int = 32,
+        namespace: str | None = None,
     ) -> None:
         self._vectors = {k: [float(x) for x in v] for k, v in (vectors or {}).items()}
         self._model_name = model_name
         self._dim = dim
+        self._namespace = namespace or f"fake|{model_name}"
         self.calls: list[list[str]] = []
 
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    @property
+    def cache_namespace(self) -> str:
+        return self._namespace
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         items = list(texts)

@@ -9,7 +9,7 @@
 - 案件的检索文本是玩家的首次咨询（表单内容优先），去掉不可见字符，截断到
   `MAX_DOC_CHARS`。检索结果只是辅助上下文，正文进入 prompt 时仍然是不可信数据。
 
-Embedding 按（模型, 文本）的哈希缓存在 JSONL 文件中，重复运行不重复调用。
+Embedding 按（端点和模型, 文本）的哈希缓存在 JSONL 文件中，重复运行不重复调用。
 """
 
 import hashlib
@@ -97,7 +97,7 @@ class BM25Index:
 
 
 class EmbeddingCache:
-    """（模型, 文本）→ 向量的 JSONL 缓存。文件不存在时为空，`save` 原子地写出。"""
+    """（端点和模型, 文本）→ 向量的 JSONL 缓存。文件不存在时为空，`save` 原子地写出。"""
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path
@@ -111,8 +111,9 @@ class EmbeddingCache:
                         self._vectors[item["key"]] = item["vector"]
 
     @staticmethod
-    def key(model: str, text: str) -> str:
-        return hashlib.sha256(f"{model}\n{text}".encode()).hexdigest()
+    def key(namespace: str, text: str) -> str:
+        """`namespace` 是 `EmbeddingClient.cache_namespace`（端点和模型）。"""
+        return hashlib.sha256(f"{namespace}\n{text}".encode()).hexdigest()
 
     def get(self, key: str) -> list[float] | None:
         return self._vectors.get(key)
@@ -137,7 +138,7 @@ async def embed_cached(
     client: EmbeddingClient, cache: EmbeddingCache, texts: Sequence[str]
 ) -> list[list[float]]:
     """缓存中没有的文本才调用 `client`，结果写回缓存（不落盘，调用方决定何时 `save`）。"""
-    keys = [cache.key(client.model_name, t) for t in texts]
+    keys = [cache.key(client.cache_namespace, t) for t in texts]
     # 按首次出现的顺序去重，调用顺序只取决于输入。
     missing = list(
         dict.fromkeys((k, t) for k, t in zip(keys, texts, strict=True) if cache.get(k) is None)
