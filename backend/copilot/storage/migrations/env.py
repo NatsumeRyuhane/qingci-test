@@ -7,6 +7,7 @@
 from alembic import context
 
 from copilot.config import get_settings
+from copilot.storage import kb_tables  # noqa: F401  注册知识库的表，让自动迁移能看到它们
 from copilot.storage.db import Base, create_engine_for
 
 config = context.config
