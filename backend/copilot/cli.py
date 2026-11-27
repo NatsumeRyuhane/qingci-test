@@ -256,3 +256,96 @@ def kb_knowledge(
     for leak in leaks:
         typer.echo(f"{labels[leak.kind.value]}：{leak.source}（{leak.threads} 个线程）", err=True)
     raise typer.Exit(1)
+
+
+@kb_app.command("annotate")
+def kb_annotate(
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option("--split", help="切分结果（copilot split）。默认 data/processed/split.json。"),
+    ] = None,
+    kb_dir: Annotated[
+        Path | None,
+        typer.Option("--kb-dir", help="copilot kb build 的输出目录。默认 data/processed/kb。"),
+    ] = None,
+    knowledge_dir: Annotated[
+        Path | None, typer.Option("--knowledge", help="人工编写的知识。默认 knowledge/。")
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", min=1, help="只标注覆盖率最高的前 N 个候选。")
+    ] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency", min=1, help="并发请求数。")] = 4,
+) -> None:
+    """用 LLM 为模板候选生成标注初稿，写出未审核的模板（#5）。有缓存时不重复调用。"""
+    import asyncio
+    from datetime import datetime
+
+    from copilot.config import LLMTask, MissingConfigError
+    from copilot.eval import DEFAULT_MANIFEST, Split, StaleSplitError, read_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.ingest.timestamps import JST
+    from copilot.kb.annotate import (
+        ANNOTATIONS_DIR,
+        TEMPLATES_FILE,
+        annotate_candidates,
+        write_templates,
+    )
+    from copilot.kb.build import CANDIDATES_FILE, DEFAULT_KB_DIR, read_candidates
+    from copilot.kb.knowledge import KNOWLEDGE_DIR, KnowledgeError, load_knowledge
+    from copilot.llm import OpenAICompatibleClient
+
+    settings = get_settings()
+    try:
+        endpoint = settings.llm_endpoint(LLMTask.ANNOTATE)
+    except MissingConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    directory = kb_dir or DEFAULT_KB_DIR
+    candidates = read_candidates(directory / CANDIDATES_FILE)
+    if not candidates:
+        typer.echo(
+            f"找不到模板候选：{directory / CANDIDATES_FILE}（先运行 copilot kb build）", err=True
+        )
+        raise typer.Exit(1)
+    try:
+        train = read_manifest(split_path or DEFAULT_MANIFEST).select(
+            read_cases(cases_path or DEFAULT_OUTPUT), Split.TRAIN
+        )
+        knowledge = load_knowledge(knowledge_dir or KNOWLEDGE_DIR)
+    except (StaleSplitError, KnowledgeError, FileNotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    train_ids = {case.id for case in train}
+    stale = [
+        c.id
+        for c in candidates
+        if any(m.split(":")[0] not in train_ids for m in c.source_message_ids)
+    ]
+    if stale:
+        typer.echo(
+            f"{len(stale)} 个候选的来源不在 train 中（先重新运行 copilot kb build）", err=True
+        )
+        raise typer.Exit(1)
+    selected = candidates[:limit] if limit else candidates
+    templates, report = asyncio.run(
+        annotate_candidates(
+            selected,
+            train,
+            knowledge,
+            OpenAICompatibleClient(settings),
+            model=endpoint.model,
+            cache_dir=directory / ANNOTATIONS_DIR,
+            now=datetime.now(JST).replace(microsecond=0),
+            concurrency=concurrency,
+        )
+    )
+    write_templates(templates, directory / TEMPLATES_FILE)
+    typer.echo(f"已写入 {directory / TEMPLATES_FILE}：{len(templates)} 个未审核的模板")
+    for line in report.lines():
+        typer.echo(line)
+    if report.failed:
+        raise typer.Exit(1)
