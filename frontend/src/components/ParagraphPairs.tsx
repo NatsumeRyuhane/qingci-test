@@ -66,6 +66,9 @@ export function ParagraphPairs({
   jaHeader: ReactNode;
 }) {
   const rows = Math.max(zh.length, ja.length);
+  // 与后端的规则一致：至少 3 段时，第一段和最后一段是固定的问候语和结语（翻译时使用风格指南的
+  // 原文），中文一侧只读
+  const fixed = (i: number) => zh.length >= 3 && (i === 0 || i === zh.length - 1);
   return (
     <div className="pair-view">
       <div className="pair-head">
@@ -82,10 +85,14 @@ export function ParagraphPairs({
           // biome-ignore lint/suspicious/noArrayIndexKey: 段落按位置对照，位置就是身份
           <div className="pair-row" key={i}>
             <div className="pair-cell">
+              {fixed(i) && <span className="fixed-tag">{i === 0 ? "固定问候语" : "固定结语"}</span>}
               {i < zh.length ? (
                 <AutoTextarea
                   aria-label={`中文第 ${i + 1} 段`}
                   value={zh[i]}
+                  readOnly={fixed(i)}
+                  className={fixed(i) ? "fixed" : undefined}
+                  title={fixed(i) ? "固定内容：翻译时使用风格指南的日语原文" : undefined}
                   onChange={(e) => onZhChange(i, e.target.value)}
                   onBlur={onZhBlur}
                   onKeyDown={onZhKeyDown}

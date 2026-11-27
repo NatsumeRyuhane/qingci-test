@@ -844,6 +844,24 @@ th:first-child {
   line-height: 1.7;
 }
 
+.pair-cell {
+  position: relative;
+}
+
+.fixed-tag {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+textarea.fixed {
+  background: var(--bg);
+  color: var(--muted);
+}
+
 .pair-empty {
   flex: 1;
   border: 1px dashed var(--border);

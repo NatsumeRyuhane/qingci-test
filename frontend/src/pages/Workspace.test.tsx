@@ -193,6 +193,10 @@ describe("Workspace", () => {
       "【合成データ】三段目。",
     );
     expect(screen.queryByText(/逐段对照可能错位/)).not.toBeInTheDocument();
+    // 首尾段是固定的问候语和结语，中文一侧只读
+    expect(screen.getByRole("textbox", { name: "中文第 1 段" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("textbox", { name: "中文第 3 段" })).toHaveAttribute("readonly");
+    expect(screen.getByRole("textbox", { name: "中文第 2 段" })).not.toHaveAttribute("readonly");
 
     fireEvent.change(screen.getByRole("textbox", { name: "中文第 2 段" }), {
       target: { value: "【合成】改过的第二段。" },
