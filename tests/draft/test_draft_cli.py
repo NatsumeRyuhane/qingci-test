@@ -9,11 +9,13 @@ from typer.testing import CliRunner
 
 from copilot import cli
 from copilot.config import LLMTask, Settings
+from copilot.contracts import RoleEvidenceKind
 from copilot.draft.service import DraftOutcome
 from copilot.ingest import write_cases
 from copilot.kb.store import KnowledgeStore
 from copilot.llm.fake import FakeLLMClient
 from copilot.storage import create_engine_for, upgrade_database
+from tests.cases import agent, case, player
 from tests.draft.test_service import (
     KNOWLEDGE,
     SNAPSHOT,
@@ -94,3 +96,20 @@ def test_missing_model_configuration(env: dict[str, Path], monkeypatch: pytest.M
     result = runner.invoke(cli.app, _args(env))
     assert result.exit_code == 1
     assert "LLM_MODEL_ANALYZE" in result.output
+
+
+def test_before_seq_drafts_before_the_real_reply(env: dict[str, Path]) -> None:
+    thread = case(
+        "900",
+        player("900", 1),
+        agent("900", 2, "【合成】本当の回答", RoleEvidenceKind.KEYWORD),
+        player("900", 3),
+        content="【合成】いつも楽しく遊んでいます。",
+    )
+    write_cases([thread], env["cases"])
+    result = runner.invoke(cli.app, _args(env, "--before-seq", "2", "--json"))
+    assert result.exit_code == 0, result.output
+    outcome = DraftOutcome.model_validate_json(result.output)
+    assert outcome.analysis.message_seq == 1
+    assert outcome.draft is not None
+    assert "本当の回答" not in outcome.draft.body_ja

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from copilot.config import Settings
+    from copilot.contracts import Case
     from copilot.draft.service import DraftOutcome
     from copilot.kb.knowledge import Knowledge
     from copilot.llm import LLMClient
@@ -605,6 +606,18 @@ EMBEDDING_CACHE = Path("data/processed/embeddings.jsonl")
 """相似案件检索的 embedding 缓存（含客户文本的哈希和向量，被 git 忽略）。"""
 
 
+def _truncate(case: "Case", before_seq: int) -> "Case":
+    """只保留 seq 小于 `before_seq` 的邮件，状态按最后一封邮件重新判断（玩家 → open）。"""
+    from copilot.contracts import CaseStatus, MessageRole
+
+    messages = [m for m in case.messages if m.seq < before_seq]
+    if not messages:
+        typer.echo(f"--before-seq {before_seq} 之前没有邮件", err=True)
+        raise typer.Exit(2)
+    status = CaseStatus.OPEN if messages[-1].role is MessageRole.PLAYER else case.status
+    return case.model_copy(update={"messages": messages, "status": status})
+
+
 def _parse_now(value: str | None) -> "datetime | None":
     from datetime import datetime
 
@@ -642,6 +655,14 @@ def draft_command(
             "--now",
             help="模拟的“现在”（ISO 8601，不带时区时按 JST）。指定时为历史重放：知识库只看当时"
             "已知的版本。默认取系统时间。",
+        ),
+    ] = None,
+    before_seq: Annotated[
+        int | None,
+        typer.Option(
+            "--before-seq",
+            min=2,
+            help="历史重放：只保留 seq 小于它的邮件，例如在真实的第一封客服回复之前起草。",
         ),
     ] = None,
     as_json: Annotated[bool, typer.Option("--json", help="输出完整结果的 JSON。")] = False,
@@ -682,6 +703,8 @@ def draft_command(
     if target is None:
         typer.echo(f"找不到案件 {case_id!r}", err=True)
         raise typer.Exit(1)
+    if before_seq is not None:
+        target = _truncate(target, before_seq)
     try:
         guide = load_knowledge(knowledge_dir or KNOWLEDGE_DIR).style_guide
     except KnowledgeError as exc:
