@@ -129,6 +129,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics
+         * @description 按模板和分流结果统计原样批准率、修改后批准率、升级率、驳回率和平均编辑距离。
+         */
+        get: operations["metrics_v1_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sim/inbox": {
         parameters: {
             query?: never;
@@ -161,6 +181,47 @@ export interface paths {
          * @description 发件箱：系统发出的回复，最新的在前，可只看一个案件的。
          */
         get: operations["outbox_v1_sim_outbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Templates
+         * @description 当前生效、已批准的模板，可按意图和类别筛选。
+         */
+        get: operations["list_templates_v1_templates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Template
+         * @description 一个模板。指定 `version` 时返回该版本（草稿引用的是具体版本），否则返回当前版本。
+         *     未批准的版本按不存在处理。
+         */
+        get: operations["get_template_v1_templates__template_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -521,6 +582,12 @@ export interface components {
          */
         DraftMode: "pipeline" | "pipeline_with_tools";
         /**
+         * EntryOrigin
+         * @description 知识库条目的来源方式。
+         * @enum {string}
+         */
+        EntryOrigin: "reconstructed" | "manual";
+        /**
          * EntryType
          * @description 知识库条目的类型，用于草稿的引用（`Citation`）。
          * @enum {string}
@@ -759,6 +826,42 @@ export interface components {
          */
         MessageRole: "player" | "agent" | "system" | "unknown";
         /**
+         * MetricsResponse
+         * @description 每封草稿以最后一次处理为准。
+         */
+        MetricsResponse: {
+            /** By Route */
+            by_route: components["schemas"]["MetricsRow"][];
+            /** By Template */
+            by_template: components["schemas"]["MetricsRow"][];
+            total: components["schemas"]["MetricsRow"];
+        };
+        /** MetricsRow */
+        MetricsRow: {
+            /** Approved */
+            approved: number;
+            /** Approved Rate */
+            approved_rate: number;
+            /** Avg Edit Distance */
+            avg_edit_distance: number | null;
+            /** Edited */
+            edited: number;
+            /** Edited Rate */
+            edited_rate: number;
+            /** Escalated */
+            escalated: number;
+            /** Escalated Rate */
+            escalated_rate: number;
+            /** Handled */
+            handled: number;
+            /** Key */
+            key: string;
+            /** Rejected */
+            rejected: number;
+            /** Rejected Rate */
+            rejected_rate: number;
+        };
+        /**
          * NoReplyProposal
          * @description 分析步骤提议“这个案件不需要回复”（提案 0003 §8）。
          *
@@ -851,6 +954,137 @@ export interface components {
          */
         Platform: "ios" | "google_play" | "other";
         /**
+         * ReplyTemplate
+         * @description 一个回复模板：一段完整的答复（客服回复的 `Message.core`），由历史客服回复归纳而来，
+         *     供检索和起草使用。
+         *
+         *     公共字段（版本、有效期、已知时间、出处、审核状态）和版本选择规则见 `KnowledgeEntry`。
+         *     草稿通过（`id`, `version`）引用模板，所以修改模板时要新建版本，而不是改写旧版本。
+         *     只适用于某次事故的模板用有效期限定，并由对应的公告与事件（`Notice`）链接。
+         */
+        ReplyTemplate: {
+            /**
+             * Auto Send Allowed
+             * @description 是否允许不经人工审核自动发送。只有已批准、`risk` 为 `low` 的通用模板（不含案件特定
+             *     内容）才能为 true（D-001、D-011）。是否真的自动发送还取决于案件，由 #6 判断。
+             * @default false
+             */
+            auto_send_allowed: boolean;
+            /**
+             * Avoid When Zh
+             * @description 什么情况下不要使用（中文），例如容易混淆的相似问题。
+             */
+            avoid_when_zh: string;
+            /**
+             * Body Ja
+             * @description 回复正文（日语），包含 `{{slot_name}}` 形式的占位符。
+             */
+            body_ja: string;
+            /** @description 模板适用的咨询类别。 */
+            category: components["schemas"]["InquiryCategory"];
+            /**
+             * Description Zh
+             * @description 这个模板回答的是什么问题（中文）。
+             */
+            description_zh: string;
+            /**
+             * Id
+             * @description 条目 ID，跨版本不变。
+             */
+            id: string;
+            /**
+             * Intent
+             * @description 模板所属的意图（`Intent.id`）。每个模板只属于一个意图。
+             */
+            intent: string;
+            /**
+             * Known From
+             * Format: date-time
+             * @description 运营方从何时起知道这个版本的内容。生产中等于录入时间；从历史数据归纳的条目取得出
+             *     它所需的证据中最晚的时间（估计时取区间上界）；只改措辞的版本沿用上一版本的值。
+             *     历史重放只看 `known_from` 不晚于模拟的“现在”的版本。
+             */
+            known_from: string;
+            /** @description 来源方式：从数据中归纳，或人工录入。 */
+            origin: components["schemas"]["EntryOrigin"];
+            /**
+             * Recorded At
+             * Format: date-time
+             * @description 这个版本实际录入的时间，供审计。不用于历史重放。
+             */
+            recorded_at: string;
+            /**
+             * @description 审核状态。只有 `approved` 的条目会提供给模型（见 `model_visible`）。
+             * @default draft
+             */
+            review_status: components["schemas"]["ReviewStatus"];
+            /**
+             * @description 风险等级，例如涉及退款、补偿的模板为 `high`。
+             * @default normal
+             */
+            risk: components["schemas"]["RiskLevel"];
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。2：加入知识库的公共字段（审核状态、已知时间等）和 `intent`（#19）。
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Slots
+             * @description `body_ja` 中的占位符。与正文中出现的占位符必须一一对应。
+             */
+            slots?: components["schemas"]["TemplateSlot"][];
+            /**
+             * Source Message Ids
+             * @description 归纳出这个条目的历史邮件，格式为 `<thread_id>:<seq>`。人工录入的条目可以为空。
+             */
+            source_message_ids?: string[];
+            /**
+             * Supersedes
+             * @description 这个条目取代的旧条目 ID（现实中的变化，例如政策变化）。只作记录，不会自动让旧条目
+             *     失效：旧条目需要新建一个关闭有效期的版本。
+             */
+            supersedes?: string[];
+            /**
+             * Title Zh
+             * @description 标题（中文），在界面中展示给客服。
+             */
+            title_zh: string;
+            /**
+             * Use When Zh
+             * @description 什么情况下使用（中文）。检索和 LLM 选择模板时参考。
+             */
+            use_when_zh: string;
+            /**
+             * Valid From
+             * @description 有效期的开始（包含）。为空表示没有下限。
+             */
+            valid_from?: string | null;
+            /**
+             * Valid To
+             * @description 有效期的结束（不包含）。为空表示在被替换前一直有效。
+             */
+            valid_to?: string | null;
+            /**
+             * Version
+             * @description 版本，从 1 开始。每次修改都新建一个版本（编辑历史）。
+             */
+            version: number;
+        };
+        /**
+         * ReviewStatus
+         * @description 知识库条目的审核状态（提案 0003 §4）。
+         * @enum {string}
+         */
+        ReviewStatus: "draft" | "approved" | "retired" | "needs_rereview";
+        /**
+         * RiskLevel
+         * @description 回复模板的风险等级。只有 `low` 的模板可以允许自动发送（D-001）。
+         * @enum {string}
+         */
+        RiskLevel: "low" | "normal" | "high";
+        /**
          * RoleEvidence
          * @description 判断一封邮件发送方的一条依据（提案 0003 §11）。由导入步骤（#4）填写，不调用 LLM。
          */
@@ -924,6 +1158,11 @@ export interface components {
              */
             score: number;
         };
+        /** TemplateList */
+        TemplateList: {
+            /** Items */
+            items: components["schemas"]["ReplyTemplate"][];
+        };
         /**
          * TemplateRef
          * @description 草稿引用的一个模板。
@@ -944,6 +1183,33 @@ export interface components {
              * @description 模板版本（`ReplyTemplate.version`）。
              */
             template_version: number;
+        };
+        /**
+         * TemplateSlot
+         * @description 模板中需要按案件填写的占位符。
+         */
+        TemplateSlot: {
+            /**
+             * Description Zh
+             * @description 要填写什么（中文），例如“玩家购买的道具名称”。
+             */
+            description_zh: string;
+            /**
+             * Example Ja
+             * @description 填写示例（日语）。
+             */
+            example_ja?: string | null;
+            /**
+             * Name
+             * @description 占位符名，在 `body_ja` 中写作 `{{name}}`。
+             */
+            name: string;
+            /**
+             * Required
+             * @description 是否必填。必填项没有填写时，草稿检查 `slots_filled` 不通过。
+             * @default true
+             */
+            required: boolean;
         };
         /**
          * TimeContext
@@ -1627,6 +1893,98 @@ export interface operations {
             };
         };
     };
+    metrics_v1_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     inbox_v1_sim_inbox_post: {
         parameters: {
             query?: never;
@@ -1743,6 +2101,197 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Outbox"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_templates_v1_templates_get: {
+        parameters: {
+            query?: {
+                intent?: string | null;
+                category?: components["schemas"]["InquiryCategory"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_template_v1_templates__template_id__get: {
+        parameters: {
+            query?: {
+                version?: number | null;
+            };
+            header?: never;
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplyTemplate"];
                 };
             };
             /** @description Unauthorized */
