@@ -22,6 +22,51 @@
 - **业务本质是“受控选用官方口径”，而非自由生成**：历史客服回复去掉首尾固定框架后高度模板化（最常见的 50 种正文覆盖 71% 的回复，见第 2 节）。核心难点在于判断“当前咨询属于哪个意图、是否落在某次事故的时间窗口内、还缺哪些核实信息”，随后严格套用经审核的官方模板并做最小化补句。
 - **人工审核本身就是迭代引擎**：坐席在中文工作台中的每一次操作——原样批准、用中文修改回复、填写理由升级或驳回——都会结构化记录为 `Feedback`（[architecture.md](architecture.md)）。编辑距离大和频繁被拒的模板直接指向知识库缺口；高置信度且长期原样批准的低风险意图则可经离线评测验证后逐步放开自动发送，形成稳健提升自动化率的闭环。
 
+### 1.3 系统模块划分与层间数据流
+
+为便于在进入细节前把握全局，下图展示本系统的分层模块化结构，以及各层之间传递的核心契约对象（定义在 [`backend/copilot/contracts/`](../backend/copilot/contracts/)，详见 [architecture.md](architecture.md)）：
+
+```mermaid
+flowchart TB
+    subgraph Offline["离线数据与知识构建层"]
+        XLSX["样本表格 (.xlsx)"] -->|"copilot ingest"| INGEST["ingest/<br/>确定性清洗 · 引用剥离 · 角色证据"]
+        INGEST -->|"Case[] (含 InquiryForm, role_evidence)"| SPLIT["eval/split.py<br/>分层均匀切分 (train / dev / test)"]
+        SPLIT -->|"train Case[]"| KB["kb/<br/>模板聚类 · LLM 初稿标注 · 人工审核覆盖层"]
+        YAML["knowledge/*.yaml<br/>意图 · 政策 · 公告 · 术语 · 风格指南"] -->|"PR 评审 + 防泄露检查"| KB
+    end
+
+    subgraph Storage["持久化与检索层 (storage/ · kb/store.py)"]
+        DB[("SQLite<br/>kb_entries (只追加触发器)<br/>案件 · 草稿 · 反馈 · 发件箱")]
+        SIM["draft/similar.py<br/>BM25 字符 bigram + Embedding 混合索引"]
+    end
+
+    KB -->|"kb publish: KnowledgeEntry 新版本"| DB
+    SPLIT -->|"train 历史语料"| SIM
+
+    subgraph Core["核心起草与纵深防御层 (draft/ · llm/)"]
+        DRAFT["draft/service.py (draft_case)<br/>时间上下文 · 可用知识过滤 · 7 项自检 · 12 关卡分流"]
+        LLM["llm/<br/>OpenAI 兼容客户端 · Pydantic 结构化重试"]
+        DRAFT <-->|"data_block 隔离 Prompt / 校验后 JSON"| LLM
+    end
+
+    DB -->|"KnowledgeSnapshot (仅 approved 有效版本)"| DRAFT
+    YAML -->|"StyleGuide (固定敬语首尾)"| DRAFT
+    SIM -->|"相似案件 ID 与所用模板 (不含原文)"| DRAFT
+
+    subgraph Surface["接口、中文工作台与评测层"]
+        API["api/<br/>FastAPI /v1 REST API + 统一授权钩子"]
+        UI["frontend/<br/>React 中文工作台 · 模拟邮箱 · 指标页"]
+        EVAL["eval/<br/>dev/test 历史重放 · Opus 评审 · 39 项安全重放"]
+    end
+
+    SPLIT -->|"dev / test Case[] + 标准答案"| EVAL
+    DRAFT -->|"DraftOutcome (CaseAnalysis + Draft + 分流)"| EVAL
+    DB <-->|"读写 Case / Draft / Feedback / OutboundMail"| API
+    API <-->|"触发起草 / 返回 DraftOutcome"| DRAFT
+    UI <-->|"HTTP /v1 JSON (OpenAPI 自动生成类型)"| API
+    UI -.->|"Feedback (批准率 / 编辑距离) 反哺审核"| KB
+```
+
 ---
 
 ## 2. 样本数据发现与工程约束
@@ -57,38 +102,21 @@
 
 `copilot.draft.service.draft_case` 是 CLI、离线评测、Web 工作台与 API 生成草稿的唯一入口：
 
-```
-日语邮件线程（Case）
-  │
-  ├─ 1. 时间上下文（timectx.py）
-  │     计算带状态的“现在”与表单“问题发生时间”（known / estimated[区间] / unavailable）
-  │
-  ├─ 2. 可用知识视图（retrieval.py）
-  │     仅取 approved 当前版本；限时模板按问题发生时间与平台/版本匹配动态注入
-  │
-  ├─ 3. 咨询分析（analyze.py · LLMTask.ANALYZE）
-  │     输出中文翻译与摘要、封闭目录内的意图及置信度、情绪、紧急度、缺失信息、敏感标签；
-  │     代码独立扫描提示注入信号并与模型判断取并集
-  │
-  ├─ 4. “不回复”短路判定（route.py: decide_no_reply）
-  │     代码确认的重复提交 或 强证据纯系统邮件（无咨询且无注入）──► 自动置为 no_reply_needed
-  │
-  ├─ 5. 候选模板排序与相似案件混合检索（similar.py）
-  │     排序固定：确定匹配的限时模板 → 待确认限时模板 → 含槽位模板 → 通用模板；
-  │     字符 bigram BM25 + embedding 经 RRF 融合检索更早线程（仅向模型提供案件号与所用模板，防跨案文本泄露）
-  │
-  ├─ 6. 受限起草与框架组装（compose.py / agent.py · LLMTask.DRAFT）
-  │     模型仅从可见模板中选定一个、填槽并补充最少句子（每句新增文本必须绑定 citations）；
-  │     代码按 StyleGuide 组装固定问候语、结语与禁止转载声明
-  │
-  ├─ 7. 7 项确定性代码自检（checks.py）
-  │     structure · register · forbidden_promise · template_window · slots_filled · citations · content_safety
-  │
-  ├─ 8. 中文回译（LLMTask.BACKTRANSLATE）
-  │     将最终日语草稿附带术语表忠实回译为中文，供不懂日语的坐席核对
-  │
-  └─ 9. 风险分流（route.py）
-        escalate（升级处理） / auto_send（12 道关卡全过） / review（人工审核）
+```mermaid
+flowchart TD
+    IN(["输入：Case + KnowledgeSnapshot + StyleGuide"]) --> S1["1. 时间上下文 (timectx.py)<br/>计算带状态的 now 与 problem_time<br/>(known / estimated[区间] / unavailable)"]
+    S1 --> S2["2. 可用知识过滤 (retrieval.py)<br/>仅保留 approved 当前有效条目；<br/>限时模板按事件窗口与平台动态注入"]
+    S2 --> S3["3. 咨询分析 (analyze.py · LLMTask.ANALYZE)<br/>输出 CaseAnalysis：中文翻译/摘要、封闭目录意图、<br/>置信度、情绪、缺失信息、敏感标签 + 代码独立注入检测"]
+    S3 --> S4{"4. “不回复”短路判定<br/>(decide_no_reply)"}
+    S4 -->|"代码确认更早同内容已回复重复提交<br/>或 强系统证据纯退信（无问题且无注入）"| NR(["返回 DraftOutcome<br/>proposed_status = no_reply_needed（不生成草稿）"])
+    S4 -->|"需要回复（或仅模型单方提议不回复）"| S5["5. 候选模板排序与相似案件检索 (similar.py)<br/>限时匹配 → 限时不确切 → 含槽位 → 通用模板；<br/>BM25 + Embedding RRF 检索更早线程（仅传 ID 与模板）"]
+    S5 --> S6["6. 受限起草与框架组装 (compose.py / agent.py · LLMTask.DRAFT)<br/>选定可见模板填槽 + 逐句绑定 citations 的最小补句<br/>（--tools 可选最多 4 步只读工具，异常回退固定流水线）；<br/>代码按 StyleGuide 拼装固定问候语、结语与禁转声明"]
+    S6 --> S7["7. 7 项确定性代码自检 (checks.py)<br/>structure · register · forbidden_promise · template_window<br/>slots_filled · citations · content_safety"]
+    S7 --> S8["8. 中文回译 (LLMTask.BACKTRANSLATE)<br/>附带 GlossaryEntry 忠实回译日语草稿为中文"]
+    S8 --> S9{"9. 风险分流判定<br/>(route.py)"}
+    S9 -->|"命中升级短语/敏感标签 · 情绪 angry · 无适用模板"| R_ESC(["Draft (route = escalate)<br/>升级交主管处理"])
+    S9 -->|"未命中升级 且 12 道 AutoSendGate 全部通过"| R_AUTO(["Draft (route = auto_send)<br/>低风险自动发送候选"])
+    S9 -->|"其余情况（任一关卡未过或时间窗口不确定）"| R_REV(["Draft (route = review)<br/>进入中文工作台人工审核（附 route_reasons）"])
 ```
 
 在 Prompt 组织上，系统指令与静态目录固定在前，玩家不可信文本统一经过 `<` 转义与不可见/双向控制字符剥离后封入 `data_block`，由代码生成的**权威时间块永远置于最末尾**（防止正文伪造时间块覆盖真实时间，`ATK-24`–`ATK-26`）。此外，系统还实现了有界只读工具循环模式（`pipeline_with_tools`，最多 `DRAFT_MAX_TOOL_STEPS=4` 步查询相似案例、当前线程邮件、其他时间点事件与术语表，异常时自动回退固定流水线）；经 #7 实测对比，固定流水线延迟更低且质量持平，因此 MVP 默认采用 `pipeline`（[D-017](decisions.md)）。
