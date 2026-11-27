@@ -96,9 +96,18 @@ docs/              需求、数据概况、决策记录、设计提案
    uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库
    uv run copilot draft <案件 ID>     # 为一个案件生成分析、草稿和分流（不发送邮件）；--tools 允许调用只读工具
    uv run copilot eval --split dev    # 在留出集上离线评测（--suite security 重放全部安全攻击目录）
+   uv run copilot seed                # 从 dev 中挑选样本线程放进工作台，作为演示案件
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
-   (cd frontend && pnpm dev)          # 前端 http://localhost:5173
+   (cd frontend && pnpm dev)          # 工作台 http://localhost:5173
    ```
+
+   工作台（#8）：收件箱、案件详情和草稿面板、指标页，以及演示用的**模拟邮箱**：在“模拟邮箱”页
+   投递一封玩家来信，它会出现在收件箱中；批准后回复进入发件箱，不会真正发出任何邮件。
+   `auto_send` 的草稿也需要客服点击发送。
+
+   不想配置 LLM 时：`.env` 中设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容；
+   或者只运行前端的演示模式 `(cd frontend && pnpm dev:demo)`，后端在浏览器中模拟，数据全部是
+   合成的。`pnpm build:demo` 生成可以静态托管的版本（`frontend/dist-demo/`）。
 
    备用路线下去掉 `uv run`（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
 

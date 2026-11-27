@@ -177,8 +177,10 @@ uv run copilot kb review export    # 每个模板一个审核文件（data/proce
 uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库（只插入新版本）
 uv run copilot draft <案件 ID>     # 分析、起草、自检和分流（#6），不发送邮件；--now 和 --before-seq 用于历史重放，--tools 为“流水线 + 工具”
 uv run copilot eval --split dev    # 离线评测与基线报告（#7）；--limit N 快速迭代，--suite security 重放安全攻击目录
-uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
+uv run copilot seed                # 从 dev 中挑选样本线程放进工作台（#8）；--ids 指定线程，已有的案件不覆盖
+uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs；WORKBENCH_DRAFTER=stub 时不调用 LLM
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
+(cd frontend && pnpm dev:demo)     # 前端演示模式：后端在浏览器中模拟（合成数据），不需要后端；pnpm build:demo 输出静态页面
 ```
 
 ### 检查（与 CI 一致）
@@ -220,9 +222,9 @@ README.md            项目概览与上手指南
 .env.example         应用读取的全部环境变量，不含值
 pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
 alembic.ini          仅供开发时生成数据库迁移
-backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、draft/（起草：时间、检索、检查与分流）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、draft/（起草：时间、检索、检查与分流）、workbench/（坐席流程、模拟邮箱、演示数据）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
-frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
+frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成，src/mock/ 是演示模式的模拟后端
 scripts/             辅助脚本（导出 requirements、生成 API 类型）
 .github/workflows/   CI
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
