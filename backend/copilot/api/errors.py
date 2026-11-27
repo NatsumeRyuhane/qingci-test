@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from copilot.storage import NotFoundError
+from copilot.workbench import ConflictError
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -100,6 +101,10 @@ async def _not_found(request: Request, exc: Exception) -> Response:
     return error_response(request, 404, "not_found", str(exc))
 
 
+async def _conflict(request: Request, exc: Exception) -> Response:
+    return error_response(request, 409, "conflict", str(exc))
+
+
 async def _unexpected(request: Request, exc: Exception) -> Response:
     logger.exception("未处理的异常（request_id=%s）", request_id_of(request))
     return error_response(request, 500, "internal_error", "服务器内部错误")
@@ -126,3 +131,4 @@ def install_error_handling(app: FastAPI) -> None:
     app.add_exception_handler(StarletteHTTPException, _http_error)
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(NotFoundError, _not_found)
+    app.add_exception_handler(ConflictError, _conflict)

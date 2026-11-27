@@ -4,6 +4,86 @@
  */
 
 export interface paths {
+    "/v1/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Cases
+         * @description 收件箱：按最近更新时间倒序列出案件，可按状态、类别和分流结果筛选。
+         */
+        get: operations["list_cases_v1_cases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cases/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Case
+         * @description 案件详情。
+         */
+        get: operations["get_case_v1_cases__case_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cases/{case_id}/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Draft
+         * @description 为最新一封玩家邮件（重新）生成分析和草稿。已结案的案件返回 409。
+         */
+        post: operations["create_draft_v1_cases__case_id__drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/drafts/{draft_id}/backtranslate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backtranslate
+         * @description 把客服编辑后的日语正文回译为中文。不修改草稿本身。
+         */
+        post: operations["backtranslate_v1_drafts__draft_id__backtranslate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -28,6 +108,364 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BacktranslateRequest */
+        BacktranslateRequest: {
+            /** Body Ja */
+            body_ja: string;
+        };
+        /** BacktranslateResponse */
+        BacktranslateResponse: {
+            /** Back Translation Zh */
+            back_translation_zh: string;
+        };
+        /**
+         * Case
+         * @description 一个案件，对应一个邮件线程（`メールID`）。
+         *
+         *     `queue`、`sensitivity_tags`、`assigned_to` 是为访问控制（#13）预留的字段：MVP 中只记录，
+         *     不影响谁能看到案件。
+         */
+        Case: {
+            /**
+             * Assigned To
+             * @description **预留（#13）**：负责的客服身份。身份体系随 #13 引入，现在是任意字符串。
+             */
+            assigned_to?: string | null;
+            /** @description 案件的类别。优先采用分析结果（`CaseAnalysis.category`），其次是表单中玩家的选择。 */
+            category?: components["schemas"]["InquiryCategory"] | null;
+            /** @description 第 1 封邮件中的表单。不是通过表单提交的线程没有这一项。 */
+            form?: components["schemas"]["InquiryForm"] | null;
+            /**
+             * Id
+             * @description 案件 ID，等于线程 ID（`メールID`）。允许的字符见 `CASE_ID_CHARS`。
+             */
+            id: string;
+            /**
+             * Messages
+             * @description 线程中的邮件，按 `seq` 严格递增排列。
+             */
+            messages: components["schemas"]["Message"][];
+            /**
+             * Queue
+             * @description **预留（#13）**：案件所属的队列，例如按游戏、地区或外包商划分。
+             */
+            queue?: string | null;
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。2：限制 `id` 允许的字符（#19）。
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Sensitivity Tags
+             * @description **预留（#13）**：已确认的敏感标签。来自分析结果的提议，经人工确认后写入。
+             */
+            sensitivity_tags?: components["schemas"]["SensitivityTag"][];
+            /**
+             * @description 在坐席流程中的状态。
+             * @default open
+             */
+            status: components["schemas"]["CaseStatus"];
+        };
+        /**
+         * CaseAnalysis
+         * @description 对案件中一封玩家邮件的分析。玩家追问时重新分析，生成新的一条。
+         */
+        CaseAnalysis: {
+            /**
+             * Case Id
+             * @description 被分析的案件 ID。
+             */
+            case_id: string;
+            /** @description 判断出的咨询类别。可能与玩家在表单中选的不同。 */
+            category: components["schemas"]["InquiryCategory"];
+            /**
+             * Created At
+             * Format: date-time
+             * @description 生成时间。
+             */
+            created_at: string;
+            /**
+             * Facts
+             * @description 从邮件和表单中提取的事实，例如 `{"device": "iPhone 15", "item": "ジェム100個"}`。
+             */
+            facts?: {
+                [key: string]: string;
+            };
+            /**
+             * Injection Signals
+             * @description 检测到的疑似提示注入依据（代码检测与模型标记）。非空时禁止自动发送（#18）。
+             */
+            injection_signals?: string[];
+            /**
+             * Intent
+             * @description 更细的意图标识，例如 `purchase_not_delivered`。取值集合由知识库（#5）定义。
+             */
+            intent: string;
+            /**
+             * Intent Confidence
+             * @description 意图分类的置信度，0 到 1。自动发送门槛要求分类置信度达到配置阈值。
+             */
+            intent_confidence?: number | null;
+            /**
+             * Message Seq
+             * @description 分析针对的玩家邮件的 `seq`，通常是最新一封。
+             */
+            message_seq: number;
+            /**
+             * Missing Info
+             * @description 回复前还需要向玩家确认的信息（中文），例如“购买时间”。
+             */
+            missing_info?: string[];
+            /**
+             * Model
+             * @description 生成分析的 LLM 模型名。
+             */
+            model: string;
+            /** @description 提议不回复时的理由。为空表示需要回复。 */
+            no_reply?: components["schemas"]["NoReplyProposal"] | null;
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Sensitivity Tags
+             * @description 提议的敏感标签。为访问控制（#13）预留，经人工确认后才写入 `Case.sensitivity_tags`。
+             */
+            sensitivity_tags?: components["schemas"]["SensitivityTag"][];
+            /** @description 玩家的情绪。 */
+            sentiment: components["schemas"]["Sentiment"];
+            /**
+             * Summary Zh
+             * @description 结合整个线程的中文摘要：玩家遇到了什么问题、想要什么。
+             */
+            summary_zh: string;
+            /** @description 对 `undetermined` 案件的语义判断（`open`、`replied` 或 `no_reply_needed`）。其他状态为空。 */
+            thread_judgement?: components["schemas"]["CaseStatus"] | null;
+            /**
+             * Thread Judgement Reason Zh
+             * @description 对 `undetermined` 案件做出 `thread_judgement` 判断的理由（中文）。
+             */
+            thread_judgement_reason_zh?: string | null;
+            /**
+             * Translation Zh
+             * @description 这封玩家邮件（去除引用后）的中文翻译。
+             */
+            translation_zh: string;
+            urgency: components["schemas"]["Urgency"];
+        };
+        /**
+         * CaseDetail
+         * @description 案件详情：线程、最新分析、最新草稿及其反馈。
+         */
+        CaseDetail: {
+            analysis: components["schemas"]["CaseAnalysis"] | null;
+            case: components["schemas"]["Case"];
+            draft: components["schemas"]["Draft"] | null;
+            /** Feedback */
+            feedback: components["schemas"]["Feedback"][];
+        };
+        /** CaseList */
+        CaseList: {
+            /** Items */
+            items: components["schemas"]["CaseSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * CaseStatus
+         * @description 案件在坐席流程中的状态。
+         * @enum {string}
+         */
+        CaseStatus: "open" | "drafted" | "escalated" | "replied" | "no_reply_needed" | "undetermined";
+        /**
+         * CaseSummary
+         * @description 收件箱中的一行。
+         */
+        CaseSummary: {
+            category: components["schemas"]["InquiryCategory"] | null;
+            /** Id */
+            id: string;
+            /** Last Message At */
+            last_message_at: string | null;
+            /** Message Count */
+            message_count: number;
+            /** Preview Ja */
+            preview_ja: string;
+            route: components["schemas"]["Route"] | null;
+            sentiment: components["schemas"]["Sentiment"] | null;
+            status: components["schemas"]["CaseStatus"];
+            /** Summary Zh */
+            summary_zh: string | null;
+            urgency: components["schemas"]["Urgency"] | null;
+        };
+        /**
+         * Citation
+         * @description 草稿中的一个说法引用的知识库条目。没有引用的事实性说法会在检查中标出（提案 0003 §10）。
+         */
+        Citation: {
+            /**
+             * Claim Zh
+             * @description 草稿中引用它的说法（中文），展示给客服。
+             */
+            claim_zh: string;
+            /**
+             * Entry Id
+             * @description 条目 ID。
+             */
+            entry_id: string;
+            /** @description 条目的类型。 */
+            entry_type: components["schemas"]["EntryType"];
+            /**
+             * Entry Version
+             * @description 条目版本。引用具体版本，条目修改后旧草稿引用的内容不变。
+             */
+            entry_version: number;
+        };
+        /**
+         * Draft
+         * @description 一封回复草稿及其分流结果。
+         */
+        Draft: {
+            /**
+             * Back Translation Zh
+             * @description `body_ja` 的中文回译，供客服核对内容。
+             */
+            back_translation_zh: string;
+            /**
+             * Body Ja
+             * @description 回复正文（日语）。
+             */
+            body_ja: string;
+            /**
+             * Case Id
+             * @description 所属案件 ID。
+             */
+            case_id: string;
+            /**
+             * Checks
+             * @description 自动检查的结果。
+             */
+            checks?: components["schemas"]["DraftCheck"][];
+            /**
+             * Citations
+             * @description 草稿中的说法引用的知识库条目。
+             */
+            citations?: components["schemas"]["Citation"][];
+            /**
+             * Confidence
+             * @description 对草稿正确性的信心，0 到 1。
+             */
+            confidence: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 生成时间。
+             */
+            created_at: string;
+            /**
+             * Fallback Reason
+             * @description 工具循环失败、回退到固定流水线的原因（中文），例如超出步数、输出无法校验。
+             *     只有 `pipeline_with_tools` 才有。
+             */
+            fallback_reason?: string | null;
+            /**
+             * Id
+             * @description 草稿 ID，`Feedback.draft_id` 引用它。默认随机生成。
+             */
+            id?: string;
+            /**
+             * Message Seq
+             * @description 草稿回复的玩家邮件的 `seq`。
+             */
+            message_seq: number;
+            /**
+             * @description 生成方式。
+             * @default pipeline
+             */
+            mode: components["schemas"]["DraftMode"];
+            /**
+             * Model
+             * @description 生成草稿的 LLM 模型名。
+             */
+            model: string;
+            /** @description 分流结果。 */
+            route: components["schemas"]["Route"];
+            /**
+             * Route Reasons
+             * @description 分流的理由（中文），至少一条。客服需要知道为什么要审核或升级。
+             */
+            route_reasons: string[];
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Similar Case Refs
+             * @description 参考的相似历史案件。
+             */
+            similar_case_refs?: components["schemas"]["SimilarCaseRef"][];
+            /**
+             * Template Refs
+             * @description 使用的模板及选择理由。没有合适模板时为空。
+             */
+            template_refs?: components["schemas"]["TemplateRef"][];
+            /** @description 起草时的时间上下文（“现在”和问题发生时间），用于复现草稿。 */
+            time_context?: components["schemas"]["TimeContext"] | null;
+            /**
+             * Trace
+             * @description 工具调用的轨迹，在界面中展示。只有 `pipeline_with_tools` 才有。
+             */
+            trace?: components["schemas"]["TraceStep"][];
+        };
+        /**
+         * DraftCheck
+         * @description 对草稿做的一项自动检查的结果。
+         */
+        DraftCheck: {
+            /**
+             * Detail Zh
+             * @description 说明（中文）。不通过时写明问题在哪里。
+             */
+            detail_zh?: string | null;
+            /** @description 检查项。 */
+            kind: components["schemas"]["DraftCheckKind"];
+            /**
+             * Passed
+             * @description 是否通过。
+             */
+            passed: boolean;
+        };
+        /**
+         * DraftCheckKind
+         * @description 对草稿做的自动检查。
+         * @enum {string}
+         */
+        DraftCheckKind: "structure" | "register" | "forbidden_promise" | "template_window" | "slots_filled" | "citations" | "content_safety";
+        /**
+         * DraftMode
+         * @description 草稿的生成方式（提案 0003 §10）。#7 对比两种方式。
+         * @enum {string}
+         */
+        DraftMode: "pipeline" | "pipeline_with_tools";
+        /** DraftRequest */
+        DraftRequest: {
+            /** Template Id */
+            template_id?: string | null;
+        };
+        /**
+         * EntryType
+         * @description 知识库条目的类型，用于草稿的引用（`Citation`）。
+         * @enum {string}
+         */
+        EntryType: "template" | "intent" | "fact" | "policy" | "glossary" | "notice";
         /** ErrorDetail */
         ErrorDetail: {
             /**
@@ -48,6 +486,59 @@ export interface components {
             error: components["schemas"]["ErrorDetail"];
         };
         /**
+         * Feedback
+         * @description 客服对一封草稿的处理结果。
+         */
+        Feedback: {
+            /** @description 处理方式。 */
+            action: components["schemas"]["FeedbackAction"];
+            /**
+             * Actor
+             * @description 处理草稿的客服身份。MVP 中是界面上选择的客服名，真正的身份体系随 #13 引入。
+             */
+            actor: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 提交时间。
+             */
+            created_at: string;
+            /**
+             * Draft Id
+             * @description 草稿 ID（`Draft.id`）。
+             */
+            draft_id: string;
+            /**
+             * Edit Distance
+             * @description 草稿 `body_ja` 与 `final_body_ja` 之间按字符计算的编辑距离（Levenshtein）。
+             *     `approved` 时为 0，`edited` 时大于 0。
+             */
+            edit_distance: number;
+            /**
+             * Final Body Ja
+             * @description 最终发送的正文（日语）。`edited` 时必填；`approved` 时可省略，表示与草稿相同。
+             */
+            final_body_ja?: string | null;
+            /**
+             * Reason
+             * @description 修改、升级或拒绝的原因（中文），可选。
+             */
+            reason?: string | null;
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
+        /**
+         * FeedbackAction
+         * @description 客服对草稿的处理。
+         * @enum {string}
+         */
+        FeedbackAction: "approved" | "edited" | "escalated" | "rejected";
+        /**
          * Health
          * @description `GET /v1/health` 的响应。
          */
@@ -57,6 +548,344 @@ export interface components {
             /** Version */
             version: string;
         };
+        /**
+         * InquiryCategory
+         * @description 咨询类别，对应游戏内表单的 `お問い合わせ内容の種類`（见 docs/data.md）。
+         * @enum {string}
+         */
+        InquiryCategory: "bug" | "purchase" | "feedback" | "data_transfer" | "other";
+        /**
+         * InquiryForm
+         * @description 玩家通过游戏内表单提交的字段，从线程第 1 封邮件中解析（见 docs/data.md）。
+         *
+         *     所有字段都可选：样本中很多字段为空。账号 ID、玩家名和邮箱地址已被脱敏清空，
+         *     这里不保留。
+         */
+        InquiryForm: {
+            /**
+             * App Version
+             * @description App 版本，来源：`アプリバージョン`，例如 `1.4.0`。
+             */
+            app_version?: string | null;
+            /** @description 玩家选择的咨询类别，来源：`お問い合わせ内容の種類`。 */
+            category?: components["schemas"]["InquiryCategory"] | null;
+            /**
+             * Content
+             * @description 咨询内容的自由文本，来源：`お問い合わせ内容`。
+             */
+            content?: string | null;
+            /**
+             * Device
+             * @description 设备名，来源：`ご利用端末名`。
+             */
+            device?: string | null;
+            /**
+             * Has Attachment
+             * @description 是否有附件，来源：`添付ファイル`。无法判断时为 null。
+             */
+            has_attachment?: boolean | null;
+            /**
+             * Occurred At
+             * @description 问题发生的时间，来源：`問題が発生した日時`。保留玩家填写的原文，格式不统一。
+             */
+            occurred_at?: string | null;
+            /**
+             * Os Version
+             * @description OS 版本，来源：`ご利用のOSバージョン`。
+             */
+            os_version?: string | null;
+            /** @description 平台，来源：`ご利用環境`。 */
+            platform?: components["schemas"]["Platform"] | null;
+        };
+        /**
+         * Message
+         * @description 线程中的一封邮件。来源：样本表格的一行（见 docs/data.md）。
+         */
+        Message: {
+            /**
+             * Body
+             * @description 去除引用的历史邮件、修复常见乱码后的正文。分析和检索都使用它。
+             */
+            body: string;
+            /**
+             * Closing
+             * @description 客服回复结尾的固定结语和禁止转载声明，是 `body` 的结尾部分；其他邮件为空字符串。
+             * @default
+             */
+            closing: string;
+            /**
+             * Greeting
+             * @description 客服回复开头的固定问候语，是 `body` 的开头部分；其他邮件为空字符串。由 #4 拆出。
+             * @default
+             */
+            greeting: string;
+            /**
+             * Quoted
+             * @description 从 `raw_body` 中去除的引用文本，没有引用时为空字符串。保留它用于核对清洗效果。
+             * @default
+             */
+            quoted: string;
+            /**
+             * Raw Body
+             * @description 原始正文，保持收到时的原样。来源：`本文`。
+             */
+            raw_body: string;
+            /** @description 发送方，由导入步骤（#4）判断。 */
+            role: components["schemas"]["MessageRole"];
+            /**
+             * Role Evidence
+             * @description 判断 `role` 的依据，由导入步骤填写。只有客服回复和系统邮件有；玩家是默认的角色，
+             *     不记录依据。需要信任角色的下游按 `role_strength` 判断（提案 0003 §11）。
+             */
+            role_evidence?: components["schemas"]["RoleEvidence"][];
+            /**
+             * Sent At
+             * @description 发送时间，必须带时区。样本中大多没有，只能从后续邮件的引用头中推断。
+             */
+            sent_at?: string | null;
+            /**
+             * Seq
+             * @description 在线程中的序号，从 1 开始。来源：`メールID枝番`。
+             */
+            seq: number;
+            /**
+             * Thread Id
+             * @description 所属线程的 ID，来源：`メールID`。与 `Case.id` 相同。
+             */
+            thread_id: string;
+        };
+        /**
+         * MessageRole
+         * @description 邮件的发送方。
+         * @enum {string}
+         */
+        MessageRole: "player" | "agent" | "system" | "unknown";
+        /**
+         * NoReplyProposal
+         * @description 分析步骤提议“这个案件不需要回复”（提案 0003 §8）。
+         *
+         *     只是提议：是否自动把案件设为 `no_reply_needed`，由 #6 按原因和证据判断。
+         */
+        NoReplyProposal: {
+            /**
+             * Duplicate Of
+             * @description 重复提交时，对应的那个线程（`Case.id`）。原因为 `duplicate` 时必填，其他原因时为空。
+             */
+            duplicate_of?: string | null;
+            /** @description 原因。 */
+            reason: components["schemas"]["NoReplyReason"];
+            /**
+             * Reason Zh
+             * @description 理由（中文），展示给客服。
+             */
+            reason_zh: string;
+        };
+        /**
+         * NoReplyReason
+         * @description 不需要回复的原因（提案 0003 §8）。
+         * @enum {string}
+         */
+        NoReplyReason: "duplicate" | "system_message" | "other";
+        /**
+         * Platform
+         * @description 玩家使用的平台，对应表单的 `ご利用環境`。
+         * @enum {string}
+         */
+        Platform: "ios" | "google_play" | "other";
+        /**
+         * RoleEvidence
+         * @description 判断一封邮件发送方的一条依据（提案 0003 §11）。由导入步骤（#4）填写，不调用 LLM。
+         */
+        RoleEvidence: {
+            /**
+             * Detail
+             * @description 补充说明，例如 `keyword` 匹配的是问候语还是结语。
+             */
+            detail?: string | null;
+            /** @description 依据的种类。强度见 `strength`。 */
+            kind: components["schemas"]["RoleEvidenceKind"];
+            /**
+             * Source Message Id
+             * @description 相关的另一封邮件：`quote_corroboration` 时是引用它的那封邮件，`corroborated_text` 时
+             *     是正文相同、有引用佐证的那封客服回复。这两种依据必填，其他依据为空。
+             */
+            source_message_id?: string | null;
+            /**
+             * Thread Count
+             * @description `repeated_text` 时，同一正文出现在多少个不同线程中。只用于这种依据，且必填。
+             */
+            thread_count?: number | null;
+        };
+        /**
+         * RoleEvidenceKind
+         * @description 判断角色的依据（提案 0003 §11）。强度见 `ROLE_EVIDENCE_STRENGTH`。
+         *
+         *     前提：输入中没有发件人元数据，角色只能从文本判断；只靠文本时没有无法伪造的证据，
+         *     MVP 中由所有者的审核作为知识库的信任根，生产中应提供元数据。
+         * @enum {string}
+         */
+        RoleEvidenceKind: "metadata" | "quote_corroboration" | "corroborated_text" | "repeated_text" | "keyword" | "system_pattern";
+        /**
+         * Route
+         * @description 草稿的分流结果（D-001）。
+         * @enum {string}
+         */
+        Route: "auto_send" | "review" | "escalate";
+        /**
+         * SensitivityTag
+         * @description 敏感标签。为访问控制（#13）预留：带这些标签的案件以后只对获得授权的人员可见。
+         *
+         *     MVP 中由分析步骤（#6）提议，暂不影响可见性。确切的清单在 #13 的设计中确定。
+         * @enum {string}
+         */
+        SensitivityTag: "payment" | "account_security" | "minor" | "legal" | "personal_info";
+        /**
+         * Sentiment
+         * @description 玩家邮件的情绪。
+         * @enum {string}
+         */
+        Sentiment: "positive" | "neutral" | "negative" | "angry";
+        /**
+         * SimilarCaseRef
+         * @description 检索到的一个相似历史案件。
+         */
+        SimilarCaseRef: {
+            /**
+             * Case Id
+             * @description 相似案件的 ID。
+             */
+            case_id: string;
+            /**
+             * Reason Zh
+             * @description 为什么认为相似（中文），可选。
+             */
+            reason_zh?: string | null;
+            /**
+             * Score
+             * @description 相似度分数，越大越相似。只在同一次检索的结果之间可比。
+             */
+            score: number;
+        };
+        /**
+         * TemplateRef
+         * @description 草稿引用的一个模板。
+         */
+        TemplateRef: {
+            /**
+             * Reason Zh
+             * @description 为什么选择这个模板（中文），展示给客服。
+             */
+            reason_zh: string;
+            /**
+             * Template Id
+             * @description 模板 ID（`ReplyTemplate.id`）。
+             */
+            template_id: string;
+            /**
+             * Template Version
+             * @description 模板版本（`ReplyTemplate.version`）。
+             */
+            template_version: number;
+        };
+        /**
+         * TimeContext
+         * @description 起草时的时间上下文：“现在”和问题发生时间（提案 0003 §9）。
+         *
+         *     记录在草稿上，使草稿可以复现。评测中“现在”模拟到分钟。
+         */
+        TimeContext: {
+            /**
+             * @description 起草的时间。生产中是系统时间（`known`）；评测中取历史回复的发送时间，没有时估计。
+             *     不能是 `unavailable`。
+             */
+            now: components["schemas"]["TimePoint"];
+            /** @description 问题发生时间，来源：`InquiryForm.occurred_at`（玩家填写，不可信）。 */
+            problem_time: components["schemas"]["TimePoint"];
+        };
+        /**
+         * TimePoint
+         * @description 一个带状态的时间点。
+         *
+         *     - `known`：`value` 是确切值，没有区间。
+         *     - `estimated`：`earliest` 和 `latest` 给出区间，`value` 是区间内最可能的值（可选）。
+         *       只知道时刻、不知道日期时（表单中只有 `HH:MM`），`time_of_day` 是已知的时刻，
+         *       区间表示日期的范围。
+         *     - `unavailable`：所有值都为空。
+         */
+        TimePoint: {
+            /**
+             * Basis Zh
+             * @description 依据（中文），例如“表单”“系统时间”“线程 ID 相邻的已知发送时间”。
+             */
+            basis_zh?: string | null;
+            /**
+             * Earliest
+             * @description 估计区间的下界，`estimated` 时必填。
+             */
+            earliest?: string | null;
+            /**
+             * Latest
+             * @description 估计区间的上界，`estimated` 时必填。
+             */
+            latest?: string | null;
+            /** @description 可信程度。 */
+            status: components["schemas"]["TimeStatus"];
+            /**
+             * Time Of Day
+             * @description 已知的时刻（必须带时区），只用于“时刻已知、日期是区间”的估计。
+             */
+            time_of_day?: string | null;
+            /**
+             * Value
+             * @description 确切值（`known`），或区间内最可能的值（`estimated`，可选）。
+             */
+            value?: string | null;
+        };
+        /**
+         * TimeStatus
+         * @description 一个时间点的可信程度（提案 0003 §9）。
+         * @enum {string}
+         */
+        TimeStatus: "known" | "estimated" | "unavailable";
+        /**
+         * TraceStep
+         * @description 工具循环中的一步：模型调用了哪个工具、参数和结果（提案 0003 §10）。
+         */
+        TraceStep: {
+            /**
+             * Arguments
+             * @description 调用参数。工具执行前会按各自的参数模型再校验一次。
+             */
+            arguments?: {
+                [key: string]: string;
+            };
+            /**
+             * Error
+             * @description 调用失败时的原因，例如参数校验失败、超出范围、超时。成功时为空。
+             */
+            error?: string | null;
+            /**
+             * Result Summary Zh
+             * @description 结果摘要（中文）。工具结果和邮件正文一样是不可信数据，这里只记录摘要。
+             */
+            result_summary_zh?: string | null;
+            /**
+             * Step
+             * @description 第几步，从 1 开始连续编号。
+             */
+            step: number;
+            /**
+             * Tool
+             * @description 调用的工具名。
+             */
+            tool: string;
+        };
+        /**
+         * Urgency
+         * @description 处理的紧急程度。
+         * @enum {string}
+         */
+        Urgency: "low" | "normal" | "high";
     };
     responses: never;
     parameters: never;
@@ -66,6 +895,322 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_cases_v1_cases_get: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CaseStatus"] | null;
+                category?: components["schemas"]["InquiryCategory"] | null;
+                route?: components["schemas"]["Route"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_case_v1_cases__case_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_draft_v1_cases__case_id__drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backtranslate_v1_drafts__draft_id__backtranslate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktranslateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktranslateResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     health_v1_health_get: {
         parameters: {
             query?: never;

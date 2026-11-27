@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, FastAPI
 from pydantic import BaseModel
 
 from copilot import __version__
+from copilot.api import cases
 from copilot.api.auth import authorize
 from copilot.api.errors import ERROR_RESPONSES, install_error_handling
 from copilot.config import Settings, get_settings
+from copilot.draft import Drafter, StubDrafter
 
 API_PREFIX = "/v1"
 
@@ -38,13 +40,15 @@ def _v1_router() -> APIRouter:
         prefix=API_PREFIX, dependencies=[Depends(authorize)], responses=ERROR_RESPONSES
     )
     router.include_router(_meta_router())
+    router.include_router(cases.router())
     return router
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, drafter: Drafter | None = None) -> FastAPI:
     """创建应用。OpenAPI 文档放在 `/v1` 下，与 API 版本一起演进。
 
     数据库引擎在第一次用到时才创建（见 `copilot.api.deps`），只生成 OpenAPI 时不碰数据库。
+    `drafter` 默认是占位实现，#6 完成后改为真实实现。
     """
     settings = settings or get_settings()
 
@@ -64,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.database_url = settings.database_url
     app.state.engine = None
+    app.state.drafter = drafter or StubDrafter()
     install_error_handling(app)
     app.include_router(_v1_router())
     return app

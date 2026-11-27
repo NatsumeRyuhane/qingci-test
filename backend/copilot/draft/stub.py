@@ -3,7 +3,7 @@
 不调用 LLM，只返回符合契约的结果，让工作台的每个操作都能端到端走通。所有文字都以
 “【占位】”开头，分流理由写明“占位规则”，避免在演示或测试中被误认为真实结果。
 
-占位的分流规则只按表单中的类别判断，覆盖三种分流结果，方便界面开发：
+占位的分流规则只按案件已有的类别（导入时来自表单）判断，覆盖三种分流结果，方便界面开发：
 - 购买问题、数据迁移 → `escalate`（大致对应 #6 中“支付、数据丢失”的升级条件）
 - 意见建议 → `auto_send`（只是建议，仍由客服点击发送）
 - 其他 → `review`
@@ -48,8 +48,8 @@ class StubDrafter:
     def draft(self, case: Case, *, template_id: str | None = None) -> DraftResult:
         message = latest_player_message(case)
         now = self._clock()
-        category = (case.form.category if case.form else None) or case.category
-        category = category or InquiryCategory.OTHER
+        form_category = case.form.category if case.form else None
+        category = case.category or form_category or InquiryCategory.OTHER
         preview = " ".join(message.body.split())[:_PREVIEW_CHARS]
 
         analysis = CaseAnalysis(
