@@ -7,7 +7,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,9 +18,13 @@ class LLMTask(StrEnum):
     DRAFT = "draft"
     BACKTRANSLATE = "backtranslate"
     JUDGE = "judge"
+    ANNOTATE = "annotate"
+    """知识库模板的标注（#5）：中文说明、意图、风险等。离线批处理，调用次数少，可以用较强的模型。"""
 
 
 JsonMode = Literal["json_schema", "json_object", "none"]
+ServiceTier = Literal["default", "flex", "priority"]
+"""请求的服务等级（例如 OpenRouter 的 `service_tier`）。flex 更便宜、优先级更低。"""
 
 
 class MissingConfigError(RuntimeError):
@@ -44,21 +48,25 @@ class Settings(BaseSettings):
     llm_json_mode: JsonMode = "json_object"
     llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 2
+    llm_service_tier: ServiceTier | None = None
 
     llm_model_analyze: str | None = None
     llm_model_draft: str | None = None
     llm_model_backtranslate: str | None = None
     llm_model_judge: str | None = None
+    llm_model_annotate: str | None = None
 
     llm_base_url_analyze: str | None = None
     llm_base_url_draft: str | None = None
     llm_base_url_backtranslate: str | None = None
     llm_base_url_judge: str | None = None
+    llm_base_url_annotate: str | None = None
 
     llm_api_key_analyze: SecretStr | None = None
     llm_api_key_draft: SecretStr | None = None
     llm_api_key_backtranslate: SecretStr | None = None
     llm_api_key_judge: SecretStr | None = None
+    llm_api_key_annotate: SecretStr | None = None
 
     # --- Embedding：OpenAI 兼容的 /v1/embeddings ---
     embedding_base_url: str | None = None
@@ -68,6 +76,12 @@ class Settings(BaseSettings):
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"
     database_url: str = "sqlite:///data/copilot.db"
+
+    @field_validator("llm_service_tier", mode="before")
+    @classmethod
+    def _empty_tier_is_none(cls, value: object) -> object:
+        # 直接复制 .env.example 时值为空字符串，表示不指定。
+        return None if value == "" else value
 
     def llm_endpoint(self, task: LLMTask) -> Endpoint:
         """某个任务实际使用的端点。
