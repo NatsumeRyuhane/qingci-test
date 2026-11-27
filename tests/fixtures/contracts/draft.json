@@ -24,11 +24,23 @@
       "back_translation_zh": "【合成数据】感谢告知订单号，我们会交由负责部门核查。",
       "checks": [
         {
+          "kind": "structure",
+          "passed": true
+        },
+        {
           "kind": "register",
           "passed": true
         },
         {
           "kind": "forbidden_promise",
+          "passed": true
+        },
+        {
+          "kind": "citations",
+          "passed": true
+        },
+        {
+          "kind": "content_safety",
           "passed": true
         }
       ],
@@ -104,6 +116,10 @@
       "back_translation_zh": "感谢您宝贵的意见，我们会转达开发团队。",
       "checks": [
         {
+          "kind": "structure",
+          "passed": true
+        },
+        {
           "kind": "register",
           "passed": true
         },
@@ -113,6 +129,14 @@
         },
         {
           "kind": "slots_filled",
+          "passed": true
+        },
+        {
+          "kind": "citations",
+          "passed": true
+        },
+        {
+          "kind": "content_safety",
           "passed": true
         }
       ],

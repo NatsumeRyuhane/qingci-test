@@ -7,7 +7,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     embedding_base_url: str | None = None
     embedding_api_key: SecretStr | None = None
     embedding_model: str | None = None
+
+    # --- 起草与分流（#6） ---
+    draft_auto_send_min_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    draft_problem_time_lookback_days: int = Field(default=7, ge=1)
 
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"

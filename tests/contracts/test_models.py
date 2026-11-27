@@ -10,6 +10,7 @@ from copilot.contracts import (
     EXPORTED_MODELS,
     Case,
     CaseAnalysis,
+    CaseStatus,
     Contract,
     Document,
     Draft,
@@ -329,13 +330,14 @@ def test_fixture_cross_references() -> None:
         assert f"{draft.case_id}:{draft.message_seq}" in messages
 
 
-# --- 不回复 ---
+# --- 不回复与分析附加字段 ---
 
 
 def test_no_reply_proposal_roundtrip() -> None:
     analysis = load_models(CaseAnalysis, "case_analysis")[1]
     assert analysis.no_reply is not None
     assert analysis.no_reply.duplicate_of == "SYN-0003"
+    assert analysis.thread_judgement is CaseStatus.NO_REPLY_NEEDED
 
 
 @pytest.mark.parametrize(
@@ -357,6 +359,38 @@ def test_case_is_not_its_own_duplicate() -> None:
     item["no_reply"]["duplicate_of"] = item["case_id"]
     with pytest.raises(ValidationError, match="自己的重复"):
         CaseAnalysis.model_validate(item)
+
+
+def test_analysis_intent_confidence_range() -> None:
+    item = load_items("case_analysis")[0] | {"intent_confidence": 1.2}
+    with pytest.raises(ValidationError, match="intent_confidence"):
+        CaseAnalysis.model_validate(item)
+
+
+@pytest.mark.parametrize("status", ["drafted", "escalated", "undetermined"])
+def test_analysis_thread_judgement_rejects_other_statuses(status: str) -> None:
+    item = load_items("case_analysis")[0] | {"thread_judgement": status}
+    with pytest.raises(ValidationError, match="thread_judgement"):
+        CaseAnalysis.model_validate(item)
+
+
+def test_analysis_optional_fields_default_when_omitted() -> None:
+    item = {
+        k: v
+        for k, v in load_items("case_analysis")[0].items()
+        if k
+        not in {
+            "intent_confidence",
+            "thread_judgement",
+            "thread_judgement_reason_zh",
+            "injection_signals",
+        }
+    }
+    analysis = CaseAnalysis.model_validate(item)
+    assert analysis.intent_confidence is None
+    assert analysis.thread_judgement is None
+    assert analysis.thread_judgement_reason_zh is None
+    assert analysis.injection_signals == []
 
 
 # --- 草稿的引用、轨迹与时间上下文 ---

@@ -118,14 +118,20 @@ class Route(StrEnum):
 class DraftCheckKind(StrEnum):
     """对草稿做的自动检查。"""
 
+    STRUCTURE = "structure"
+    """必需结构：固定的问候语、结语和禁止转载声明是否齐全，正文是否非空且无重复框架。"""
     REGISTER = "register"
-    """语体：敬语和固定的开头、结尾是否符合规范（见 docs/data.md 关键发现 3）。"""
+    """语体：正文的敬体（です・ます調）是否得体（见 docs/data.md 关键发现 3）。"""
     FORBIDDEN_PROMISE = "forbidden_promise"
     """是否做出了不允许的承诺，例如补偿、退款、具体的修复时间。"""
     TEMPLATE_WINDOW = "template_window"
     """引用的模板是否在有效期内（只适用于某次事故的模板，见 docs/data.md 关键发现 2）。"""
     SLOTS_FILLED = "slots_filled"
     """模板中的占位符是否都已填写。"""
+    CITATIONS = "citations"
+    """引用检查：引用的知识库条目必须已提供且已批准，新增的事实性说法须有引用。"""
+    CONTENT_SAFETY = "content_safety"
+    """内容安全：草稿中不能含有非模板的外部链接、邮箱、HTML/脚本、不可见控制符或其他案件信息。"""
 
 
 class FeedbackAction(StrEnum):

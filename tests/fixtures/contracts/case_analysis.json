@@ -9,6 +9,7 @@
       "summary_zh": "玩家购买“ジェム100個”后未到账，已按要求提供购买时间和订单号，等待核查。",
       "category": "purchase",
       "intent": "purchase_not_delivered",
+      "intent_confidence": 0.92,
       "sentiment": "neutral",
       "urgency": "high",
       "facts": {
@@ -20,6 +21,7 @@
       "sensitivity_tags": [
         "payment"
       ],
+      "injection_signals": [],
       "model": "fake-llm",
       "created_at": "2024-03-11T12:00:00+09:00"
     },
@@ -31,6 +33,7 @@
       "summary_zh": "玩家提出意见，内容与另一个已回复的线程完全相同，是重复提交。",
       "category": "feedback",
       "intent": "feedback_general",
+      "intent_confidence": 0.96,
       "sentiment": "positive",
       "urgency": "low",
       "no_reply": {
@@ -38,6 +41,8 @@
         "reason_zh": "与已回复的线程 SYN-0003 内容相同，玩家提交了两次。",
         "duplicate_of": "SYN-0003"
       },
+      "thread_judgement": "no_reply_needed",
+      "thread_judgement_reason_zh": "与已回复线程内容一致，无需重复回复。",
       "model": "fake-llm",
       "created_at": "2024-03-11T12:05:00+09:00"
     }

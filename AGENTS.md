@@ -204,6 +204,8 @@ uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档
 | ORM 模型 | `uv run alembic revision --autogenerate -m "<说明>"`，检查生成的迁移脚本 |
 | 契约模型（`backend/copilot/contracts/`） | 同步 `tests/fixtures/contracts/` 中的合成数据和 [docs/architecture.md](docs/architecture.md)；不兼容的改动要把 `schema_version` 加 1（见该文档的“约定”） |
 | 环境变量 | 同步 `.env.example`（`tests/test_config.py` 会检查） |
+| 新增或修改一层安全防线，发现新的攻击方式或漏洞 | 在 [docs/security.md](docs/security.md) 中登记（攻击 `ATK-NN`、漏洞 `H-NN`），写明应当拦截的层和修补位置；新攻击先加入合成样本，再决定是否修补 |
+| 新增或改变系统的一条保证（安全、分流、知识库的规则） | 在 [docs/claims.md](docs/claims.md) 中写明这条主张、保证它的代码和守护它的测试；还没有测试的写进“待验证”，并注明由哪个 issue 补上（`tests/test_claims.py` 会检查引用的测试存在） |
 
 文档改动：确认所有相对链接都能正确解析。
 
@@ -216,7 +218,7 @@ README.md            项目概览与上手指南
 .env.example         应用读取的全部环境变量，不含值
 pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
 alembic.ini          仅供开发时生成数据库迁移
-backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、draft/（起草：时间、检索、检查与分流）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
 scripts/             辅助脚本（导出 requirements、生成 API 类型）

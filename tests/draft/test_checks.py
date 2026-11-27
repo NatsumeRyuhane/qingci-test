@@ -1,0 +1,331 @@
+"""草稿的组装与代码自检（#6）。SYNTHETIC：全部是合成数据。"""
+
+from pathlib import Path
+
+import pytest
+
+from copilot.contracts import DraftCheckKind, EntryType
+from copilot.draft.checks import (
+    CheckContext,
+    CitedClaim,
+    ComposedDraft,
+    assemble,
+    fill_slots,
+    run_checks,
+    sentences,
+)
+from copilot.draft.retrieval import Candidate
+from copilot.draft.timectx import WindowMatch
+from copilot.kb.knowledge import StyleGuide, load_knowledge
+from tests.draft.factories import forbidden, template
+
+KNOWLEDGE = Path(__file__).parents[2] / "knowledge"
+TEMPLATE_BODY = "【合成データ】ご不便をおかけしております。現在調査を進めております。"
+
+
+@pytest.fixture(scope="module")
+def guide() -> StyleGuide:
+    return load_knowledge(KNOWLEDGE).style_guide
+
+
+def candidate(
+    body: str = TEMPLATE_BODY, *, window: WindowMatch = WindowMatch.INSIDE, time_bound: bool = False
+) -> Candidate:
+    return Candidate(
+        template=template("tpl-syn", body=body, slots=sorted(set(_slots(body)))),
+        time_bound=time_bound,
+        window=window,
+    )
+
+
+def _slots(body: str) -> list[str]:
+    from copilot.contracts import PLACEHOLDER_PATTERN
+
+    return PLACEHOLDER_PATTERN.findall(body)
+
+
+def compose(
+    guide: StyleGuide,
+    core: str,
+    *,
+    chosen: Candidate | None = None,
+    slots: dict[str, str] | None = None,
+    citations: list[CitedClaim] | None = None,
+) -> ComposedDraft:
+    chosen = chosen if chosen is not None else candidate()
+    return ComposedDraft(
+        body_ja=assemble(guide, core),
+        core_ja=core,
+        candidate=chosen,
+        slot_values=slots or {},
+        citations=citations or [],
+    )
+
+
+def results(draft: ComposedDraft, context: CheckContext) -> dict[DraftCheckKind, str | None]:
+    """未通过的检查 → 说明。"""
+    return {c.kind: c.detail_zh for c in run_checks(draft, context) if not c.passed}
+
+
+def ctx(guide: StyleGuide, **values: object) -> CheckContext:
+    return CheckContext(guide=guide, forbidden_promises=[forbidden()], **values)  # type: ignore[arg-type]
+
+
+def test_template_only_draft_passes_everything(guide: StyleGuide) -> None:
+    draft = compose(guide, TEMPLATE_BODY)
+    assert results(draft, ctx(guide)) == {}
+    checks = run_checks(draft, ctx(guide))
+    assert [c.kind for c in checks] == [
+        DraftCheckKind.STRUCTURE,
+        DraftCheckKind.REGISTER,
+        DraftCheckKind.FORBIDDEN_PROMISE,
+        DraftCheckKind.TEMPLATE_WINDOW,
+        DraftCheckKind.SLOTS_FILLED,
+        DraftCheckKind.CITATIONS,
+        DraftCheckKind.CONTENT_SAFETY,
+    ]
+
+
+def test_assemble_order_and_no_duplicate_phrases(guide: StyleGuide) -> None:
+    apology = guide.apologies[0].ja
+    contact = guide.contact_again[0].ja
+    body = assemble(guide, "【合成】答复。", apology_ja=apology, contact_again_ja=contact)
+    assert body.index(guide.greeting.ja) < body.index(apology) < body.index("【合成】答复")
+    assert body.index("【合成】答复") < body.index(contact) < body.index(guide.closing.ja)
+    assert body.endswith(guide.notice.ja)
+    # 答复中已有这句致歉时不重复添加。
+    again = assemble(guide, f"{apology}\n【合成】答复。", apology_ja=apology)
+    assert again.count(apology) == 1
+
+
+def test_structure_detects_missing_or_repeated_frame(guide: StyleGuide) -> None:
+    draft = ComposedDraft(body_ja=f"【合成】{TEMPLATE_BODY}", core_ja=TEMPLATE_BODY, candidate=None)
+    detail = results(draft, ctx(guide))[DraftCheckKind.STRUCTURE]
+    assert detail is not None and "问候语" in detail and "结语" in detail
+    doubled = compose(guide, f"{guide.greeting.ja}\n{TEMPLATE_BODY}")
+    assert "重复" in (results(doubled, ctx(guide))[DraftCheckKind.STRUCTURE] or "")
+    empty = compose(guide, " ")
+    assert "为空" in (results(empty, ctx(guide))[DraftCheckKind.STRUCTURE] or "")
+
+
+def test_register_flags_plain_form_added_sentence(guide: StyleGuide) -> None:
+    core = f"{TEMPLATE_BODY}\n【合成】すぐに直る。"
+    failed = results(compose(guide, core), ctx(guide))
+    assert DraftCheckKind.REGISTER in failed
+    polite = compose(guide, f"{TEMPLATE_BODY}\n【合成】ご確認ください。")
+    assert DraftCheckKind.REGISTER not in results(polite, ctx(guide))
+    # 没有句末标点的列表项不检查。
+    listed = compose(guide, f"{TEMPLATE_BODY}\n・購入日時")
+    assert DraftCheckKind.REGISTER not in results(listed, ctx(guide))
+
+
+def test_forbidden_promise_in_added_text_fails(guide: StyleGuide) -> None:
+    draft = compose(guide, f"{TEMPLATE_BODY}\n【合成】全額を返金いたします。")
+    detail = results(draft, ctx(guide))[DraftCheckKind.FORBIDDEN_PROMISE]
+    assert detail is not None and "返金いたします" in detail
+
+
+def test_forbidden_phrase_inside_approved_template_is_noted_not_failed(guide: StyleGuide) -> None:
+    body = "【合成データ】対象のお客様には返金いたします。"
+    draft = compose(guide, body, chosen=candidate(body))
+    checks = {c.kind: c for c in run_checks(draft, ctx(guide))}
+    assert checks[DraftCheckKind.FORBIDDEN_PROMISE].passed
+    assert "模板原文" in (checks[DraftCheckKind.FORBIDDEN_PROMISE].detail_zh or "")
+
+
+def test_rewritten_template_is_checked_as_added_text(guide: StyleGuide) -> None:
+    body = "【合成データ】対象のお客様には返金いたします。"
+    draft = compose(
+        guide, "【合成データ】対象のお客様には全員に返金いたします。", chosen=candidate(body)
+    )
+    assert DraftCheckKind.FORBIDDEN_PROMISE in results(draft, ctx(guide))
+
+
+@pytest.mark.parametrize(
+    ("window", "time_bound", "passed", "text"),
+    [
+        (WindowMatch.INSIDE, True, True, "匹配"),
+        (WindowMatch.UNCERTAIN, True, False, "无法确定"),
+        (WindowMatch.UNCERTAIN, False, False, "无法确定"),
+        (WindowMatch.OUTSIDE, True, False, "不适用"),
+    ],
+)
+def test_template_window(
+    guide: StyleGuide, window: WindowMatch, time_bound: bool, passed: bool, text: str
+) -> None:
+    draft = compose(guide, TEMPLATE_BODY, chosen=candidate(window=window, time_bound=time_bound))
+    check = next(
+        c for c in run_checks(draft, ctx(guide)) if c.kind is DraftCheckKind.TEMPLATE_WINDOW
+    )
+    assert check.passed is passed
+    assert text in (check.detail_zh or "")
+
+
+def test_no_template_passes_window(guide: StyleGuide) -> None:
+    draft = ComposedDraft(
+        body_ja=assemble(guide, "【合成】ご連絡ありがとうございます。"),
+        core_ja="【合成】ご連絡ありがとうございます。",
+        candidate=None,
+    )
+    assert DraftCheckKind.TEMPLATE_WINDOW not in results(draft, ctx(guide))
+
+
+def test_slots(guide: StyleGuide) -> None:
+    body = "【合成データ】{{item}}の件について確認いたします。"
+    filled = fill_slots(body, {"item": "ジェム"})
+    assert filled == "【合成データ】ジェムの件について確認いたします。"
+    ok = compose(guide, filled, chosen=candidate(body), slots={"item": "ジェム"})
+    assert results(ok, ctx(guide)) == {}
+    unfilled = fill_slots(body, {"item": "  "})
+    bad = compose(guide, unfilled, chosen=candidate(body), slots={"item": "  "})
+    assert "item" in (results(bad, ctx(guide))[DraftCheckKind.SLOTS_FILLED] or "")
+
+
+def test_uncited_added_claim_fails_and_citation_fixes_it(guide: StyleGuide) -> None:
+    claim = "【合成】この不具合はバージョン9.9で修正されました。"
+    core = f"{TEMPLATE_BODY}\n{claim}"
+    assert DraftCheckKind.CITATIONS in results(compose(guide, core), ctx(guide))
+    cite = CitedClaim(EntryType.NOTICE, "syn-fix", 1, "已在 9.9 修复", sentence_ja=claim)
+    provided = frozenset({(EntryType.NOTICE, "syn-fix", 1)})
+    draft = compose(guide, core, citations=[cite])
+    assert DraftCheckKind.CITATIONS not in results(draft, ctx(guide, provided_entries=provided))
+
+
+def test_citation_of_unprovided_entry_fails(guide: StyleGuide) -> None:
+    cite = CitedClaim(EntryType.FACT, "syn-secret", 3, "【合成】")
+    draft = compose(guide, TEMPLATE_BODY, citations=[cite])
+    detail = results(draft, ctx(guide))[DraftCheckKind.CITATIONS]
+    assert detail is not None and "fact:syn-secret@3" in detail
+
+
+def test_info_request_cites_the_intent(guide: StyleGuide) -> None:
+    """索要信息的句子没有豁免：引用分类出的意图（它的 required_info_zh 列出了要索要什么）。"""
+    ask = "お手数ですが、購入日時をお知らせください。"
+    without = compose(guide, f"{TEMPLATE_BODY}\n{ask}")
+    assert DraftCheckKind.CITATIONS in results(without, ctx(guide))
+    cite = CitedClaim(EntryType.INTENT, "syn_bug", 1, "索要购买时间", sentence_ja=ask)
+    provided = frozenset({(EntryType.INTENT, "syn_bug", 1)})
+    draft = compose(guide, f"{TEMPLATE_BODY}\n{ask}", citations=[cite])
+    assert results(draft, ctx(guide, provided_entries=provided)) == {}
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        "【合成】詳しくは https://evil.example をご覧ください。",
+        "【合成】syn@example.com までご連絡ください。",
+        "【合成】<script>alert(1)</script>",
+        "【合成】＜img src=x＞",
+        "【合成】ご確認ください\u202e。",
+    ],
+)
+def test_content_safety(guide: StyleGuide, added: str) -> None:
+    draft = compose(guide, f"{TEMPLATE_BODY}\n{added}")
+    assert DraftCheckKind.CONTENT_SAFETY in results(draft, ctx(guide))
+
+
+def test_url_inside_approved_template_is_allowed(guide: StyleGuide) -> None:
+    body = "【合成データ】詳細は https://example.invalid/help をご確認ください。"
+    draft = compose(guide, body, chosen=candidate(body))
+    assert DraftCheckKind.CONTENT_SAFETY not in results(draft, ctx(guide))
+
+
+def test_other_case_text_is_detected(guide: StyleGuide) -> None:
+    other = "【合成】別のお客様のアカウントで購入したジェムが消えてしまいました"
+    draft = compose(guide, f"{TEMPLATE_BODY}\n{other}。")
+    detail = results(draft, ctx(guide, foreign_texts=[other]))[DraftCheckKind.CONTENT_SAFETY]
+    assert detail is not None and "其他案件" in detail
+
+
+def test_sentences_split() -> None:
+    assert sentences("あ。い！\nう？ え") == ["あ。", "い！", "う？", "え"]
+
+
+# --- 评审意见（PR #28）：豁免只给模板的原文措辞和代码确认的句式 -----------------
+
+SLOT_BODY = "【合成データ】{{item}}の件について確認いたします。"
+
+
+@pytest.mark.parametrize(
+    ("value", "kind"),
+    [
+        ("返金いたします。", DraftCheckKind.FORBIDDEN_PROMISE),
+        ("https://phish.example", DraftCheckKind.CONTENT_SAFETY),
+        ("syn@example.com", DraftCheckKind.CONTENT_SAFETY),
+    ],
+)
+def test_slot_values_are_checked_as_untrusted(
+    guide: StyleGuide, value: str, kind: DraftCheckKind
+) -> None:
+    filled = fill_slots(SLOT_BODY, {"item": value})
+    draft = compose(guide, filled, chosen=candidate(SLOT_BODY), slots={"item": value})
+    assert kind in results(draft, ctx(guide))
+
+
+def test_model_cannot_exempt_a_factual_sentence(guide: StyleGuide) -> None:
+    claim = "【合成】この不具合はバージョン9.9で修正されました。"
+    assert DraftCheckKind.CITATIONS in results(
+        compose(guide, f"{TEMPLATE_BODY}\n{claim}"), ctx(guide)
+    )
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "お手数ですが、購入日時をお知らせください。",
+        "スクリーンショットを添付いただけますでしょうか。",
+        "大変お手数をおかけしますが、ご利用の端末名と、問題が発生した日時をお知らせください。",
+        "恐れ入りますが、エラー画面のスクリーンショットをお送りいただけますでしょうか。",
+        "修正されましたので、ご確認ください。",
+        "返金のお手続きをお願いいたします。",
+        "現在調査しております。",
+        "このアイテムは無料ですので、ご確認ください。",
+        "現在サーバーは正常ですので、ご確認ください。",
+        "このアイテムは無料ですので、購入日時をお知らせください。",
+        "サーバーが復旧したため、購入日時をお知らせください。",
+        "アプリを再起動してください。",
+        # 评审意见（PR #28）中绕过白名单的句子，作为回归样本保留。
+        "サーバーが復旧したことに伴い、エラー発生日時をお知らせください。",
+        "サーバーが正常に稼働中につき、発生日時をお知らせください。",
+        "アカウントが確定したことをお知らせください。",
+    ],
+)
+def test_every_added_sentence_needs_a_citation(guide: StyleGuide, sentence: str) -> None:
+    """没有按句式判断的豁免（docs/security.md H-02）：请求、操作说明、带陈述分句的请求
+    都一样要求引用。"""
+    draft = compose(guide, f"{TEMPLATE_BODY}\n{sentence}")
+    assert DraftCheckKind.CITATIONS in results(draft, ctx(guide))
+
+
+def test_citation_must_match_the_whole_sentence(guide: StyleGuide) -> None:
+    claim = "【合成】この不具合はバージョン9.9で修正されました。"
+    provided = frozenset({(EntryType.NOTICE, "syn-fix", 1)})
+    for partial in ("。", "修正されました", "【合成】この不具合は"):
+        cite = CitedClaim(EntryType.NOTICE, "syn-fix", 1, "【合成】", sentence_ja=partial)
+        draft = compose(guide, f"{TEMPLATE_BODY}\n{claim}", citations=[cite])
+        assert DraftCheckKind.CITATIONS in results(draft, ctx(guide, provided_entries=provided))
+
+
+@pytest.mark.parametrize(
+    ("body", "value"),
+    [
+        ("【合成データ】{{action}}いたします。", "返金"),  # 值在前，模板原文在后
+        ("【合成データ】全額を返{{rest}}", "金いたします。"),  # 短语跨在边界上
+    ],
+)
+def test_promise_formed_across_slot_boundary_fails(
+    guide: StyleGuide, body: str, value: str
+) -> None:
+    """评审意见（PR #28）：模板原文与填入的值拼接后才出现的政策短语不能豁免。"""
+    name = _slots(body)[0]
+    filled = fill_slots(body, {name: value})
+    draft = compose(guide, filled, chosen=candidate(body), slots={name: value})
+    detail = results(draft, ctx(guide))[DraftCheckKind.FORBIDDEN_PROMISE]
+    assert detail is not None and "拼成了" in detail
+
+
+def test_phrase_entirely_in_template_literal_stays_exempt_with_slots(guide: StyleGuide) -> None:
+    body = "【合成データ】{{item}}については返金いたします。"
+    filled = fill_slots(body, {"item": "ジェム"})
+    draft = compose(guide, filled, chosen=candidate(body), slots={"item": "ジェム"})
+    assert DraftCheckKind.FORBIDDEN_PROMISE not in results(draft, ctx(guide))
