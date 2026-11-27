@@ -66,7 +66,11 @@ describe("Workspace", () => {
         "【合成データ】訳文です。",
       ),
     );
-    expect(posts(calls, "/translate")[0].body).toEqual({ body_zh: "【合成】我们正在调查。" });
+    expect(posts(calls, "/translate")[0].body).toEqual({
+      body_zh: "【合成】我们正在调查。",
+      base_zh: DRAFT.back_translation_zh,
+      base_ja: DRAFT.body_ja,
+    });
     expect(screen.getByText("全部通过")).toBeInTheDocument();
   });
 
@@ -205,6 +209,8 @@ describe("Workspace", () => {
     await waitFor(() => expect(posts(calls, "/translate")).toHaveLength(1));
     expect(posts(calls, "/translate")[0].body).toEqual({
       body_zh: "【合成】第一段。\n\n【合成】改过的第二段。\n\n【合成】第三段。",
+      base_zh: zh,
+      base_ja: ja,
     });
     // 译文只有一段：与中文段数不同时提示
     expect(await screen.findByText(/逐段对照可能错位/)).toBeInTheDocument();

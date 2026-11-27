@@ -244,6 +244,9 @@ export function Editor({
   const [jaParts, setJaParts] = useState(() => splitParagraphs(draft.body_ja));
   const zh = joinParagraphs(zhParts);
   const ja = joinParagraphs(jaParts);
+  // 上一次中日文对齐时的中文（草稿的回译，或上一次翻译时的中文）。翻译时只重新翻译与它不同的段落，
+  // 其他段落保留当前的日语（包括直接改过的段落）。
+  const [baseZh, setBaseZh] = useState(draft.back_translation_zh);
   const [zhDirty, setZhDirty] = useState(false);
   const [jaUnlocked, setJaUnlocked] = useState(false);
   const [jaManual, setJaManual] = useState(false);
@@ -286,12 +289,13 @@ export function Editor({
       call(
         api.POST("/v1/drafts/{draft_id}/translate", {
           params: { path: { draft_id: draft.id } },
-          body: { body_zh: zh },
+          body: { body_zh: zh, base_zh: baseZh, base_ja: ja },
         }),
       ),
     );
     if (!result) return;
     setJaParts(splitParagraphs(result.body_ja));
+    setBaseZh(zh);
     setChecks(result.checks);
     setChecksStale(false);
     setZhDirty(false);
@@ -452,7 +456,7 @@ export function Editor({
               type="button"
               disabled={busy !== null}
               onClick={() => {
-                setZhParts(splitParagraphs(draft.back_translation_zh));
+                setZhParts(splitParagraphs(baseZh));
                 setZhDirty(false);
               }}
             >
@@ -576,7 +580,10 @@ export function Editor({
           onCancel={() => setDialog(null)}
           onConfirm={() => void translate()}
         >
-          <p>你直接改过日语。按中文重新翻译会覆盖这些修改。</p>
+          <p>
+            你直接改过日语。只会重新翻译你改过的中文段落，这些段落中你对日语的直接修改会被覆盖；
+            其他段落保留。
+          </p>
         </Dialog>
       )}
     </div>

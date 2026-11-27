@@ -143,6 +143,8 @@ export interface paths {
         /**
          * Translate
          * @description 把客服编辑的中文回复译成日语（LLM），并对译文自检。不修改草稿本身。
+         *
+         *     给出基准时只重新翻译改过的段落，没有改过的段落保留基准日语；没有修改时不调用 LLM。
          */
         post: operations["translate_v1_drafts__draft_id__translate_post"];
         delete?: never;
@@ -1412,6 +1414,10 @@ export interface components {
         };
         /** TranslateRequest */
         TranslateRequest: {
+            /** Base Ja */
+            base_ja?: string | null;
+            /** Base Zh */
+            base_zh?: string | null;
             /** Body Zh */
             body_zh: string;
         };

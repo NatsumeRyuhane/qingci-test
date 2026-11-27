@@ -42,7 +42,7 @@ from copilot.llm import (
 )
 from copilot.storage import create_engine_for
 from copilot.workbench.drafting import DrafterFailedError, DrafterUnavailableError
-from copilot.workbench.editing import check_edited, translate_reply
+from copilot.workbench.editing import check_edited, translate_edit
 
 logger = logging.getLogger(__name__)
 
@@ -221,11 +221,17 @@ class PipelineDrafter:
         glossary = self._current_view().glossary
         return self._run(back_translate(body_ja, self._client(), glossary))
 
-    def translate(self, body_zh: str) -> str:
+    def translate(
+        self, body_zh: str, *, base_zh: str | None = None, base_ja: str | None = None
+    ) -> str:
         self._params()
         view = self._current_view()
         guide, _, _ = self._load()
-        return self._run(translate_reply(body_zh, self._client(), guide, view.glossary))
+        return self._run(
+            translate_edit(
+                body_zh, self._client(), guide, view.glossary, base_zh=base_zh, base_ja=base_ja
+            )
+        )
 
     def check(self, body_ja: str) -> list[DraftCheck]:
         guide, _, _ = self._load()

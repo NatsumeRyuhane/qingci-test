@@ -52,8 +52,14 @@ class Drafter(Protocol):
         """把（客服编辑后的）日语回复回译为中文，供不懂日语的客服核对。"""
         ...
 
-    def translate(self, body_zh: str) -> str:
-        """把客服编辑的中文回复译成日语全文（客服用中文工作）。"""
+    def translate(
+        self, body_zh: str, *, base_zh: str | None = None, base_ja: str | None = None
+    ) -> str:
+        """把客服编辑的中文回复译成日语全文（客服用中文工作）。
+
+        给出基准（上一次对齐时的中日文）时只重新翻译改过的段落，其他段落保留基准日语
+        （`copilot.workbench.editing.translate_edit`）。
+        """
         ...
 
     def check(self, body_ja: str) -> list[DraftCheck]:
@@ -143,8 +149,25 @@ class StubDrafter:
     def backtranslate(self, body_ja: str) -> str:
         return f"【占位】没有调用回译服务。日语正文共 {len(body_ja)} 个字符。"
 
-    def translate(self, body_zh: str) -> str:
-        return f"{_GREETING_JA}\n\n【占位：没有调用翻译服务】\n{body_zh.strip()}\n\n{_CLOSING_JA}"
+    def translate(
+        self, body_zh: str, *, base_zh: str | None = None, base_ja: str | None = None
+    ) -> str:
+        from copilot.workbench.editing import changed_paragraphs, join_paragraphs, split_paragraphs
+
+        changed = (
+            changed_paragraphs(body_zh, base_zh, base_ja)
+            if base_zh is not None and base_ja is not None
+            else None
+        )
+        if changed is None or base_ja is None:
+            return (
+                f"{_GREETING_JA}\n\n【占位：没有调用翻译服务】\n{body_zh.strip()}\n\n{_CLOSING_JA}"
+            )
+        zh, _ = split_paragraphs(body_zh)
+        ja, separators = split_paragraphs(base_ja)
+        for i in changed:
+            ja[i] = f"【占位翻訳】{zh[i]}"
+        return join_paragraphs(ja, separators)
 
     def check(self, body_ja: str) -> list[DraftCheck]:
         structured = body_ja.startswith(_GREETING_JA) and body_ja.rstrip().endswith(_CLOSING_JA)

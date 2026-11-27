@@ -9,6 +9,7 @@
   沿用草稿原来的结果。
 """
 
+import asyncio
 import re
 from collections.abc import Sequence
 
@@ -42,6 +43,23 @@ TRANSLATE_PROMPT = """把 <reply_zh> 中的中文客服回复正文翻译成日�
 {glossary}"""
 
 _PARAGRAPH = re.compile(r"\n[ \t\u3000]*\n\s*")
+_SEPARATOR = re.compile(r"(\n[ \t\u3000]*\n\s*)")
+"""与前端（`frontend/src/lib/paragraphs.ts`）相同的段落规则，拆分时保留分隔符。"""
+
+
+def split_paragraphs(text: str) -> tuple[list[str], list[str]]:
+    """（段落, 分隔符）。`join_paragraphs` 拼回后与原文完全相同。"""
+    parts = _SEPARATOR.split(text)
+    return parts[0::2], parts[1::2]
+
+
+def join_paragraphs(blocks: list[str], separators: list[str]) -> str:
+    return "".join(
+        block if i == 0 else (separators[i - 1] if i - 1 < len(separators) else "\n\n") + block
+        for i, block in enumerate(blocks)
+    )
+
+
 FRAME_PARAGRAPHS = 3
 """至少有这么多段时，第一段和最后一段是固定的问候语和结语（#6 按风格指南组装每封草稿）。"""
 
@@ -66,6 +84,54 @@ async def translate_reply(
     ]
     translated = (await llm.complete_text(LLMTask.TRANSLATE, messages)).strip()
     return assemble(guide, translated) if framed else translated
+
+
+def changed_paragraphs(body_zh: str, base_zh: str, base_ja: str) -> list[int] | None:
+    """客服改过的中文段落（下标）。中文、基准中文和基准日语段数不一致时（增删了段落）返回 None。
+
+    基准是上一次对齐时的中日文（草稿本身，或上一次翻译的结果）。至少 3 段时首尾段是固定的
+    问候语和结语，不算修改。
+    """
+    zh, _ = split_paragraphs(body_zh)
+    base, _ = split_paragraphs(base_zh)
+    ja, _ = split_paragraphs(base_ja)
+    if not len(zh) == len(base) == len(ja):
+        return None
+    frame = {0, len(zh) - 1} if len(zh) >= FRAME_PARAGRAPHS else set()
+    return [i for i in range(len(zh)) if i not in frame and zh[i].strip() != base[i].strip()]
+
+
+async def translate_edit(
+    body_zh: str,
+    llm: LLMClient,
+    guide: StyleGuide,
+    glossary: Sequence[GlossaryEntry] = (),
+    *,
+    base_zh: str | None = None,
+    base_ja: str | None = None,
+) -> str:
+    """只重新翻译客服改过的段落，其他段落保留基准日语的原文（逐段对照）。
+
+    没有修改过的段落不再翻译：中文回译再译回日语不一定得到原来的句子（实测一段普通的
+    “今後とも…”被译成了固定结语，结语重复出现），而且客服直接改过的日语也不应被覆盖。
+    段数变了（客服增删了段落）或没有基准时，整封翻译（`translate_reply`）。
+    """
+    changed = (
+        changed_paragraphs(body_zh, base_zh, base_ja)
+        if base_zh is not None and base_ja is not None
+        else None
+    )
+    if changed is None:
+        return await translate_reply(body_zh, llm, guide, glossary)
+    assert base_ja is not None
+    zh, _ = split_paragraphs(body_zh)
+    ja, separators = split_paragraphs(base_ja)
+    translated = await asyncio.gather(
+        *(translate_reply(zh[i], llm, guide, glossary) for i in changed)
+    )
+    for i, text in zip(changed, translated, strict=True):
+        ja[i] = text
+    return join_paragraphs(ja, separators)
 
 
 def _core(body_ja: str, guide: StyleGuide) -> str:

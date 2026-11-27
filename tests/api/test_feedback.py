@@ -249,3 +249,19 @@ def test_actionable_queue_oldest_first(client: TestClient, seed: Seed) -> None:
     )
     queue = client.get("/v1/cases", params={"actionable": True, "sort": "oldest"}).json()
     assert [item["id"] for item in queue["items"]] == ["SYN-1", "SYN-2"]
+
+
+def test_translate_with_base_only_replaces_changed_paragraphs(
+    client: TestClient, seed: Seed
+) -> None:
+    seed(case("SYN-1"))
+    draft = _draft(client)
+    base_zh = "问候\n\n第一段\n\n第二段\n\n结语"
+    base_ja = "挨拶\n\n一段目\n\n二段目\n\n結び"
+    body = {
+        "body_zh": base_zh.replace("第二段", "改过的第二段"),
+        "base_zh": base_zh,
+        "base_ja": base_ja,
+    }
+    result = client.post(f"/v1/drafts/{draft['id']}/translate", json=body).json()
+    assert result["body_ja"] == "挨拶\n\n一段目\n\n【占位翻訳】改过的第二段\n\n結び"

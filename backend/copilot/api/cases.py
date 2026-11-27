@@ -132,6 +132,11 @@ class FeedbackRequest(BaseModel):
 class TranslateRequest(BaseModel):
     body_zh: str = Field(min_length=1, max_length=MAX_BODY_CHARS)
     """客服编辑的中文回复。"""
+    base_zh: str | None = Field(default=None, max_length=MAX_BODY_CHARS)
+    """上一次对齐时的中文（草稿的回译，或上一次翻译时的中文）。与 `base_ja` 一起给出时，
+    只重新翻译改过的段落。"""
+    base_ja: str | None = Field(default=None, max_length=MAX_BODY_CHARS)
+    """与 `base_zh` 逐段对应的日语（可以包含客服直接改过的段落）。"""
 
 
 class CheckRequest(BaseModel):
@@ -259,9 +264,11 @@ def router() -> APIRouter:
     def translate(
         repo: Repo, drafter: DrafterDep, draft_id: DraftIdPath, body: TranslateRequest
     ) -> EditResult:
-        """把客服编辑的中文回复译成日语（LLM），并对译文自检。不修改草稿本身。"""
+        """把客服编辑的中文回复译成日语（LLM），并对译文自检。不修改草稿本身。
+
+        给出基准时只重新翻译改过的段落，没有改过的段落保留基准日语；没有修改时不调用 LLM。"""
         draft = _require_draft(repo, draft_id)
-        body_ja = drafter.translate(body.body_zh)
+        body_ja = drafter.translate(body.body_zh, base_zh=body.base_zh, base_ja=body.base_ja)
         return EditResult(body_ja=body_ja, checks=edited_checks(drafter, draft, body_ja))
 
     @r.post("/drafts/{draft_id}/check")

@@ -10,7 +10,14 @@ from copilot.contracts import DraftCheckKind
 from copilot.draft.checks import assemble
 from copilot.kb.knowledge import StyleGuide, load_knowledge
 from copilot.llm.fake import FakeLLMClient
-from copilot.workbench.editing import check_edited, translate_reply
+from copilot.workbench.editing import (
+    changed_paragraphs,
+    check_edited,
+    join_paragraphs,
+    split_paragraphs,
+    translate_edit,
+    translate_reply,
+)
 from tests.draft.factories import forbidden, template
 from tests.workbench.test_pipeline import _drafter
 
@@ -88,3 +95,43 @@ def test_pipeline_drafter_translate_and_check(tmp_path: Path) -> None:
     guide = load_knowledge(KNOWLEDGE).style_guide
     failed = _failed(drafter.check(assemble(guide, "返金いたします。")))
     assert DraftCheckKind.FORBIDDEN_PROMISE in failed
+
+
+BASE_ZH = "【合成】问候\n\n【合成】第一段\n\n【合成】今后也请继续支持。\n\n【合成】结语"
+BASE_JA = "挨拶です。\n\n一段目です。\n\n\n今後ともよろしくお願いします。\n\n結びです。"
+
+
+def test_unchanged_paragraphs_keep_their_japanese_without_calling_the_llm(
+    guide: StyleGuide,
+) -> None:
+    """回归：没有改过的段落不再翻译（中文回译再译回日语曾得到固定结语，结语重复）。"""
+    fake = FakeLLMClient()
+    result = asyncio.run(translate_edit(BASE_ZH, fake, guide, base_zh=BASE_ZH, base_ja=BASE_JA))
+    assert result == BASE_JA
+    assert fake.calls == []
+
+
+def test_only_changed_paragraphs_are_translated(guide: StyleGuide) -> None:
+    fake = FakeLLMClient()
+    fake.queue(LLMTask.TRANSLATE, "改めた一段目です。")
+    edited = BASE_ZH.replace("【合成】第一段", "【合成】改过的第一段").replace("问候", "改了问候")
+    result = asyncio.run(translate_edit(edited, fake, guide, base_zh=BASE_ZH, base_ja=BASE_JA))
+
+    # 分隔符（包括多余的空行）保留；首尾的固定段即使中文改了也不翻译
+    assert result == BASE_JA.replace("一段目です。", "改めた一段目です。")
+    assert len(fake.calls) == 1
+    assert "改过的第一段" in fake.calls[0].messages[1]["content"]
+
+
+def test_added_paragraph_falls_back_to_full_translation(guide: StyleGuide) -> None:
+    fake = FakeLLMClient()
+    fake.queue(LLMTask.TRANSLATE, "全文の訳")
+    edited = BASE_ZH.replace("【合成】第一段", "【合成】第一段\n\n【合成】新加的一段")
+    assert changed_paragraphs(edited, BASE_ZH, BASE_JA) is None
+    result = asyncio.run(translate_edit(edited, fake, guide, base_zh=BASE_ZH, base_ja=BASE_JA))
+    assert result == assemble(guide, "全文の訳")
+
+
+def test_paragraph_split_round_trips() -> None:
+    for text in ["", "一", "一\n\n二", "一\n\n\n二\n \n三", "a\r\nb\n\nc\n"]:
+        assert join_paragraphs(*split_paragraphs(text)) == text
