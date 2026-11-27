@@ -1,6 +1,6 @@
 # AI 协作工程实践与会话记录导读
 
-本文档配套 [`agent-conversations/`](README.md) 目录下的 8 份原始协作会话记录，说明本项目的会话导出与脱敏机制、交互式 HTML 审阅器的使用方法，并通过架构演进图与原始对话摘录复盘人机协作完成『ぽちゃガチョ！』客服坐席助手（Copilot）全链路工程的过程。
+本文档是实践测试题（[`docs/requirements.md`](../docs/requirements.md)）交付物 **C（AI 协作过程）** 的总览与导读，配套 [`agent-conversations/`](README.md) 目录下的 8 份原始协作会话记录（完整技术方案复盘见交付物 B [`docs/approach.md`](../docs/approach.md)）。下文依次说明会话导出与脱敏机制、交互式 HTML 审阅器的使用方法，并通过架构演进图与原始对话摘录复盘人机协作完成『ぽちゃガチョ！』客服坐席助手（Copilot）工程落地的全过程。
 
 ---
 
@@ -22,7 +22,7 @@
 | 8 | [`2026-11-27-issue-7-eval.json`](2026-11-27-issue-7-eval.json) | Antigravity | 16 | 0* | 264 | Issue #7, #34, #35 · PR #33 · D-017 |
 | **合计** | **8 份会话** | **双工具接力** | **118** | **603** | **1,623** | **19 个合并 PR · D-001～D-017** |
 
-> \* 注：上表「人类指令」已剔除 `/clear`、`<task-notification>` 等 22 条运行环境噪音轮次与 1 条直接终端命令（原始 `turns` 总数为 141）。第 8 份会话由 Antigravity 导出，其结构差异见第 2.2 节。
+> 注（\*）：上表「人类指令」已剔除 `/clear`、`<task-notification>` 等 22 条运行环境噪音轮次与 1 条直接终端命令（原始 `turns` 总数为 141）。第 8 份会话由 Antigravity 导出，其结构差异见第 2.2 节；后续中文坐席工作台（#8，PR #38，D-018～D-019）与方案复盘（#9，PR #39）在同一工程规范下继续推进并合入 `main`。
 
 ---
 
@@ -204,7 +204,7 @@ xychart-beta
   > **Original (Turn #5)**: *"Also because we are benchmarking the system in historical context, we will also need to prentend that the event mentioned is happening, and provide agents with time context. The granularity should be exact to minutes, and time context is appended at the end of the query to the LLM."*
   >
   > **中文译文（Turn #5）**：另外因为我们要在历史语境里给系统做基准测试，还需要假装当时提到的那个事件正在发生，并给 Agent 提供时间上下文。粒度要精确到分钟，时间上下文附在发给 LLM 的查询末尾。
-  - **落地效果**：直接启发了提案 0003 与 D-011 的核心设计——所有知识条目带现实有效期与 `known_from`（历史重放绝不能看到未来才写出的修正），时间状态显式区分「已知 / 估计区间 / 未知」。
+  - **落地效果**：直接启发了[提案 0003](../docs/proposals/0003-knowledge-base.md) 与 D-011 的核心设计——所有知识条目带现实有效期与 `known_from`（历史重放绝不能看到未来才写出的修正），时间状态显式区分「已知 / 估计区间 / 未知」。
 
 - **严谨拆解系统邮件（`S`）的三种可能成因，避免误判结案污染知识库** — [`2026-11-26-ingest.json`](2026-11-26-ingest.json) · **Turn #15**：
   > **Original**: *"for the sake of the knowledge base, I think wether the thread ends on a system message by itself is not a good indicator, because: - a bounce may be our system fail to send outgoing reply - it maybe player copypaste malformed context into their message - it maybe malicious paylod trying to disguise as system ... If a thread is left on S, then it would need semantic to analyze if the case is closed."*
@@ -264,7 +264,7 @@ xychart-beta
   > **Original (Turn #17)**: *"I think it will not worth it to patch every hole as of now, but we do need to document the possible attack patterns and replay them at #7, and catalogue them. The security model is morelike a layered cheese model, but we need to catalogue it so we know how and where to patch if the e2e test came back improvement needed"*
   >
   > **中文译文（Turn #14 & #17）**：关于 1：我觉得你想复杂了。就让初始化自动发送流程的那个函数去检查这条流程是否带着全部 12 道门槛的批准就行了，这样就不需要组合测试。因为它设计上就是一票否决……在 readme 和 docs 里，我们应该把主张和假设明确列出来，并清楚说明每条主张由哪个测试守着。……我觉得现在就把每个洞都补上不值得，但我们确实需要把可能的攻击模式记录下来，在 #7 里回放，并把它们编成目录。安全模型更像那种分层奶酪模型，但我们需要把它编目，这样当 e2e 测试回来说需要改进时，我们知道该补哪里、怎么补。
-  - **落地效果**：避免了指数级爆炸的门槛组合测试，建立了 `docs/claims.md`（每条安全与质量主张绑定具体单元测试或评测指标）与 `docs/security.md`（L1–L10 防御层与 `ATK-01`–`ATK-63` 攻击目录），并在 #7 中把全部 39 个合成攻击样本跑通端到端重放验证。
+  - **落地效果**：避免了指数级爆炸的门槛组合测试，建立了 [`docs/claims.md`](../docs/claims.md)（每条安全与质量主张绑定具体单元测试或评测指标）与 [`docs/security.md`](../docs/security.md)（L1–L10 防御层与 `ATK-01`–`ATK-63` 攻击目录），并在 #7 中把全部 39 个合成攻击样本跑通端到端重放验证（见 [`docs/eval.md`](../docs/eval.md)）。
 
 ---
 

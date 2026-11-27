@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-62",
+  "title_zh": "草稿或邮件正文中的 HTML 在界面中被执行",
+  "expected_layers": [
+    "#8"
+  ],
+  "kind": "not_implemented"
+}

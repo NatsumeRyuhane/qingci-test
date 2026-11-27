@@ -1,0 +1,108 @@
+# 政策（提案 0003 §2）：由代码检查，不靠模型自觉遵守（Policy.matching_phrases：NFKC 后按子串匹配）。
+#
+# - forbidden_promise：草稿中不允许出现的承诺。检查草稿正文（#6 的 forbidden_promise 检查）。
+# - escalation_trigger：需要升级处理的情况。检查玩家邮件，以及分析得出的敏感标签。
+#
+# 短语是通用的日语说法，不来自样本数据。短语太宽会误报，太窄会漏报：误报只会让草稿转人工，
+# 所以宁宽勿窄。修改后要在 #7 中看误报率。
+
+defaults:
+  version: 1
+  known_from: "2024-02-01T00:00:00+09:00"
+  recorded_at: "2026-11-27T00:00:00+09:00"
+  origin: manual
+  review_status: approved
+
+entries:
+  # --- 不允许的承诺 --------------------------------------------------------------
+  - id: no-refund-promise
+    kind: forbidden_promise
+    title_zh: 不承诺退款
+    description_zh: 付款由应用商店处理，我们不能退款，也不能承诺退款。退款请玩家联系 Apple 或 Google。
+    phrases_ja:
+      - 返金いたします
+      - 返金させていただきます
+      - 返金対応いたします
+      - 返金を行います
+      - 払い戻しいたします
+
+  - id: no-compensation-promise
+    kind: forbidden_promise
+    title_zh: 不承诺补偿
+    description_zh: 补偿由运营方统一决定并公告。草稿不能向个别玩家承诺补偿、补发或赠送。已经确实发放的道具（例如事故公告中写明已发放）由模板说明，不由模型生成。
+    phrases_ja:
+      - 補償いたします
+      - 補償させていただきます
+      - 補填いたします
+      - 補填させていただきます
+      - お詫びの品
+      - プレゼントいたします
+      - 付与させていただきます
+
+  - id: no-fix-date-promise
+    kind: forbidden_promise
+    title_zh: 不承诺具体的修复时间
+    description_zh: 修复时间由开发决定，可能变化。草稿不能写出具体的修复日期或“某天之前修好”。
+    phrases_ja:
+      - までに修正いたします
+      - までに修正します
+      - までに対応いたします
+      - 日に修正
+      - 修正予定日
+
+  - id: no-data-recovery-guarantee
+    kind: forbidden_promise
+    title_zh: 不保证一定能恢复数据
+    description_zh: 没有绑定的账号可能无法恢复。草稿不能保证一定能恢复数据或账号。
+    phrases_ja:
+      - 必ず復旧
+      - 必ず復元
+      - 確実に復旧
+      - 確実に復元
+
+  # --- 升级触发条件 --------------------------------------------------------------
+  - id: escalate-legal
+    kind: escalation_trigger
+    title_zh: 法律威胁或投诉到外部机构
+    description_zh: 玩家提到律师、诉讼、消费者中心、警察等。交给主管处理，不由坐席直接回复。
+    phrases_ja:
+      - 弁護士
+      - 訴訟
+      - 訴えます
+      - 裁判
+      - 消費者センター
+      - 消費生活センター
+      - 警察
+      - 法的措置
+    sensitivity_tags: [legal]
+
+  - id: escalate-minor-payment
+    kind: escalation_trigger
+    title_zh: 未成年人付款
+    description_zh: 玩家提到未成年人（例如孩子擅自付款）。涉及付款和未成年人，交给主管处理。
+    phrases_ja:
+      - 未成年
+      - 子供が勝手に
+      - 子どもが勝手に
+    sensitivity_tags: [minor]
+
+  - id: escalate-payment-dispute
+    kind: escalation_trigger
+    title_zh: 支付纠纷
+    description_zh: 玩家提到拒付、不当扣款、重复扣款等。交给主管处理。
+    phrases_ja:
+      - チャージバック
+      - 不正請求
+      - 二重請求
+      - 二重に請求
+    sensitivity_tags: [payment]
+
+  - id: escalate-account-security
+    kind: escalation_trigger
+    title_zh: 账号被盗或异常登录
+    description_zh: 玩家提到账号被盗、被他人登录。交给主管处理，按本人确认的流程进行。
+    phrases_ja:
+      - 乗っ取
+      - 不正ログイン
+      - 不正アクセス
+    sensitivity_tags: [account_security]

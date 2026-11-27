@@ -9,8 +9,9 @@
    python3 scripts/render_conversations.py --bundle -o /tmp/conversations.html
 
 3. 将单个（或多个）指定会话渲染为独立 HTML 文件：
-   python3 scripts/render_conversations.py agent-conversations/2026-11-26-project-kickoff.json -o /tmp/kickoff.html
+   python3 scripts/render_conversations.py agent-conversations/<file>.json -o /tmp/out.html
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,9 +82,7 @@ def build_bundled_html(json_paths: list[Path], template_path: Path = VIEWER_TEMP
         sessions.append({"filename": p.name, "data": data})
 
     payload_js = (
-        "<script>\n"
-        f"window.__BUNDLED_SESSIONS__ = {safe_json_for_html_script(sessions)};\n"
-        "</script>"
+        f"<script>\nwindow.__BUNDLED_SESSIONS__ = {safe_json_for_html_script(sessions)};\n</script>"
     )
     return template.replace(BUNDLE_MARKER, payload_js, 1)
 
@@ -202,7 +201,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.bundle or args.inputs:
-        targets = [p.resolve() for p in args.inputs] if args.inputs else discover_session_files(args.dir.resolve())
+        targets = (
+            [p.resolve() for p in args.inputs]
+            if args.inputs
+            else discover_session_files(args.dir.resolve())
+        )
         if not targets:
             print("错误：未找到任何可渲染的会话 JSON 文件。", file=sys.stderr)
             return 1
@@ -215,7 +218,9 @@ def main(argv: list[str] | None = None) -> int:
             if len(targets) == 1 and not args.bundle:
                 out_path = targets[0].with_suffix(".html")
             else:
-                print("错误：打包模式请通过 -o / --output 指定输出 HTML 文件路径。", file=sys.stderr)
+                print(
+                    "错误：打包模式请通过 -o / --output 指定输出 HTML 文件路径。", file=sys.stderr
+                )
                 return 2
         else:
             out_path = args.output
@@ -230,8 +235,9 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "请指定运行模式：\n"
         "  预览全部会话：python3 scripts/render_conversations.py --serve\n"
-        "  打包离线单文件：python3 scripts/render_conversations.py --bundle -o /tmp/conversations.html\n"
-        "  渲染单个文件：python3 scripts/render_conversations.py agent-conversations/<file>.json -o /tmp/out.html",
+        "  打包离线单文件：python3 scripts/render_conversations.py --bundle -o /tmp/out.html\n"
+        "  渲染单个文件：python3 scripts/render_conversations.py "
+        "agent-conversations/<file>.json -o /tmp/out.html",
         file=sys.stderr,
     )
     return 2

@@ -17,7 +17,7 @@
            "result": {"is_error": false, "output": …, "omitted_lines": 0}},   # 未完成的调用为 null
           {"type": "skill_loaded", "timestamp": …},
           {"type": "shell_output", "timestamp": …, "stdout": …, "stderr": …},  # ! 命令的输出
-          {"type": "harness_notice", "timestamp": …, "text": …}               # 运行环境消息，如 API 报错
+          {"type": "harness_notice", "timestamp": …, "text": …}  # 运行环境消息，如 API 报错
         ]
       }
     ]
@@ -30,20 +30,30 @@ GitHub 风格的访问令牌，
 以及读取样本数据或其派生数据的命令的全部输出（见 data/README.md）。
 导出后仍需人工通读一遍再提交。
 """
+
 import html
 import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
-MAX_OUTPUT_LINES = 40      # 工具结果最多保留的行数
-MAX_FIELD_CHARS = 4000     # 单个输入字段最多保留的字符数
+MAX_OUTPUT_LINES = 40  # 工具结果最多保留的行数
+MAX_FIELD_CHARS = 4000  # 单个输入字段最多保留的字符数
 LOCAL_USER = os.path.basename(os.path.expanduser("~"))
 ORG_IDS: set[str] = set()  # 由 main() 预先扫描会话文件填充
 # 命中即视为读取了样本数据或由它派生的数据（导入结果 data/interim/、查看器的 threads.json、
 # 临时复制的 .jsonl），整段输出省略
-DATA_MARKERS = ("data.json", ".xlsx", "readx.py", "sharedStrings", "data/interim", ".jsonl", "threads.json")
+DATA_MARKERS = (
+    "data.json",
+    ".xlsx",
+    "readx.py",
+    "sharedStrings",
+    "data/interim",
+    ".jsonl",
+    "threads.json",
+)
 REDACTIONS = [
     "省略模型思考过程与系统提示",
     "隐去邮箱地址、本地用户名与目录、scratchpad 路径、SSH 密钥信息",
@@ -60,7 +70,8 @@ def redact(s: str) -> str:
     s = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "[email redacted]", s)
     s = re.sub(r"/private/tmp/claude-\d+/[^\s'\"]*?/scratchpad", "$SCRATCHPAD", s)
     s = re.sub(r"/Users/[^/\s]+", "~", s)
-    # 本地用户名也会出现在项目目录名（-Users-<user>-…）等处，统一隐去（区分大小写，不影响 GitHub 用户名）
+    # 本地用户名也会出现在项目目录名（-Users-<user>-…）等处，统一隐去
+    # （区分大小写，不影响 GitHub 用户名）
     s = s.replace(LOCAL_USER, "<user>")
     s = re.sub(r"ssh-ed25519 [A-Za-z0-9+/=]+", "ssh-ed25519 [key redacted]", s)
     # GitHub 风格的令牌，例如 CodeRabbit 评论链接中的 scope=ghh_…
@@ -108,7 +119,7 @@ def tool_input(name: str, inp: dict) -> dict:
 def main() -> None:
     src, dst = sys.argv[1], sys.argv[2]
     title = sys.argv[3] if len(sys.argv) > 3 else "会话记录"
-    ORG_IDS.update(re.findall(r"org=([0-9a-fA-F-]{36})", open(src, encoding="utf-8").read()))
+    ORG_IDS.update(re.findall(r"org=([0-9a-fA-F-]{36})", Path(src).read_text(encoding="utf-8")))
 
     turns, pending, session_id = [], {}, None  # pending: tool_use_id -> 对应的 tool_call 步骤
 
@@ -117,14 +128,18 @@ def main() -> None:
             turns.append({"turn": 1, "timestamp": None, "user": "", "steps": []})
         return turns[-1]["steps"]
 
-    for line in open(src, encoding="utf-8"):
+    with open(src, encoding="utf-8") as src_f:
+        lines_iter = list(src_f)
+    for line in lines_iter:
         o = json.loads(line)
         if o.get("type") not in ("user", "assistant"):
             continue
         session_id = session_id or o.get("sessionId")
         ts = o.get("timestamp")
         content = (o.get("message") or {}).get("content")
-        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
+        blocks = (
+            [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
+        )
 
         for b in blocks:
             bt = b.get("type")
@@ -137,16 +152,35 @@ def main() -> None:
                     continue
                 if text.startswith("<bash-input>"):  # 用户在会话中用 ! 前缀直接执行的命令
                     cmd = html.unescape(re.sub(r"</?bash-input>", "", text)).strip()
-                    turns.append({"turn": len(turns) + 1, "timestamp": ts, "kind": "shell_command",
-                                  "user": cmd, "steps": []})
+                    turns.append(
+                        {
+                            "turn": len(turns) + 1,
+                            "timestamp": ts,
+                            "kind": "shell_command",
+                            "user": cmd,
+                            "steps": [],
+                        }
+                    )
                     continue
                 if text.startswith("<bash-stdout>"):  # 上一条 ! 命令的输出，归入同一轮
-                    current_steps().append({"type": "shell_output", "timestamp": ts,
-                                            "stdout": tag_text(text, "bash-stdout"),
-                                            "stderr": tag_text(text, "bash-stderr")})
+                    current_steps().append(
+                        {
+                            "type": "shell_output",
+                            "timestamp": ts,
+                            "stdout": tag_text(text, "bash-stdout"),
+                            "stderr": tag_text(text, "bash-stderr"),
+                        }
+                    )
                     continue
-                turns.append({"turn": len(turns) + 1, "timestamp": ts, "kind": "message",
-                              "user": text, "steps": []})
+                turns.append(
+                    {
+                        "turn": len(turns) + 1,
+                        "timestamp": ts,
+                        "kind": "message",
+                        "user": text,
+                        "steps": [],
+                    }
+                )
 
             elif o["type"] == "user" and bt == "tool_result":
                 step = pending.pop(b.get("tool_use_id"), None)
@@ -166,14 +200,22 @@ def main() -> None:
                     lines = raw.splitlines()
                     keep = 3 if step["tool"] in ("Read", "Write", "Edit") else MAX_OUTPUT_LINES
                     output, omitted = "\n".join(lines[:keep]), max(0, len(lines) - keep)
-                step["result"] = {"is_error": bool(b.get("is_error")), "output": output, "omitted_lines": omitted}
+                step["result"] = {
+                    "is_error": bool(b.get("is_error")),
+                    "output": output,
+                    "omitted_lines": omitted,
+                }
 
             elif o["type"] == "assistant" and bt == "text":
                 text = redact(b["text"])
                 if not text:
                     continue
                 # 由运行环境生成的消息（如 API 报错）不是 Agent 说的话，单独标注
-                kind = "harness_notice" if o["message"].get("model") == "<synthetic>" else "agent_message"
+                kind = (
+                    "harness_notice"
+                    if o["message"].get("model") == "<synthetic>"
+                    else "agent_message"
+                )
                 current_steps().append({"type": kind, "timestamp": ts, "text": text})
 
             elif o["type"] == "assistant" and bt == "tool_use":
@@ -192,7 +234,7 @@ def main() -> None:
         "title": title,
         "source": "Claude Code",
         "session_id": session_id,
-        "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "redactions": REDACTIONS,
         "turns": turns,
     }

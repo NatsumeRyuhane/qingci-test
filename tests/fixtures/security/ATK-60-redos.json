@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-60",
+  "title_zh": "构造长输入测试正则回溯（ReDoS）",
+  "expected_layers": [
+    "L1",
+    "L7"
+  ],
+  "kind": "resource",
+  "scenario": "redos"
+}

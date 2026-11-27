@@ -1,0 +1,97 @@
+# 日中术语表：游戏内的公开术语（界面、道具、功能的名称），供翻译、回译和中文说明保持一致。
+#
+# 只收录游戏界面上公开的名称，不收录玩家写的内容。译法是为中文客服理解而定的，不是官方的中文
+# 本地化；有官方译名时应改为官方译名。依据：train 部分的模板候选（D-012）。
+
+defaults:
+  version: 1
+  known_from: "2024-02-01T00:00:00+09:00"
+  recorded_at: "2026-11-27T00:00:00+09:00"
+  origin: manual
+  review_status: approved
+
+entries:
+  - id: game-title
+    term_ja: ぽちゃガチョ！
+    term_zh: 『ぽちゃガチョ！』（游戏名，不翻译）
+    note_zh: 回复中总是写作『ぽちゃガチョ！』，带书名号。
+  - id: goose
+    term_ja: ガチョウ
+    term_zh: 鹅
+    note_zh: 游戏中的角色。
+  - id: affinity
+    term_ja: 好感度
+    term_zh: 好感度
+    note_zh: 鹅的好感度，在鹅的请求中以“心”表示。
+  - id: board
+    term_ja: ボード
+    term_zh: 棋盘
+    note_zh: 也叫“パズル画面”（合成画面）。
+  - id: piece
+    term_ja: ピース
+    term_zh: 碎片
+    note_zh: 棋盘上可以合成的单位。
+  - id: launcher
+    term_ja: ランチャー
+    term_zh: 生成器
+    note_zh: 会产生碎片的碎片。部分生成器到一定等级前不能出售。
+  - id: parts
+    term_ja: パーツ
+    term_zh: 零件
+    note_zh: 背包中的一栏。
+  - id: backpack
+    term_ja: リュック
+    term_zh: 背包
+    note_zh: 可以暂时把道具和碎片从棋盘上移出，收在“パーツ”或“ランチャー”栏中。
+  - id: backpack-skin
+    term_ja: リュックスキン
+    term_zh: 背包皮肤
+  - id: order
+    term_ja: オーダー
+    term_zh: 订单
+  - id: shop
+    term_ja: 売店
+    term_zh: 小卖部
+    note_zh: 游戏内的商店。购买的道具以卡片形式显示在棋盘上方。
+  - id: gym-level
+    term_ja: ジムレベル
+    term_zh: 等级（ジムレベル）
+    note_zh: 玩家的等级。
+  - id: star
+    term_ja: スター
+    term_zh: 星星
+    note_zh: 用于建设等的货币。
+  - id: diamond
+    term_ja: ダイヤ
+    term_zh: 钻石
+    note_zh: 付费货币。
+  - id: decoration-ticket
+    term_ja: 装飾券
+    term_zh: 装饰券
+  - id: energy
+    term_ja: エネルギー
+    term_zh: 能量
+  - id: bonus-pass
+    term_ja: 特典パス
+    term_zh: 特典通行证
+  - id: construction
+    term_ja: 建設
+    term_zh: 建设
+  - id: my-page
+    term_ja: マイページ
+    term_zh: 个人页面（マイページ）
+    note_zh: 从主画面右上角的齿轮图标进入，可以查看账号 ID、绑定账号、退出登录。
+  - id: bind
+    term_ja: バインド
+    term_zh: 账号绑定（数据连携）
+    note_zh: 把游戏数据绑定到邮箱、Google（仅 Android）或 Apple ID（仅 iOS），换设备时用来继承数据。
+  - id: guest-login
+    term_ja: ゲストログイン
+    term_zh: 游客登录
+  - id: friend-code
+    term_ja: フレンドコード
+    term_zh: 好友码
+  - id: official-x
+    term_ja: 公式X（旧Twitter）
+    term_zh: 官方 X（原 Twitter）
+    note_zh: 运营方发布公告的渠道之一，另一个是游戏内公告。

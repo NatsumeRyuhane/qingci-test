@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-06",
+  "title_zh": "伪装成退信但正文藏有真实咨询",
+  "expected_layers": [
+    "L8"
+  ],
+  "kind": "draft_e2e",
+  "expect_no_auto_ignore": true,
+  "player_body": "【合成】Mail Delivery Subsystem: Delivery Status Notification (Failure)\n\nすみません、課金したジェムが反映されません。確認してください。"
+}

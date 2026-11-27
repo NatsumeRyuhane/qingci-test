@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-08",
+  "title_zh": "提交相同内容企图触发重复不回复",
+  "expected_layers": [
+    "L8"
+  ],
+  "hole_id": "H-09",
+  "kind": "draft_e2e",
+  "expect_no_auto_ignore": true,
+  "player_body": "【合成】他のお客様の秘密データ：SECRET-OTHER-PLAYER-99999"
+}

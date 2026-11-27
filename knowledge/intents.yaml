@@ -1,0 +1,197 @@
+# 意图目录（提案 0003 §5）：封闭列表，CaseAnalysis.intent 只能取这里的 id。
+#
+# 依据：train 部分的 76 个模板候选（copilot kb build，D-012：只看 train）。每个候选之后的标注
+# 都要落到其中一个意图上；都不合适时用 other。
+#
+# auto_send_eligible：只有模板本身就是完整答复、并且答错代价很小的意图才列入（D-001）。
+# 目前只有“意见建议的致谢”和“玩家道谢后的回复”。是否真的自动发送还要看案件（#6）。
+#
+# known_from：这些是分析用的结构和运营方一贯的做法，在样本时期之前就已存在，取样本开始之前的
+# 时间，使历史重放（#7）中可以使用。recorded_at 是录入时间。
+
+defaults:
+  version: 1
+  known_from: "2024-02-01T00:00:00+09:00"
+  recorded_at: "2026-11-27T00:00:00+09:00"
+  origin: manual
+  review_status: approved
+
+entries:
+  # --- 故障（bug）---------------------------------------------------------------
+  - id: bug_investigating
+    category: bug
+    title_zh: 故障调查中
+    description_zh: 玩家报告了故障，原因还没有确认。回复说明正在根据玩家提供的信息调查，调查完成后会再联系，或通过官方 X 和游戏内公告告知。
+    default_risk: normal
+
+  - id: bug_request_details
+    category: bug
+    title_zh: 索要故障详情
+    description_zh: 玩家报告的故障信息不足以调查。回复请玩家补充发生时间、画面、操作、错误信息、截图或录屏等。
+    required_info_zh:
+      - 发生日期和时间
+      - 发生的画面
+      - 发生前后的操作
+      - 问题的具体情况
+      - 机型和 OS 版本
+      - 错误信息（如有）
+      - 截图或录屏
+    default_risk: normal
+
+  - id: bug_basic_troubleshooting
+    category: bug
+    title_zh: 基本排查（重启、网络、存储）
+    description_zh: 卡顿、闪退、无法启动等一般性问题。回复请玩家重启设备、切换网络、检查存储空间或重启应用，仍未解决时再次联系。
+    default_risk: normal
+
+  - id: bug_reinstall_after_binding
+    category: bug
+    title_zh: 确认绑定后重新安装
+    description_zh: 游戏数据没有正常下载导致的问题。回复请玩家先确认已完成账号绑定（数据连携），再重新安装应用。没有绑定时重装会丢失数据，必须提醒。
+    default_risk: normal
+
+  - id: bug_fixed_please_check
+    category: bug
+    title_zh: 已修复，请确认
+    description_zh: 玩家报告的问题已经修复。回复请玩家在游戏内确认，仍有问题时重启应用。
+    default_risk: normal
+
+  - id: app_update_failed
+    category: bug
+    title_zh: 无法更新应用
+    description_zh: 玩家无法更新到新版本。回复请玩家在各自的应用商店中更新版本，仍未解决时再次联系。
+    default_risk: low
+
+  - id: ad_reward_not_received
+    category: bug
+    title_zh: 观看广告后没有获得奖励
+    description_zh: 播放广告后无法领取奖励。这是已知问题，回复说明仍在调查和确认中，进展会通过官方 X 和游戏内公告告知（见 notices.yaml）。
+    default_risk: normal
+
+  - id: item_in_backpack
+    category: bug
+    title_zh: 道具或碎片不见了（请查看背包）
+    description_zh: 玩家以为道具或碎片消失了。放进背包的道具会收在背包的“パーツ”或“ランチャー”栏中，回复请玩家确认；仍找不到时附上截图再次联系。
+    required_info_zh:
+      - 背包中“パーツ”“ランチャー”栏的截图
+    default_risk: normal
+
+  - id: event_reward_question
+    category: bug
+    title_zh: 活动与排名奖励
+    description_zh: 关于活动奖励、排名奖励的领取条件、时间显示，以及奖励无法领取。某些情况对应特定的事故（见 notices.yaml），只在事故适用时使用对应的模板。
+    default_risk: normal
+
+  - id: campaign_question
+    category: bug
+    title_zh: 宣传活动的规则
+    description_zh: 关于邀请好友、事前登录特典等宣传活动的参加条件、领取方法和期间。期间有限的活动只在期间内（及之后的合理时间内）使用对应的模板。
+    default_risk: normal
+
+  - id: gameplay_question
+    category: bug
+    title_zh: 玩法与规格说明
+    description_zh: 关于游戏玩法和规格的问题，例如道具的合成和使用方法、背包皮肤、商店道具、建设、能量、好感度等。回复说明规格，必要时为游戏内显示不够清楚致歉。
+    default_risk: low
+
+  - id: undisclosed_info_request
+    category: feedback
+    title_zh: 询问未公开的信息
+    description_zh: 玩家询问未公开的规格细节或今后的计划。回复说明无法个别告知未向所有玩家公开的信息，有可公开的信息时会通过官方 X 和游戏内公告告知。
+    default_risk: low
+
+  - id: randomness_complaint
+    category: feedback
+    title_zh: 对随机出现的不满
+    description_zh: 玩家抱怨想要的碎片或道具一直不出现。回复说明出现是完全随机的，并表示会把意见报告给运营和开发团队。
+    default_risk: normal
+
+  # --- 购买（purchase）----------------------------------------------------------
+  - id: purchase_not_reflected
+    category: purchase
+    title_zh: 付款后道具未到账或无法购买
+    description_zh: 付费购买道具时出错、无法购买，或付款后道具没有到账。某些情况对应特定的事故（见 notices.yaml）；否则索要调查所需的信息。涉及付款，必须由人审核。
+    required_info_zh:
+      - 账号 ID（“マイページ”的“その他”栏中显示）
+      - 购买道具的时间
+      - 购买记录（购买时的收据邮件，或 iTunes、Google Pay 等处的购买历史截图）
+    default_risk: high
+
+  - id: birthday_input_issue
+    category: purchase
+    title_zh: 购买时无法输入或需要重置生日
+    description_zh: 购买道具时要求的生日无法输入，或输入错误需要重置。回复给出可能的解决方法（例如 iPhone 的显示设置），或说明由客服重置生日所需的信息。说“已经重置”的模板只能在客服确实操作之后使用。
+    required_info_zh:
+      - 账号 ID
+      - 玩家名
+    default_risk: normal
+
+  - id: refund_request
+    category: purchase
+    title_zh: 退款或取消付款
+    description_zh: 玩家希望退款或取消付款。付款由应用商店处理，回复请玩家联系 Apple 或 Google。不能承诺退款或补偿（见 policies.yaml）。
+    default_risk: high
+
+  - id: unintended_operation
+    category: purchase
+    title_zh: 误操作（不是故障）
+    description_zh: 玩家说某个操作（例如消费道具）不是自己的本意，但这是正常的游戏行为。回复说明对正常操作的结果无法做任何处理，所有玩家都一样。玩家容易不满，必须由人审核措辞。
+    default_risk: normal
+
+  # --- 数据迁移与账号（data_transfer）--------------------------------------------
+  - id: account_recovery
+    category: data_transfer
+    title_zh: 恢复账号或在新设备上继承数据
+    description_zh: 玩家在新设备上或重新安装后想恢复原来的账号。已绑定时，回复说明从“マイページ”退出后用已绑定的方式登录；游客登录时说明用“ゲスト”重新登录的方法。
+    default_risk: normal
+
+  - id: account_binding_howto
+    category: data_transfer
+    title_zh: 如何绑定账号
+    description_zh: 询问如何进行账号绑定（数据连携）。回复说明入口和可绑定的服务，并指向官方网站的 FAQ。
+    default_risk: low
+
+  - id: account_identity_verification
+    category: data_transfer
+    title_zh: 账号本人确认
+    description_zh: 玩家没有绑定、需要客服帮忙找回账号。为保护账号，只有玩家提供足够详细且准确的信息时才处理，回复请玩家补充等级、持有的星星和钻石数量等信息。
+    required_info_zh:
+      - 等级
+      - 持有的星星、钻石、装饰券的数量
+      - 首次登录的时间等其他可以核对的信息
+    default_risk: high
+
+  - id: account_email_binding
+    category: data_transfer
+    title_zh: 由客服绑定或变更邮箱
+    description_zh: 本人确认之后，由客服为玩家用邮箱绑定账号或变更绑定的邮箱。说“已经变更”的模板只能在客服确实操作之后使用。
+    required_info_zh:
+      - 希望绑定的邮箱地址
+    default_risk: high
+
+  # --- 意见与其他 ----------------------------------------------------------------
+  - id: feedback_acknowledgement
+    category: feedback
+    title_zh: 意见建议的致谢
+    description_zh: 玩家提出意见或建议。回复感谢并说明会作为宝贵意见在运营团队内共享。不包含任何案件特定的内容。
+    default_risk: low
+    auto_send_eligible: true
+
+  - id: thanks_reply
+    category: other
+    title_zh: 玩家道谢后的回复
+    description_zh: 玩家对之前的回复表示感谢，或告知问题已经解决。回复感谢联系，并欢迎今后有问题时再联系。不包含任何案件特定的内容。
+    default_risk: low
+    auto_send_eligible: true
+
+  - id: third_party_inquiry
+    category: other
+    title_zh: 不是本人的咨询
+    description_zh: 咨询来自玩家本人以外的人（例如代为咨询）。回复说明只回答本人的咨询，并告知官方网站也有咨询入口。
+    default_risk: normal
+
+  - id: other
+    category: other
+    title_zh: 其他
+    description_zh: 不属于以上任何意图。没有对应的模板，交给人工处理。
+    default_risk: normal

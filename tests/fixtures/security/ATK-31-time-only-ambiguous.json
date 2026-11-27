@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-31",
+  "title_zh": "只填时刻使日期无法确定",
+  "expected_layers": [
+    "L5",
+    "L7"
+  ],
+  "kind": "draft_e2e",
+  "occurred_at": "12:30",
+  "player_body": "【合成】購入エラーが発生しました。対応をお願いします。"
+}

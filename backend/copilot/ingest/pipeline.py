@@ -1,0 +1,281 @@
+"""把表格行组装成清洗后的 `Case`，并统计清洗结果。"""
+
+import os
+import tempfile
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from copilot.contracts import (
+    Case,
+    CaseStatus,
+    InquiryForm,
+    Message,
+    MessageRole,
+    RoleEvidenceKind,
+    RoleEvidenceStrength,
+    is_valid_case_id,
+)
+from copilot.ingest.evidence import (
+    REPEATED_TEXT_MIN_THREADS,
+    add_cross_thread_evidence,
+    local_evidence,
+)
+from copilot.ingest.form import REDACTED_KEYS, parse_fields, to_inquiry_form
+from copilot.ingest.roles import RoleReason, detect_role
+from copilot.ingest.sheet import SheetFormatError, SheetRow, describe_cell
+from copilot.ingest.text import (
+    CharFix,
+    QuoteFormat,
+    fix_chars,
+    normalize_newlines,
+    normalize_whitespace,
+    split_frame,
+    split_quote,
+)
+from copilot.ingest.timestamps import message_ref, quote_matches, sent_times
+
+DEFAULT_OUTPUT = Path("data/interim/cases.jsonl")
+"""导入结果的默认位置（被 git 忽略，见 data/README.md）。"""
+
+
+@dataclass
+class IngestStats:
+    """导入统计，可与 docs/data.md 中的数字对照。"""
+
+    threads: int = 0
+    messages: int = 0
+    thread_lengths: Counter[int] = field(default_factory=Counter)
+    roles: Counter[MessageRole] = field(default_factory=Counter)
+    role_reasons: Counter[RoleReason] = field(default_factory=Counter)
+    quote_formats: Counter[QuoteFormat] = field(default_factory=Counter)
+    inline_quotes: int = 0
+    char_fixes: Counter[CharFix] = field(default_factory=Counter)
+    messages_with_fixes: int = 0
+    agent_without_greeting: int = 0
+    agent_without_closing: int = 0
+    forms: int = 0
+    categories: Counter[str] = field(default_factory=Counter)
+    platforms: Counter[str] = field(default_factory=Counter)
+    redacted_fields_not_empty: int = 0
+    sent_at_known: int = 0
+    sent_at_conflicts: int = 0
+    statuses: Counter[CaseStatus] = field(default_factory=Counter)
+    threads_without_agent: int = 0
+    agent_evidence: Counter[str] = field(default_factory=Counter)
+    """客服回复按最强的一条角色依据分类。"""
+    replied_without_strong_evidence: int = 0
+    """以客服回复结束、但这封回复没有强证据的线程，状态为 undetermined。"""
+
+    def lines(self) -> list[str]:
+        """可读的统计报告，每项一行，顺序固定。"""
+
+        lengths: Counter[str] = Counter()
+        for k, n in self.thread_lengths.items():
+            lengths[str(k) if k < 5 else "5+"] += n
+        return [
+            f"线程：{self.threads} · 邮件：{self.messages}",
+            f"线程长度：{_counts(lengths, ['1', '2', '3', '4', '5+'])}",
+            f"发送方：{_counts(self.roles, MessageRole)}",
+            f"判断依据：{_counts(self.role_reasons, RoleReason)}",
+            f"客服回复缺问候语：{self.agent_without_greeting}"
+            f" · 缺结尾：{self.agent_without_closing}",
+            f"去除引用：{_counts(self.quote_formats, QuoteFormat)}"
+            f" · 压缩在一行中：{self.inline_quotes}",
+            f"字符修复：{_counts(self.char_fixes, CharFix)} · 涉及邮件：{self.messages_with_fixes}",
+            f"表单：{self.forms} · 脱敏字段非空：{self.redacted_fields_not_empty}",
+            f"类别（按线程）：{_counts(self.categories, sorted(self.categories))}",
+            f"平台（按线程）：{_counts(self.platforms, sorted(self.platforms))}",
+            f"已知发送时间：{self.sent_at_known} · 引用头矛盾而未采用：{self.sent_at_conflicts}",
+            f"客服回复的角色证据（按最强的一条）：{_counts(self.agent_evidence, EVIDENCE_ORDER)}",
+            f"案件状态：{_counts(self.statuses, CaseStatus)}"
+            f" · 以没有强证据的客服回复结束：{self.replied_without_strong_evidence}",
+            f"没有客服回复的线程：{self.threads_without_agent}",
+        ]
+
+
+EVIDENCE_ORDER = [
+    RoleEvidenceKind.METADATA.value,
+    RoleEvidenceKind.QUOTE_CORROBORATION.value,
+    RoleEvidenceKind.CORROBORATED_TEXT.value,
+    RoleEvidenceKind.REPEATED_TEXT.value,
+    RoleEvidenceKind.KEYWORD.value,
+    "none",
+]
+"""统计中角色依据的顺序，从强到弱。"""
+
+
+def _strongest_kind(message: Message) -> str:
+    kinds = {evidence.kind.value for evidence in message.role_evidence}
+    return next((kind for kind in EVIDENCE_ORDER if kind in kinds), "none")
+
+
+def _counts(counter: Mapping[Any, int], order: Iterable[Any]) -> str:
+    """按给定顺序列出非零的计数。"""
+    return " · ".join(f"{key}: {counter[key]}" for key in order if counter.get(key))
+
+
+def build_message(row: SheetRow, stats: IngestStats) -> tuple[Message, RoleReason]:
+    split = split_quote(normalize_newlines(row.body))
+    fixed, fixes = fix_chars(split.head)
+    body = normalize_whitespace(fixed)
+    role, reason = detect_role(row.seq, row.body, body)
+
+    greeting = closing = ""
+    if role is MessageRole.AGENT:
+        greeting, closing = split_frame(body)
+        stats.agent_without_greeting += not greeting
+        stats.agent_without_closing += not closing
+
+    stats.messages += 1
+    stats.roles[role] += 1
+    stats.role_reasons[reason] += 1
+    if split.format is not None:
+        stats.quote_formats[split.format] += 1
+        stats.inline_quotes += split.inline
+    if fixes:
+        stats.char_fixes.update(fixes)
+        stats.messages_with_fixes += 1
+
+    message = Message(
+        thread_id=row.thread_id,
+        seq=row.seq,
+        role=role,
+        raw_body=row.body,
+        body=body,
+        quoted=split.quoted,
+        greeting=greeting,
+        closing=closing,
+    )
+    return message, reason
+
+
+def _status(messages: list[Message]) -> CaseStatus:
+    """只看线程的最后一封邮件。
+
+    - 有强角色证据的客服回复 → `replied`：之后没有玩家追问，可以认为已结案。
+    - 没有强证据的客服回复 → `undetermined`：可能是玩家写了客服的问候语，或粘贴了收到的
+      回复（提案 0003 §11），不能让案件离开待处理队列，交给 #6 判断。
+    - 玩家邮件 → `open`：玩家的咨询或追问还没有回复。
+    - 系统邮件或无法判断发送方的邮件 → `undetermined`：单看结构无法确定。客服回复后的退信
+      可能是我们的回复没有发出去，也可能是玩家粘贴的内容，或伪装成系统邮件的输入，所以
+      既不能当作已结案，也不能直接忽略，需要语义分析。
+    """
+    last = messages[-1]
+    if last.role is MessageRole.AGENT:
+        if last.role_strength is RoleEvidenceStrength.STRONG:
+            return CaseStatus.REPLIED
+        return CaseStatus.UNDETERMINED
+    if last.role is MessageRole.PLAYER:
+        return CaseStatus.OPEN
+    return CaseStatus.UNDETERMINED
+
+
+def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case:
+    if not is_valid_case_id(thread_id):
+        # read_sheet 已经检查过；直接传入 SheetRow 的调用方也要得到表格格式错误，而不是校验异常。
+        raise SheetFormatError(f"メールID 含有不允许的字符：{describe_cell(thread_id)}")
+    rows = sorted(rows, key=lambda r: r.seq)
+    seqs = [r.seq for r in rows]
+    if len(set(seqs)) != len(seqs):
+        raise SheetFormatError(f"线程 {thread_id!r} 中有重复的 メールID枝番：{seqs}")
+
+    built = [build_message(row, stats) for row in rows]
+    messages = [m for m, _ in built]
+
+    # 表单只取线程的第 1 封（Case.form 的定义）。后面的邮件即使像表单，也只保留角色和正文。
+    form: InquiryForm | None = None
+    first, first_reason = built[0]
+    if first.seq == 1 and first_reason is RoleReason.FORM:
+        fields = parse_fields(first.body)
+        form = to_inquiry_form(fields)
+        stats.forms += 1
+        stats.redacted_fields_not_empty += sum(1 for k in REDACTED_KEYS if fields.get(k))
+
+    matches = quote_matches([message_ref(m.seq, m.role, m.quoted, m.core) for m in messages])
+    times, conflicts = sent_times(matches)
+    messages = [
+        m.model_copy(
+            update={"sent_at": times.get(m.seq), "role_evidence": local_evidence(m, matches)}
+        )
+        for m in messages
+    ]
+    stats.sent_at_known += len(times)
+    stats.sent_at_conflicts += conflicts
+
+    # 状态取决于跨线程的角色证据，在 build_cases 中所有线程都组装完之后再定。
+    case = Case(
+        id=thread_id, messages=messages, form=form, category=form.category if form else None
+    )
+    stats.threads += 1
+    stats.thread_lengths[len(messages)] += 1
+    stats.categories[form.category.value if form and form.category else "（无）"] += 1
+    stats.platforms[form.platform.value if form and form.platform else "（无）"] += 1
+    stats.threads_without_agent += not any(m.role is MessageRole.AGENT for m in messages)
+    return case
+
+
+def thread_order(thread_id: str) -> tuple[int, int, str, str]:
+    """ASCII 数字 ID 按数值排在前面，其他 ID 按字符串排在后面。
+
+    数值比较不调用 `int()`：先比去掉前导零后的位数，再比字符串，所以 `²` 这类 `int()`
+    不接受的字符、以及超过 Python 整数转换位数上限的长 ID 都不会出错。数值相同（`1` 和
+    `01`）时按原字符串区分，顺序只取决于 ID 本身，与输入顺序无关。
+    """
+    if thread_id.isascii() and thread_id.isdecimal():
+        digits = thread_id.lstrip("0") or "0"
+        return (0, len(digits), digits, thread_id)
+    return (1, 0, "", thread_id)
+
+
+def build_cases(
+    rows: Iterable[SheetRow], *, repeated_text_min_threads: int = REPEATED_TEXT_MIN_THREADS
+) -> tuple[list[Case], IngestStats]:
+    """按 `メールID` 分组、按 `メールID枝番` 排序，组装成案件。结果的顺序只取决于输入内容。
+
+    先逐个组装线程，再补充跨线程的角色证据（`add_cross_thread_evidence`），最后按最后一封
+    邮件判断状态。`repeated_text_min_threads` 是“重复出现”证据的阈值。
+    """
+    groups: dict[str, list[SheetRow]] = defaultdict(list)
+    for row in rows:
+        groups[row.thread_id].append(row)
+    stats = IngestStats()
+    cases = [build_case(tid, groups[tid], stats) for tid in sorted(groups, key=thread_order)]
+    cases = add_cross_thread_evidence(cases, min_threads=repeated_text_min_threads)
+    finished = []
+    for case in cases:
+        status = _status(case.messages)
+        # model_copy 不做校验；这里按契约完整校验一次，保证角色证据等不变量成立。
+        finished.append(Case.model_validate(case.model_dump() | {"status": status}))
+        stats.statuses[status] += 1
+        last = case.messages[-1]
+        stats.replied_without_strong_evidence += (
+            last.role is MessageRole.AGENT and status is CaseStatus.UNDETERMINED
+        )
+        for message in case.messages:
+            if message.role is MessageRole.AGENT:
+                stats.agent_evidence[_strongest_kind(message)] += 1
+    return finished, stats
+
+
+def write_cases(cases: Iterable[Case], path: Path) -> None:
+    """写成 JSONL（每行一个案件）。先写临时文件再替换，中途失败不会留下半个文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            for case in cases:
+                f.write(case.model_dump_json())
+                f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def read_cases(path: Path) -> list[Case]:
+    """读回 `write_cases` 写出的文件。供后续步骤（#5、#6、#7）使用。"""
+    with path.open(encoding="utf-8") as f:
+        return [Case.model_validate_json(line) for line in f if line.strip()]
