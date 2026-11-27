@@ -322,17 +322,22 @@ def _system_only(case: Case) -> bool:
 
 
 def find_duplicate_of(case: Case, others: Iterable[Case]) -> Case | None:
-    """内容、设备、App 版本和问题发生时间都相同、并且有可信客服回复的另一个线程（最早的）。
+    """内容、设备、App 版本和问题发生时间都相同、有可信客服回复、并且**更早提交**的另一个
+    线程（最早的）。只看更早的线程：当前案件不能因为之后才提交、之后才得到回复的重复线程
+    而得不到草稿。
 
     样本没有账号和发件地址，只能按内容判断；生产中应按账号或发件地址判断（提案 0003 §8）。
     """
     key = duplicate_key(case)
     if key is None:
         return None
+    position = thread_order(case.id)
     found = [
         other
         for other in others
-        if other.id != case.id and duplicate_key(other) == key and _strong_agent_reply(other)
+        if thread_order(other.id) < position
+        and duplicate_key(other) == key
+        and _strong_agent_reply(other)
     ]
     return min(found, key=lambda c: thread_order(c.id), default=None)
 

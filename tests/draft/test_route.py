@@ -401,3 +401,9 @@ def test_duplicate_shortcut_ignores_threads_with_follow_up() -> None:
         "401", player("401", 1), player("401", 2, "【合成】別の質問です"), content=FORM
     )
     assert decide_no_reply(follow_up, None, [original]) is None
+
+
+def test_later_replied_duplicate_does_not_suppress_earlier_thread() -> None:
+    """评审意见（PR #28）：对应的线程必须更早提交。"""
+    later = replied("401", RoleEvidenceKind.QUOTE_CORROBORATION)
+    assert decide_no_reply(case("400", content=FORM), None, [later]) is None
