@@ -95,6 +95,7 @@ docs/              需求、数据概况、决策记录、设计提案
    uv run copilot kb label            # 生成评测（#7）用的标准答案
    uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库
    uv run copilot draft <案件 ID>     # 为一个案件生成分析、草稿和分流（不发送邮件）；--tools 允许调用只读工具
+   uv run copilot eval --split dev    # 在留出集上离线评测（--suite security 重放全部安全攻击目录）
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
    (cd frontend && pnpm dev)          # 前端 http://localhost:5173
    ```
@@ -113,5 +114,6 @@ docs/              需求、数据概况、决策记录、设计提案
 | [docs/architecture.md](docs/architecture.md) | 数据契约：各实体的作用、关系与约定；起草的检查与分流规则 |
 | [docs/claims.md](docs/claims.md) | 设计主张与假设：每条主张由哪个测试守护 |
 | [docs/security.md](docs/security.md) | 安全模型：各层防线、攻击目录、已知漏洞和修补位置 |
+| [docs/eval.md](docs/eval.md) | 离线评测方法、基线指标、对比实验与安全攻击重放结果 |
 | [docs/decisions.md](docs/decisions.md) | 决策记录：选了什么、为什么 |
 | [docs/proposals/](docs/proposals/) | MVP 之后工作的设计提案 |

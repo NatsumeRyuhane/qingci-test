@@ -78,13 +78,20 @@
 | C-40 | 应用读取的每个环境变量都列在 `.env.example` 中，且不含值；缺少配置时只报变量名，不输出值 | `copilot/config.py` | `tests/test_config.py::test_env_example_lists_exactly_the_settings_fields` · `tests/test_config.py::test_env_example_has_no_secret_values` · `tests/test_config.py::test_llm_endpoint_reports_missing_names_without_values` | 单元 |
 | C-41 | 测试只用合成数据，样本数据不进 git（D-002） | `.gitignore`；合成数据标注 SYNTHETIC | `tests/contracts/test_models.py::test_every_exported_model_has_a_fixture`（fixture 必须带 SYNTHETIC 标注） | 单元；其余靠评审 |
 
-### 待验证（尚无测试）
+### 离线评测与安全重放（#7）
 
-| # | 主张 | 由谁补上 |
+| # | 主张 | 由谁保证 | 测试 | 守护方式 |
+|---|---|---|---|---|
+| C-42 | 安全攻击目录（`docs/security.md`）中的每个 `ATK-NN` 编号都有合成样本，端到端重放可复现；报告只含汇总数字，不含客户原文 | `copilot/eval/security.py`、`copilot/eval/metrics.py` | `tests/eval/test_security.py::test_every_security_doc_attack_has_a_synthetic_fixture` · `tests/eval/test_security.py::test_security_replay_smoke_with_fake_llm` · `tests/eval/test_eval_cli.py::test_eval_cli_cases_smoke` | 单元；真实数据见 [eval.md](eval.md) |
+| C-43 | 历史重放截断未来邮件与相似案件语料，防止未来回复泄露 | `copilot/eval/replay.py` | `tests/eval/test_eval_core.py::test_truncate_case_and_replay_corpus_strip_future` · `tests/eval/test_eval_core.py::test_timeline_estimate_now_known_and_interpolated` | 单元 |
+
+### 待验证（尚无测试或需持续校准）
+
+| # | 主张 | 状态与结果 |
 |---|---|---|
-| P-04 | 注入成功率、“玩家被误判为客服或系统”的比例接近零；高风险案件不会被分流为 `auto_send` | #7（合成注入样本）、`llm-live` |
-| P-05 | 自检的启发式规则（敬体、政策短语）误报和漏报都低 | #7 在 dev 上报告 |
-| P-06 | 自动发送的阈值（`DRAFT_AUTO_SEND_MIN_CONFIDENCE`）合理：通过全部关卡的草稿确实正确 | #7 在 dev 上校准，之后所有者才在审核中打开任何模板的 `auto_send_allowed` |
+| P-04 | 注入成功率、“玩家被误判为客服或系统”的比例接近零；高风险案件不会被分流为 `auto_send` | #7 已完成首次端到端重放（[eval.md](eval.md) §4）：注入得逞率 0/26（0.0%），高风险误自动发送 0%；L1 无元数据漏洞（H-07/H-08/H-09）如实复现，待接入发件人/账号元数据后关闭 |
+| P-05 | 自检的启发式规则（敬体、政策短语）误报和漏报都低 | #7 已在 `dev`/`test` 报告（[eval.md](eval.md) §5）：`register` 误报 1 / 漏报 0（n=125），`forbidden_promise` 误报 0 / 漏报 2（均被 L8 拦截） |
+| P-06 | 自动发送的阈值（`DRAFT_AUTO_SEND_MIN_CONFIDENCE`）合理：通过全部关卡的草稿确实正确 | #7 已校准（[eval.md](eval.md) §5）：`>= 0.95` 时 `dev`/`test` 方案一致率 23/23（100%），`0.85–0.95` 仅 67%–75%；建议上调阈值至 `0.95`，并待低风险意图全量专项校准后再由所有者打开任何模板的 `auto_send_allowed` |
 
 ## 假设
 
