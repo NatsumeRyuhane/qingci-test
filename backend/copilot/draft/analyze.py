@@ -131,8 +131,9 @@ def system_prompt(view: KnowledgeView) -> str:
 - sentiment、urgency：情绪和紧急程度。angry 只用于明显愤怒的邮件。
 - facts：从邮件和表单中提取的事实（设备、版本、时间、道具等），键用英文小写，值保持原文。
 - missing_info：回复前还需要向玩家确认的信息，只能从所选意图的“需要索要”中照抄。
-- sensitivity_tags：payment（支付纠纷、退款）、account_security（账号被盗）、minor（未成年人）、
-  legal（法律威胁、投诉到外部机构）、personal_info（邮件中含有个人隐私信息）。没有就是空列表。
+- sensitivity_tags：payment（支付纠纷：要求退款、拒付、重复扣款、不当扣款；购买后道具没有到账、
+  购买失败本身不算）、account_security（账号被盗、他人登录）、minor（未成年人）、legal（法律威胁、
+  投诉到外部机构）、personal_info（邮件中含有个人隐私信息）。没有就是空列表。
 - no_reply：只有当线程不需要回复时才填写：system_message（只有系统邮件、其中没有玩家的问题）
   或 other（写明理由）。需要回复时为 null。
 - thread_judgement：只有用户消息说明案件状态为 undetermined 时才填写：open（还需要回复）、

@@ -149,7 +149,7 @@ async def draft_case(
             foreign_texts=foreign,
         ),
     )
-    back_translation = await back_translate(composition.draft.body_ja, llm)
+    back_translation = await back_translate(composition.draft.body_ja, llm, view.glossary)
     candidate = composition.draft.candidate
     decision_route, reasons = route(
         RouteInput(
