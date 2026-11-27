@@ -8,6 +8,7 @@ from copilot.ingest.pipeline import (
     IngestStats,
     build_cases,
     read_cases,
+    thread_order,
     write_cases,
 )
 from copilot.ingest.sheet import SheetFormatError, SheetRow, read_sheet
@@ -20,5 +21,6 @@ __all__ = [
     "build_cases",
     "read_cases",
     "read_sheet",
+    "thread_order",
     "write_cases",
 ]

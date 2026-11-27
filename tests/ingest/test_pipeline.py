@@ -19,10 +19,10 @@ from copilot.ingest import (
     build_cases,
     read_cases,
     read_sheet,
+    thread_order,
     write_cases,
 )
 from copilot.ingest import sheet as sheet_module
-from copilot.ingest.pipeline import _thread_order
 from copilot.ingest.sheet import MAX_ID_CHARS
 from copilot.ingest.timestamps import JST
 
@@ -224,10 +224,10 @@ def test_numeric_ids_with_same_value_sort_by_spelling() -> None:
     assert forward == backward == ["01", "1", "SYN"]
 
 
-def test_thread_order_handles_unusual_ids() -> None:
+def testthread_order_handles_unusual_ids() -> None:
     # 这些 ID 不是合法的案件 ID（会被 build_cases 拒绝），但排序函数本身不能因此出错。
     long_id = "9" * 5000  # 超过 Python 整数与字符串转换的默认位数上限
-    ids = sorted(["²", "10", long_id, "9", "１", "SYN"], key=_thread_order)
+    ids = sorted(["²", "10", long_id, "9", "１", "SYN"], key=thread_order)
     assert ids == ["9", "10", long_id, "SYN", "²", "１"]
 
 

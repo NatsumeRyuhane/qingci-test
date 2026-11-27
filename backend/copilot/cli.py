@@ -117,3 +117,47 @@ def contracts_export(
         return
     for path in write_json_schemas(out_dir):
         typer.echo(f"已写入 {path}")
+
+
+@app.command("split")
+def split_command(
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="输出的切分结果。默认 data/processed/split.json。"),
+    ] = None,
+    method: Annotated[
+        str,
+        typer.Option(
+            "--method",
+            help="stratified：在时间上均匀分布的分层抽样（默认）；chronological：按时间先后切分。",
+        ),
+    ] = "stratified",
+    stats: Annotated[bool, typer.Option("--stats", help="输出各侧的汇总统计。")] = False,
+) -> None:
+    """把案件切分为 train / dev / test（#5、#7，D-012）。知识库只用 train 构建。"""
+    from copilot.eval import DEFAULT_MANIFEST, SplitMethod, split_cases, split_stats, write_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+
+    try:
+        chosen = SplitMethod(method)
+    except ValueError:
+        typer.echo(f"不认识的切分方法：{method}（可选 {', '.join(SplitMethod)}）", err=True)
+        raise typer.Exit(2) from None
+    source = cases_path or DEFAULT_OUTPUT
+    if not source.is_file():
+        typer.echo(f"找不到导入结果：{source}（先运行 copilot ingest）", err=True)
+        raise typer.Exit(1)
+    cases = read_cases(source)
+    manifest = split_cases(cases, method=chosen)
+    target = out or DEFAULT_MANIFEST
+    write_manifest(manifest, target)
+    counts = {side: len(manifest.ids(side)) for side in manifest.ratios}
+    summary = " · ".join(f"{side.value}: {n}" for side, n in counts.items())
+    typer.echo(f"已写入 {target}：{summary}")
+    if stats:
+        for line in split_stats(cases, manifest):
+            typer.echo(line)
