@@ -11,6 +11,7 @@ dependencies = [
     "openai>=3.60.0",
     "openpyxl>=3.1.5",
     "pydantic-settings>=2.16.3",
+    "pyyaml>=6.0.2",
     "sqlalchemy>=2.1.9",
     "typer>=0.29.3",
     "uvicorn[standard]>=0.54.0",
@@ -54,4 +55,5 @@ dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.6",
     "types-openpyxl>=3.1.5.20261122",
+    "types-pyyaml>=6.0.12.20261122",
 ]

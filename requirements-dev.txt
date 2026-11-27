@@ -297,7 +297,9 @@ pyyaml==6.0.4 \
     --hash=sha256:9e7ec9dc75cadd392fd687cc9b8ccf7dd59ada0a991e0d14ae0fad9ecdba00c3 \
     --hash=sha256:e24bf71af8a432d7808fabff134d38dfe16d3cbb41f2873bb4b1e42422de0a1a \
     --hash=sha256:f5c410f9e2ffc9286279a46f2e8c107edaf3b1123510af59c828a9c15b23c9db
-    # via uvicorn
+    # via
+    #   copilot
+    #   uvicorn
 rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
     --hash=sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36
@@ -362,6 +364,9 @@ typer==0.29.3 \
 types-openpyxl==3.1.5.20261122 \
     --hash=sha256:10b4b572021af793fabd87446594e621fc9a222e6e664b6b1f40fd51f638dee3 \
     --hash=sha256:cc6d93aab042fa27f69e9b89f3b7b671d5630e632199326ee3d18c2e22977839
+types-pyyaml==6.0.12.20261122 \
+    --hash=sha256:689fbbe883b60471166dede9dba6ac0dbdbcf0ea98062d7ec195430f5bbdb009 \
+    --hash=sha256:7fa577c893a1db255cbb02320884ffcb97b7a219fe515bec6c5f15d5d3af41ed
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
