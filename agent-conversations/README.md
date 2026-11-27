@@ -1,0 +1,95 @@
+# agent-conversations/
+
+与 AI Agent 协作开发本项目的会话记录，按会话导出，一个会话一个文件，命名为 `YYYY-MM-DD-<主题>.json`。这些原始记录是交付物 C（AI 协作过程）的素材；最终提交时如何整理，由 issue #9 决定（D-007、D-009）。
+
+- **工程实践导读与关键对话摘录**：见 [ENGINEERING_PROCESS.md](ENGINEERING_PROCESS.md)（含导出与脱敏机制、研发演进 Mermaid 图表、人机协同控制环与七大维度原始对话摘录）。
+- **交互式 HTML 审阅器**：见 [viewer.html](viewer.html) 与 [`scripts/render_conversations.py`](../scripts/render_conversations.py)（支持中英切换、折叠工具调用、过滤环境噪音与全文检索，用法见下文「可视化浏览」）。
+
+| 文件 | 内容 |
+|---|---|
+| [2026-11-26-project-kickoff.json](2026-11-26-project-kickoff.json) | 项目启动：阅读题目与数据、确定坐席助手方案、搭建仓库脚手架、在 issue 中写出开发计划、改为中文、导出会话 |
+| [2026-11-26-foundation-stack.json](2026-11-26-foundation-stack.json) | 基础建设（#2）：仓库所有者评审技术栈（LLM 不绑定服务商、改用 React、存储预留迁移接口、测试策略、uv/pnpm 之外的备用路线），新开部署 issue #14 并调整 #1、#6、#8、#10；实现 D-010 与项目骨架、CI（PR #15）；`src/` 改名为 `backend/`；处理 CodeRabbit 的三条评审意见。会话开头是一次 `/clear`，之前的上下文不在本记录中 |
+| [2026-11-26-contracts.json](2026-11-26-contracts.json) | 数据契约（#3）：实现共享 Pydantic 模型、JSON Schema 导出、合成测试数据与 `docs/architecture.md`（PR #16）；对照 #10–#14 检查前向兼容，补充版本演进规则；处理 CodeRabbit 的一条评审意见。同时起草了 #13 访问控制提案和 #14 部署（各自的本地分支，按仓库所有者要求暂缓推送）。会话开头是一次 `/clear`，之前的上下文不在本记录中；导出时隐去了 CodeRabbit 链接中的访问令牌 |
+| [2026-11-26-ingest.json](2026-11-26-ingest.json) | 导入与清洗（#4）：先做了仅限本地的邮件线程查看器（`chore/4-thread-viewer`，未推送）；讨论知识库的目标与内容（整条回复为模板单位、一致事实与限时公告分开、模拟“当前时间”精确到分钟并附在查询末尾、按需检索的 ReAct 循环、时间可以未知或带标签的估计）；实现 `copilot ingest`（PR #17），在真实样本上用汇总数字核对并抽查 30 个线程；处理 CodeRabbit 的多轮评审；派子 Agent 做只读安全审计，修复 ReDoS、构造的 xlsx、异常和错误信息回显等问题，其余发现与提示注入防护记入 #18；与仓库所有者讨论后，案件状态改为只看最后一封邮件，以系统邮件结束时为 `undetermined`。会话开头是一次 `/clear`，之前的上下文不在本记录中；读取样本及其派生数据的命令输出整段省略，导出脚本为此补充了标记，并自动隐去 GitHub 令牌 |
+| [2026-11-26-kb-design-contracts.json](2026-11-26-kb-design-contracts.json) | 知识库设计与契约扩展：撰写提案 0003 和 D-011（PR #20），开契约后续 issue #19，并更新 #5–#8、#12、#18；用汇总数字讨论角色证据和“不回复”（多数未回复的咨询是重复提交）；处理 CodeRabbit 的多轮评审（版本选择改为最新版本加有效期、`known_from`、重复出现只作辅助证据，仓库所有者确定 MVP 以其审核为信任根、生产需要元数据），并加入每层的对抗测试要求；按所有者要求清理分支和 worktree；实现 #19（PR #21）：知识库契约、带状态的时间、`Case.id` 字符限制、角色证据和新的状态规则（真实样本中 863 个线程从 `replied` 变为 `undetermined`）。会话开头是一次 `/clear`，之前的上下文不在本记录中；读取样本及其派生数据的命令输出按导出脚本的规则省略 |
+| [2026-11-27-kb-pipeline.json](2026-11-27-kb-pipeline.json) | 知识库流水线（#5，PR #22–#27）：按仓库所有者的要求先切分数据，防止评测集泄露进知识库，并与所有者讨论后改为在时间上均匀分布的 train/dev/test（D-012）；模板候选（只在 train 内重新计算角色证据、聚类与近似去重、槽位、稳定 ID），所有者决定覆盖率如实报告、不设 80% 门槛（D-013）；`knowledge/` 中的意图、政策、公告、术语和风格指南，评审即审核（D-014）；配置 OpenRouter（flex 服务等级、Claude Opus 5.5 作评审模型、Qwen embedding），用 LLM 生成标注初稿；标准答案与解决信号，期间发现并修复切分中重复提交偏向 train 的问题；做了一个仅限本地的一次性审核工具，所有者审核并批准全部 82 个模板；不可改写的版本化存储、覆盖层与发布。按所有者要求暂不处理 CodeRabbit 的评审意见。读取样本及其派生数据的命令输出、读取持久化长输出的结果、以及最后一轮泄露检查用到样本短语的命令按导出脚本的规则省略 |
+| [2026-11-27-issue-6-draft.json](2026-11-27-issue-6-draft.json) | 咨询分析、起草与分流（#6，PR #28–#30）以及公告的一次性修正（#31，PR #32）：读 issue 与提案后，所有者决定分 3 个叠加的 PR、BM25 用字符 bigram（D-015）；额度将尽时写交接说明，另一个工具（agy）因连接不稳只完成了两个提交，本会话评审后接手并清理它留下的文件。PR1：时间上下文、可用知识与限时模板、相似案件混合检索、代码自检、分流与“不回复”，处理 CodeRabbit 的多轮评审（豁免边界、失败即放行、重放泄露等）；所有者决定自动发送改为 12 个关卡的显式批准、把设计主张与假设逐条写成 docs/claims.md、安全按“瑞士奶酪”模型登记成 docs/security.md 的攻击目录而不是逐个修补，并从结构上关闭“索要信息”豁免（H-02）。PR2：分析、起草、回译与 copilot draft，真实数据验证中发现并修复 payment 标签、回译术语、相似案件模板匹配的问题，以及严格重放偏晚（A-12）和服务商间歇性 403。PR3：有界的工具循环与两种方式的延迟、token 对比（工具约翻倍、无可见提升），延迟发现记入 #7。发现 3/2 事故公告的 known_from 来自 dev/test，所有者决定一次性修正（D-016）。本文件取代同一会话早先导出的 2026-11-27-issue-6-design-handoff.json。会话开头是一次 `/clear`；读取样本派生数据和持久化长输出的结果按导出脚本的规则省略，另外手动省略了一次在真实样本上运行 copilot draft 时打印出的草稿正文与回译 |
+| [2026-11-27-issue-7-eval.json](2026-11-27-issue-7-eval.json) | 离线评测框架、安全攻击目录端到端重放与基线报告（#7，PR #33；Antigravity，期间调用 Carbon/Pro 子 Agent 做架构评审、评测归因分析与 CodeRabbit 评审处理）：并行化相似案件检索与分析、隐藏空 `search_facts` 工具、间歇性地区 403 重试与按任务 `max_tokens` 上限；实现历史重放（`replay.py`）、LLM 评审（`judge.py`）、多维切片汇总与 Markdown 报告（`metrics.py`）、带配置指纹缓存续跑的并发执行器（`runner.py`）、全部 39 个 `ATK-01`–`ATK-63` 合成攻击样本与重放器（`security.py`）及 `copilot eval` 命令；在真实数据上完成 Gemini 4 与 DeepSeek v4.1 Flash 的 `dev`/`test` 严格与放宽 `known_from`（A-12）基线、`flex` vs `default` 延迟对比及 39 项安全重放；处理全部 13 条 CodeRabbit 行内评审与 2 条跟进意见（采纳 12 条、按 A-07/H-11 保留 1 条讨论），落地所有者确认的 3 项决定（`DRAFT_AUTO_SEND_MIN_CONFIDENCE = 0.92`、决策 D-017 全链路暂定 `deepseek/deepseek-v4.1-flash`、新建后续 issue #34 与 #35），并在最终修订框架 `e106399` 上重跑 DeepSeek v4.1 Flash 新基线。导出按 D-002/D-009 隐去密钥、邮箱、本地路径、模型思考过程与样本派生输出 |
+
+## 可视化浏览（HTML 审阅器）
+
+使用 [`viewer.html`](viewer.html) 与辅助脚本 [`scripts/render_conversations.py`](../scripts/render_conversations.py)（仅依赖 Python 标准库，前端零外部依赖）可获得最佳审阅体验：
+
+```sh
+# 1. 启动本地 HTTP 预览服务（自动加载全部 8 份会话）
+python3 scripts/render_conversations.py --serve --open
+
+# 2. 打包为单个离线 HTML 文件（无网络依赖、无 file:// CORS 限制，双击即看）
+python3 scripts/render_conversations.py --bundle -o /tmp/conversations.html
+
+# 3. 单独将某一份会话渲染为独立 HTML 文件
+python3 scripts/render_conversations.py agent-conversations/2026-11-26-project-kickoff.json -o /tmp/kickoff.html
+```
+
+也可以直接用浏览器打开 `agent-conversations/viewer.html`，将本目录下的 `.json` 文件拖拽到页面中，或点击右上角「📂 打开 JSON」多选加载。审阅器默认开启 **「🌐 显示中文」**（优先显示 `translation_chs`，点击每条消息右上角可展开对照英文原文），默认将连续 `tool_call` 折叠为紧凑摘要条，并隐藏 `/clear`、`<task-notification>` 等运行环境噪音。
+
+## 格式
+
+结构化 JSON，用户消息、Agent 回复和工具调用的边界一目了然。每条实质性人类指令与 `agent_message` 均附带不改动原文的简体中文译文字段 `translation_chs`（保留原始 `user` 与 `text` 字节级不变）：
+
+```jsonc
+{
+  "schema_version": 1,
+  "title": "…", "source": "Claude Code", "session_id": "…", "exported_at": "…",
+  "redactions": ["…"],                 // 导出时做了哪些省略和隐去
+  "turns": [                           // 每条用户消息开启一轮
+    {
+      "turn": 1,
+      "timestamp": "…",
+      "kind": "message",               // 或 "shell_command"：用户用 ! 前缀直接执行的命令
+      "user": "用户消息原文",
+      "translation_chs": "用户消息简体中文译文", // 仅非噪音人类指令包含，不改动 user 原文
+      "steps": [                       // 该轮中依次发生的事
+        { "type": "agent_message", "text": "…", "translation_chs": "Agent 回复简体中文译文" },
+        { "type": "tool_call", "tool": "Bash", "description": "…", "input": { "command": "…" },
+          "result": { "is_error": false, "output": "…", "omitted_lines": 0 } },
+        { "type": "skill_loaded" },
+        { "type": "shell_output", "stdout": "…", "stderr": "…" },
+        { "type": "harness_notice", "text": "…" }   // 运行环境消息（如 API 报错），不是 Agent 说的话
+      ]
+    }
+  ]
+}
+```
+
+快速浏览示例：
+
+```sh
+# 列出每一轮的用户消息
+jq -r '.turns[] | "\(.turn) [\(.kind)] \(.user[0:80])"' agent-conversations/<文件>.json
+# 只看第 3 轮中 Agent 说的话
+jq -r '.turns[2].steps[] | select(.type=="agent_message") | .text' agent-conversations/<文件>.json
+```
+
+## 导出方式
+
+Claude Code 会话用 [`scripts/export_claude_session.py`](../scripts/export_claude_session.py) 导出：
+
+```sh
+python3 -I scripts/export_claude_session.py \
+  ~/.claude/projects/<项目目录名>/<session-id>.jsonl \
+  agent-conversations/YYYY-MM-DD-<主题>.json "会话记录：<标题>"
+```
+
+脚本会：
+- 保留用户消息、Agent 回复、工具调用（含输入）及其结果（截断）
+- 省略模型的思考过程、系统提示、运行时元数据，以及 Write 写入的文件全文（以仓库中的文件为准）
+- 隐去邮箱地址、本地用户名和目录、SSH 密钥信息、报错链接中的组织 ID；读取样本数据的命令输出整段省略
+
+其他工具的会话请用该工具自带的导出功能，尽量转换为相同的结构，并按下面的要求处理。
+
+## 提交前必须检查
+
+1. 通读一遍，确认没有密钥、个人信息，也没有大段样本数据（[data/README.md](../data/README.md)）。
+2. 不要改写对话内容本身。需要说明的地方，在本 README 的表格中补充。
+3. 记录只反映导出那一刻为止的内容。会话在导出之后的部分不包含在内，最后一次工具调用的 `result` 可能为 `null`。

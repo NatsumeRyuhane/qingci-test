@@ -2,7 +2,7 @@
 
 一个客服坐席助手（Copilot），让**中文客服人员**能够快速、准确地回复手游『ぽちゃガチョ！』**日本玩家**的客服邮件，并使用得体的日语商务敬语。客服人员用得越多，它就越好用。
 
-> **状态：** MVP 全部功能模块（共享契约、导入清洗、模板与运营知识库、分析起草与风险分流、离线评测与安全重放、中文客服 Web 工作台与模拟邮箱）均已完成。完整的技术方案复盘见 [docs/approach.md](docs/approach.md)，开发计划见[路线图（#1）](https://github.com/NatsumeRyuhane/qingci-test/issues/1)。
+> **状态：** MVP 全部功能模块（共享契约、导入清洗、模板与运营知识库、分析起草与风险分流、离线评测与安全重放、中文客服 Web 工作台与模拟邮箱）均已完成。完整的技术方案复盘见 [docs/approach.md](docs/approach.md)，AI 协作工程实践与交互记录见 [agent-conversations/ENGINEERING_PROCESS.md](agent-conversations/ENGINEERING_PROCESS.md)，开发计划见[路线图（#1）](https://github.com/NatsumeRyuhane/qingci-test/issues/1)。
 
 ## 背景
 
@@ -11,7 +11,7 @@
 - 一款在日本发行的游戏，客服由中国团队承担。
 - **目标：** 解决语言障碍和日本客服的语言习惯问题，并基于由历史客服邮件构成的小型知识库，让回复尽可能做到**自动化、精准、可持续迭代**。
 - **输入：** 一份脱敏样本，5,950 封客服邮件、2,872 个邮件线程（[docs/data.md](docs/data.md)）。
-- **交付物：** (A) 可运行的源代码，附 README 和运行录屏；(B) 技术方案复盘（[docs/approach.md](docs/approach.md)）；(C) 与 AI 协作开发的交互日志，这是考察重点。
+- **交付物：** (A) 可运行的源代码，附 README 和运行录屏；(B) 技术方案复盘（[docs/approach.md](docs/approach.md)）；(C) 与 AI 协作开发的交互日志与工程复盘（[agent-conversations/ENGINEERING_PROCESS.md](agent-conversations/ENGINEERING_PROCESS.md) 与 [agent-conversations/](agent-conversations/README.md)），这是考察重点。
 
 我们把它当作一个真实、长期维护的项目来做：后续维护者需要的一切都写在本仓库和 issue 里，而不是留在某个人的聊天记录中。
 
@@ -110,8 +110,9 @@ backend/copilot/   后端（Python 3.12 + FastAPI，/v1 REST API 与 copilot CLI
 knowledge/         人工编写、不含客户原文的运营知识（意图、政策、公告、术语、风格指南）
 tests/             后端单元、契约与对抗测试（只用合成数据）
 frontend/          前端（React + TypeScript），只通过 /v1 访问后端
-scripts/           辅助脚本（demo.sh 一键本地演示、导出锁定依赖、从 OpenAPI 生成前端类型）
+scripts/           辅助脚本（demo.sh 一键本地演示、导出锁定依赖、生成前端类型、会话导出与 HTML 渲染）
 data/              仅限本地的数据与数据库目录（内容永不提交）
+agent-conversations/  与 AI Agent 协作的原始会话记录、HTML 审阅器与工程实践导读（交付物 C）
 docs/              方案复盘、需求、数据概况、契约与防线、评测基线、决策记录、设计提案
 ```
 
@@ -201,6 +202,8 @@ uv run pytest
 |---|---|
 | [AGENTS.md](AGENTS.md) | 贡献指南、工作流程、分支保护规则与检查命令 |
 | [docs/approach.md](docs/approach.md) | **技术方案复盘（交付物 B）**：问题分析、数据发现、架构与分流设计、评测基线与后续演进 |
+| [agent-conversations/ENGINEERING_PROCESS.md](agent-conversations/ENGINEERING_PROCESS.md) | **AI 协作过程导读（交付物 C）**：导出与脱敏机制、研发演进全景图、人机协同方法论与关键对话双语摘录 |
+| [agent-conversations/README.md](agent-conversations/README.md) | 原始 AI Agent 协作会话索引（8 份结构化 JSON，含 `translation_chs` 中文译文与交互式审阅器 [viewer.html](agent-conversations/viewer.html)） |
 | [docs/requirements.md](docs/requirements.md) | 原始测试题说明 |
 | [docs/data.md](docs/data.md) | 样本数据的结构、统计与关键发现 |
 | [docs/architecture.md](docs/architecture.md) | 数据契约：各实体的作用、关系与约定；起草自检与分流规则 |

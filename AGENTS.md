@@ -225,14 +225,19 @@ alembic.ini          仅供开发时生成数据库迁移
 backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、draft/（起草：时间、检索、检查与分流）、workbench/（坐席流程、模拟邮箱、演示数据）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
-scripts/             辅助脚本（导出 requirements、生成 API 类型）
+scripts/             辅助脚本（一键演示、导出 requirements、生成 API 类型、会话导出与 HTML 渲染）
 .github/workflows/   CI
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
 knowledge/           人工编写、不含客户原文的知识（意图、政策、公告、术语、风格指南），见 knowledge/README.md
+agent-conversations/ 与 AI Agent 协作的会话记录、HTML 审阅器与工程实践导读（D-009）
 docs/
   requirements.md    原始测试题说明
+  approach.md        技术方案复盘（交付物 B）
   data.md            样本数据概况与发现
   architecture.md    数据契约：各实体的作用、关系与约定
+  claims.md          设计主张与假设（每条代码级主张由哪些测试守护）
+  security.md        安全模型、攻击目录与已知漏洞
+  eval.md            离线评测方法与留出集/安全基线报告
   decisions.md       决策记录（D-NNN）
   proposals/         MVP 之后工作的设计提案
 ```
