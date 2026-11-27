@@ -216,7 +216,7 @@ README.md            项目概览与上手指南
 .env.example         应用读取的全部环境变量，不含值
 pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
 alembic.ini          仅供开发时生成数据库迁移
-backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、draft/（起草：时间、检索、检查与分流）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
 scripts/             辅助脚本（导出 requirements、生成 API 类型）

@@ -119,3 +119,9 @@
 - 背景：只有已批准（`approved`）的知识库条目会提供给模型（D-011）。从数据中归纳的条目（模板）通过审核文件审核；人工编写、提交到 `knowledge/` 的条目（意图、政策、公告与事件、术语表）需要一个同样可靠的批准方式。提案 0003 §12 要求这些运营内容“像代码一样评审”。
 - 决定：`knowledge/` 中的条目以 `review_status: approved` 提交，**PR 的评审就是所有者的审核**；未经评审的改动不能合并（AGENTS.md 第 5 节）。修改已合并的条目时新建版本，不改写。编写时只参考 train 的数据（D-012），提交前用 `copilot kb knowledge --check-leaks` 检查是否混入样本原文。
 - 影响：意图目录和政策在合并后即可被 #6 使用；审核的记录就是 PR 的评审记录。规则写在 [knowledge/README.md](../knowledge/README.md)。
+
+## D-015：相似案件检索的 BM25 用字符 bigram
+- 日期：2026-11-27 · 状态：已采纳（细化 D-010 中“BM25（日语分词）”一句） · 来源：[#6](https://github.com/NatsumeRyuhane/qingci-test/issues/6)（仓库所有者的决定）
+- 背景：D-010 定下 BM25 + embedding 的混合检索，但仓库中还没有日语分词器。形态素分析器（例如 sudachipy 及其词典、fugashi + unidic-lite）会给两条工具链和 CI 增加几十 MB 的依赖。样本文本全角半角混用，部分字符丢失成了 `?`（[data.md](data.md)），分词器对这类文本并不可靠。
+- 决定：BM25 用 NFKC 规范化、去掉空白和常见标点后的**字符 bigram**，这是中日文检索的常见做法。语义上的相似由 embedding 补充，两路用 RRF 融合；没有配置 embedding 时只用 BM25。
+- 影响：不增加依赖。如果 #7 的评测显示检索质量受分词影响，再换成真正的分词器；检索接口（`SimilarCaseRetriever`）不变。
