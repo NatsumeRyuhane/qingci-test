@@ -2,10 +2,13 @@
 
 from collections.abc import Callable
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from copilot.contracts import Case, InquiryForm
+from copilot.contracts import Case, InquiryForm, NoReplyProposal, NoReplyReason
 from copilot.contracts.enums import CaseStatus, InquiryCategory
+from copilot.draft.service import DraftOutcome
+from copilot.workbench import DrafterFailedError, DrafterUnavailableError, StubDrafter
 from tests.cases import agent, case, player
 
 Seed = Callable[..., None]
@@ -39,7 +42,7 @@ def test_list_cases_before_and_after_drafting(client: TestClient, seed: Seed) ->
     listed = client.get("/v1/cases", params={"route": "escalate"}).json()
     assert [item["id"] for item in listed["items"]] == ["SYN-2"]
     item = listed["items"][0]
-    assert item["status"] == "drafted"
+    assert item["status"] == "escalated"  # 分流为升级时，案件按起草服务的建议变为 escalated
     assert item["category"] == "purchase"
     assert item["summary_zh"].startswith("【占位】")
     assert item["urgency"] == "high"
@@ -71,10 +74,9 @@ def test_case_detail(client: TestClient, seed: Seed) -> None:
 def test_redraft_replaces_latest_draft(client: TestClient, seed: Seed) -> None:
     seed(case("SYN-1"))
     first = client.post("/v1/cases/SYN-1/drafts", json={}).json()["draft"]
-    second = client.post("/v1/cases/SYN-1/drafts", json={"template_id": "tpl-x"}).json()["draft"]
+    second = client.post("/v1/cases/SYN-1/drafts").json()["draft"]
 
     assert first["id"] != second["id"]
-    assert any("tpl-x" in reason for reason in second["route_reasons"])
     assert client.get("/v1/cases/SYN-1").json()["draft"]["id"] == second["id"]
 
 
@@ -117,3 +119,63 @@ def test_backtranslate_edited_body(client: TestClient, seed: Seed) -> None:
     assert (
         client.post(f"/v1/drafts/{draft_id}/backtranslate", json={"body_ja": ""}).status_code == 422
     )
+
+
+class _NoReplyDrafter(StubDrafter):
+    """模拟 #6 判定“不回复”自动生效：没有草稿。"""
+
+    def draft(self, case: Case) -> DraftOutcome:
+        outcome = super().draft(case)
+        proposal = NoReplyProposal(
+            reason=NoReplyReason.DUPLICATE, reason_zh="【合成】重复提交", duplicate_of="SYN-0"
+        )
+        return outcome.model_copy(
+            update={
+                "draft": None,
+                "no_reply": proposal,
+                "no_reply_auto": True,
+                "proposed_status": CaseStatus.NO_REPLY_NEEDED,
+            }
+        )
+
+
+class _BrokenDrafter(StubDrafter):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self._error = error
+
+    def draft(self, case: Case) -> DraftOutcome:
+        raise self._error
+
+    def backtranslate(self, body_ja: str) -> str:
+        raise self._error
+
+
+def test_auto_no_reply_closes_case_without_draft(
+    app: FastAPI, client: TestClient, seed: Seed
+) -> None:
+    app.state.drafter = _NoReplyDrafter()
+    seed(case("SYN-1"))
+
+    detail = client.post("/v1/cases/SYN-1/drafts").json()
+    assert detail["draft"] is None
+    assert detail["case"]["status"] == "no_reply_needed"
+    assert detail["analysis"]["no_reply"]["duplicate_of"] == "SYN-0"
+
+
+def test_drafter_errors_map_to_503_and_502(app: FastAPI, client: TestClient, seed: Seed) -> None:
+    seed(case("SYN-1"))
+    draft_id = client.post("/v1/cases/SYN-1/drafts").json()["draft"]["id"]
+
+    app.state.drafter = _BrokenDrafter(DrafterUnavailableError("缺少配置：LLM_MODEL_DRAFT"))
+    response = client.post("/v1/cases/SYN-1/drafts")
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
+    assert "LLM_MODEL_DRAFT" in response.json()["error"]["message"]
+
+    app.state.drafter = _BrokenDrafter(DrafterFailedError("起草服务调用失败，请稍后重试"))
+    response = client.post(f"/v1/drafts/{draft_id}/backtranslate", json={"body_ja": "x"})
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "upstream_error"
+    # 失败的起草没有留下半个结果
+    assert client.get("/v1/cases/SYN-1").json()["draft"]["id"] == draft_id

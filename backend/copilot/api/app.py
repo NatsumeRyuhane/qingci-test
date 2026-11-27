@@ -11,7 +11,7 @@ from copilot.api import cases, sim
 from copilot.api.auth import authorize
 from copilot.api.errors import ERROR_RESPONSES, install_error_handling
 from copilot.config import Settings, get_settings
-from copilot.draft import Drafter, StubDrafter
+from copilot.workbench import Drafter, StubDrafter
 
 API_PREFIX = "/v1"
 
@@ -45,11 +45,19 @@ def _v1_router() -> APIRouter:
     return router
 
 
+def _default_drafter(settings: Settings) -> Drafter:
+    if settings.workbench_drafter == "stub":
+        return StubDrafter()
+    from copilot.workbench.pipeline import PipelineDrafter
+
+    return PipelineDrafter(settings)
+
+
 def create_app(settings: Settings | None = None, *, drafter: Drafter | None = None) -> FastAPI:
     """创建应用。OpenAPI 文档放在 `/v1` 下，与 API 版本一起演进。
 
     数据库引擎在第一次用到时才创建（见 `copilot.api.deps`），只生成 OpenAPI 时不碰数据库。
-    `drafter` 默认是占位实现，#6 完成后改为真实实现。
+    `drafter` 默认按 `WORKBENCH_DRAFTER` 选择：#6 的起草流水线，或不调用 LLM 的占位实现。
     """
     settings = settings or get_settings()
 
@@ -69,7 +77,7 @@ def create_app(settings: Settings | None = None, *, drafter: Drafter | None = No
     )
     app.state.database_url = settings.database_url
     app.state.engine = None
-    app.state.drafter = drafter or StubDrafter()
+    app.state.drafter = drafter or _default_drafter(settings)
     install_error_handling(app)
     app.include_router(_v1_router())
     return app

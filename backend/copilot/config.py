@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     draft_max_tool_steps: int = Field(default=4, ge=1, le=10)
     """“流水线 + 工具”模式中，模型最多调用几次工具（提案 0003 §10）。"""
 
+    # --- 工作台（#8） ---
+    workbench_drafter: Literal["pipeline", "stub"] = "pipeline"
+    """工作台使用的起草服务：`pipeline` 调用 #6 的流水线；`stub` 是不调用 LLM 的占位实现，
+    用于前端开发和预览。"""
+    workbench_draft_tools: bool = False
+    """工作台起草时是否用“流水线 + 工具”模式。"""
+
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"
     database_url: str = "sqlite:///data/copilot.db"

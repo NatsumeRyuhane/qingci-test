@@ -6,8 +6,8 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy import Engine
 
-from copilot.draft import Drafter
 from copilot.storage import Repository, SqlRepository, create_engine_for, session_scope
+from copilot.workbench import Drafter
 
 
 def engine_of(request: Request) -> Engine:

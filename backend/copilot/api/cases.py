@@ -16,9 +16,8 @@ from copilot.contracts.enums import (
     Sentiment,
     Urgency,
 )
-from copilot.draft import latest_player_message
 from copilot.storage import NotFoundError
-from copilot.workbench import generate_draft, submit_feedback
+from copilot.workbench import generate_draft, latest_player_message, submit_feedback
 
 PREVIEW_CHARS = 80
 MAX_BODY_CHARS = 20_000
@@ -63,11 +62,6 @@ class CaseDetail(BaseModel):
     draft: Draft | None
     feedback: list[Feedback]
     """最新草稿收到的反馈，按时间顺序。"""
-
-
-class DraftRequest(BaseModel):
-    template_id: str | None = Field(default=None, max_length=128)
-    """客服指定的模板 ID，不指定时由起草服务选择。"""
 
 
 class BacktranslateRequest(BaseModel):
@@ -157,11 +151,13 @@ def router() -> APIRouter:
         return _detail(repo, case_id)
 
     @r.post("/cases/{case_id}/drafts", status_code=201)
-    def create_draft(
-        repo: Repo, drafter: DrafterDep, case_id: CaseIdPath, body: DraftRequest
-    ) -> CaseDetail:
-        """为最新一封玩家邮件（重新）生成分析和草稿。已结案的案件返回 409。"""
-        generate_draft(repo, drafter, case_id, template_id=body.template_id)
+    def create_draft(repo: Repo, drafter: DrafterDep, case_id: CaseIdPath) -> CaseDetail:
+        """为最新一封玩家邮件（重新）生成分析和草稿。
+
+        “不回复”自动生效时没有草稿，案件变为 `no_reply_needed`。已结案的案件返回 409；
+        起草服务未配置时返回 503，调用失败时返回 502。
+        """
+        generate_draft(repo, drafter, case_id)
         return _detail(repo, case_id)
 
     @r.post("/drafts/{draft_id}/backtranslate")

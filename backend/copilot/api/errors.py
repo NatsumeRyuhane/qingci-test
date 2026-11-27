@@ -18,7 +18,12 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from copilot.storage import NotFoundError
-from copilot.workbench import ConflictError, InvalidRequestError
+from copilot.workbench import (
+    ConflictError,
+    DrafterFailedError,
+    DrafterUnavailableError,
+    InvalidRequestError,
+)
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -33,6 +38,8 @@ ErrorCode = Literal[
     "conflict",
     "validation_error",
     "internal_error",
+    "upstream_error",
+    "service_unavailable",
 ]
 
 _STATUS_CODES: dict[int, ErrorCode] = {
@@ -61,7 +68,7 @@ class ErrorResponse(BaseModel):
 
 
 ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    status: {"model": ErrorResponse} for status in (401, 403, 404, 409, 422, 500)
+    status: {"model": ErrorResponse} for status in (401, 403, 404, 409, 422, 500, 502, 503)
 }
 """写进 OpenAPI 的错误响应，让前端生成的类型知道错误正文的结构。"""
 
@@ -109,6 +116,14 @@ async def _invalid(request: Request, exc: Exception) -> Response:
     return error_response(request, 422, "validation_error", str(exc))
 
 
+async def _drafter_unavailable(request: Request, exc: Exception) -> Response:
+    return error_response(request, 503, "service_unavailable", str(exc))
+
+
+async def _drafter_failed(request: Request, exc: Exception) -> Response:
+    return error_response(request, 502, "upstream_error", str(exc))
+
+
 async def _unexpected(request: Request, exc: Exception) -> Response:
     logger.exception("未处理的异常（request_id=%s）", request_id_of(request))
     return error_response(request, 500, "internal_error", "服务器内部错误")
@@ -137,3 +152,5 @@ def install_error_handling(app: FastAPI) -> None:
     app.add_exception_handler(NotFoundError, _not_found)
     app.add_exception_handler(ConflictError, _conflict)
     app.add_exception_handler(InvalidRequestError, _invalid)
+    app.add_exception_handler(DrafterUnavailableError, _drafter_unavailable)
+    app.add_exception_handler(DrafterFailedError, _drafter_failed)

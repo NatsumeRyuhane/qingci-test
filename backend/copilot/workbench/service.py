@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 from copilot.contracts import Case, Feedback, Message, OutboundMail, RoleEvidence
 from copilot.contracts.enums import CaseStatus, FeedbackAction, MessageRole, RoleEvidenceKind
-from copilot.draft import Drafter, DraftResult, latest_player_message
+from copilot.draft.service import DraftOutcome
 from copilot.storage import NotFoundError, Repository
 from copilot.storage.repository import Clock, utc_now
+from copilot.workbench.drafting import Drafter, latest_player_message
 from copilot.workbench.text import levenshtein
 
 CLOSED_STATUSES = frozenset({CaseStatus.REPLIED, CaseStatus.NO_REPLY_NEEDED})
@@ -40,30 +41,34 @@ def _require_case(repo: Repository, case_id: str) -> Case:
     return case
 
 
-def generate_draft(
-    repo: Repository, drafter: Drafter, case_id: str, *, template_id: str | None = None
-) -> DraftResult:
+def generate_draft(repo: Repository, drafter: Drafter, case_id: str) -> DraftOutcome:
     """为案件最新一封玩家邮件（重新）分析并起草，保存结果。
 
-    案件变为 `drafted`，类别更新为分析得出的类别；已升级的案件保持 `escalated`，
-    重新起草不会撤销升级。
+    - 生成了草稿：案件变为起草服务建议的状态（`drafted`，分流为升级时 `escalated`）。
+      已升级的案件保持 `escalated`，重新起草不会撤销升级。
+    - “不回复”自动生效（#6，提案 0003 §8）：没有草稿，案件变为 `no_reply_needed`。
+      保存的分析中 `no_reply` 是最终的判断（代码确认的重复提交，或分析的提议）。
+    - 类别更新为分析得出的类别（`Case.category` 优先采用分析结果）。
     """
     case = _require_case(repo, case_id)
     if case.status in CLOSED_STATUSES:
         raise ConflictError(f"案件已结案（{case.status.value}），不能起草")
     try:
-        result = drafter.draft(case, template_id=template_id)
+        outcome = drafter.draft(case)
     except ValueError as exc:  # 例如线程中没有玩家邮件
         raise ConflictError(str(exc)) from exc
 
-    repo.add_analysis(result.analysis)
-    repo.add_draft(result.draft)
-    # `Case.category` 优先采用分析结果（见契约）
-    update: dict[str, object] = {"category": result.analysis.category}
+    analysis = outcome.analysis
+    if outcome.no_reply is not None:
+        analysis = analysis.model_copy(update={"no_reply": outcome.no_reply})
+    repo.add_analysis(analysis)
+    update: dict[str, object] = {"category": analysis.category}
+    if outcome.draft is not None:
+        repo.add_draft(outcome.draft)
     if case.status is not CaseStatus.ESCALATED:
-        update["status"] = CaseStatus.DRAFTED
+        update["status"] = outcome.proposed_status or CaseStatus.DRAFTED
     repo.save_case(case.model_copy(update=update))
-    return result
+    return outcome
 
 
 def submit_feedback(

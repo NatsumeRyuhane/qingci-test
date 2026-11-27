@@ -13,10 +13,10 @@ from copilot.storage import SqlRepository, create_engine_for, session_scope, upg
 
 @pytest.fixture
 def app(tmp_path: Path) -> FastAPI:
-    """连接一个已迁移的临时 SQLite 数据库的应用。"""
+    """连接一个已迁移的临时 SQLite 数据库、使用占位起草服务的应用。"""
     url = f"sqlite:///{tmp_path / 'copilot.db'}"
     upgrade_database(url)
-    return create_app(Settings(database_url=url))
+    return create_app(Settings(database_url=url, workbench_drafter="stub"))
 
 
 @pytest.fixture
