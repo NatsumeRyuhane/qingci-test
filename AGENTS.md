@@ -173,6 +173,8 @@ uv run copilot kb build            # 只用 train 构建模板候选（#5），�
 uv run copilot kb knowledge --check-leaks   # 校验 knowledge/，并检查是否混入样本原文
 uv run copilot kb annotate         # 用 LLM 标注模板候选（需要 LLM_MODEL_ANNOTATE），写出 data/processed/kb/templates.jsonl
 uv run copilot kb label            # 为所有切分生成 #7 的标准答案，写出 data/processed/kb/labels/
+uv run copilot kb review export    # 每个模板一个审核文件（data/processed/kb/review/），改完后 kb review import
+uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库（只插入新版本）
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
