@@ -61,6 +61,17 @@ def test_chronological_split_keeps_time_order() -> None:
     assert sides == [Split.TRAIN] * 70 + [Split.DEV] * 15 + [Split.TEST] * 15
 
 
+def test_chronological_boundaries_use_original_positions() -> None:
+    # 重复提交 [1, 20] 整组在 train；其他线程仍按自己在时间线上的位置分配，不被这组推后
+    # （边界：14 和 17）。
+    cases = _cases(20)
+    for i in (1, 20):
+        cases[i - 1] = case(str(i), content=DUPLICATE)
+    manifest = split_cases(cases, method=SplitMethod.CHRONOLOGICAL)
+    sides = [manifest.assignments[c.id] for c in cases]
+    assert sides == [Split.TRAIN] * 14 + [Split.DEV] * 3 + [Split.TEST] * 2 + [Split.TRAIN]
+
+
 @pytest.mark.parametrize("method", list(SplitMethod))
 def test_duplicates_stay_on_one_side(method: SplitMethod) -> None:
     cases = _cases(300)

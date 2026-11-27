@@ -172,31 +172,28 @@ def split_cases(
     cases = list(cases)
     _check_ratios(ratios)
     units = _units(cases)
+    position = {
+        case_id: i for i, case_id in enumerate(sorted((c.id for c in cases), key=thread_order))
+    }
     assignments: dict[str, Split] = {}
     if method is SplitMethod.STRATIFIED:
-        position = {
-            case_id: i for i, case_id in enumerate(sorted((c.id for c in cases), key=thread_order))
-        }
         strata: dict[int, list[list[str]]] = {}
         for unit in units:
             strata.setdefault(position[unit[0]] // stratum_size, []).append(unit)
         for stratum in strata.values():
             _allocate(sorted(stratum, key=lambda u: _hash_order(seed, u)), ratios, assignments)
     else:
-        total = sum(len(unit) for unit in units)
+        # 按组内最早的线程在时间线上的原始位置决定一侧，整组跟随它。不能按已分配的线程数
+        # 累计：一组重复提交会把它之后的所有线程往后推，边界附近的线程会被分错。
+        total = len(position)
         bounds = [ratios[Split.TRAIN] * total, (ratios[Split.TRAIN] + ratios[Split.DEV]) * total]
-        before = 0
         for unit in units:
+            first = position[unit[0]]
             side = (
-                Split.TRAIN
-                if before < bounds[0]
-                else Split.DEV
-                if before < bounds[1]
-                else Split.TEST
+                Split.TRAIN if first < bounds[0] else Split.DEV if first < bounds[1] else Split.TEST
             )
             for case_id in unit:
                 assignments[case_id] = side
-            before += len(unit)
     return SplitManifest(
         method=method,
         seed=seed,
