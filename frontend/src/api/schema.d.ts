@@ -625,6 +625,11 @@ export interface components {
              */
             actor: string;
             /**
+             * Confirmed Failed Checks
+             * @description 发送时未通过、由客服确认后仍然发送的自检项。只用于批准和修改后发送。
+             */
+            confirmed_failed_checks?: components["schemas"]["DraftCheckKind"][];
+            /**
              * Created At
              * Format: date-time
              * @description 提交时间。
@@ -647,6 +652,19 @@ export interface components {
              */
             final_body_ja?: string | null;
             /**
+             * Final Body Zh
+             * @description 客服在界面中编辑的中文回复。客服用中文工作，日语由 LLM 从它翻译而来；没有编辑中文时
+             *     为空。
+             */
+            final_body_zh?: string | null;
+            /**
+             * Ja Edited Directly
+             * @description 客服是否直接改过日语正文。直接改过时，日语以客服的修改为准，不再由中文重新翻译，
+             *     `final_body_zh` 可能与日语不完全一致。
+             * @default false
+             */
+            ja_edited_directly: boolean;
+            /**
              * Reason
              * @description 修改、升级或拒绝的原因（中文），可选。
              */
@@ -664,7 +682,7 @@ export interface components {
          * @description 客服对草稿的处理。
          * @enum {string}
          */
-        FeedbackAction: "approved" | "edited" | "escalated" | "rejected";
+        FeedbackAction: "approved" | "edited" | "escalated" | "rejected" | "no_reply";
         /**
          * FeedbackRequest
          * @description 客服对草稿的处理。编辑距离和时间由服务端计算。

@@ -29,6 +29,7 @@ export const ACTION_LABELS: Record<FeedbackAction, string> = {
   edited: "修改后发送",
   escalated: "升级处理",
   rejected: "驳回",
+  no_reply: "无需回复",
 };
 
 export const URGENCY_LABELS: Record<string, string> = { low: "低", normal: "普通", high: "高" };

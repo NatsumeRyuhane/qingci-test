@@ -17,6 +17,7 @@ from copilot.contracts import (
     DraftMode,
     Fact,
     Feedback,
+    FeedbackAction,
     GlossaryEntry,
     InquiryForm,
     Intent,
@@ -438,3 +439,23 @@ def test_tool_name_is_restricted(tool: str) -> None:
     item["trace"][0]["tool"] = tool
     with pytest.raises(ValidationError, match="tool"):
         Draft.model_validate(item)
+
+
+# --- 不回复与编辑记录（#8） ---
+
+
+def test_no_reply_feedback_requires_reason_and_has_no_body() -> None:
+    item = load_items("feedback")[3]
+    assert Feedback.model_validate(item).action is FeedbackAction.NO_REPLY
+    with pytest.raises(ValidationError, match="reason"):
+        Feedback.model_validate(item | {"reason": " "})
+    with pytest.raises(ValidationError, match="没有发出的正文"):
+        Feedback.model_validate(item | {"final_body_ja": "x"})
+
+
+def test_confirmed_failed_checks_only_when_sending() -> None:
+    escalated = load_items("feedback")[2]
+    with pytest.raises(ValidationError, match="confirmed_failed_checks"):
+        Feedback.model_validate(escalated | {"confirmed_failed_checks": ["register"]})
+    edited = Feedback.model_validate(load_items("feedback")[1])
+    assert edited.final_body_zh and edited.confirmed_failed_checks

@@ -145,6 +145,9 @@ class FeedbackAction(StrEnum):
     """升级处理。"""
     REJECTED = "rejected"
     """草稿不可用。"""
+    NO_REPLY = "no_reply"
+    """不需要回复，客服直接结案（重复提交、垃圾邮件、没有需要答复的内容等），必须写明理由。
+    案件变为 `no_reply_needed`。"""
 
 
 class TimeStatus(StrEnum):

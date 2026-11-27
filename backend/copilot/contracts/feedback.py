@@ -5,7 +5,7 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, Field, model_validator
 
 from copilot.contracts.base import Document
-from copilot.contracts.enums import FeedbackAction
+from copilot.contracts.enums import DraftCheckKind, FeedbackAction
 
 
 class Feedback(Document):
@@ -28,6 +28,14 @@ class Feedback(Document):
     `approved` 时为 0，`edited` 时大于 0。"""
     created_at: AwareDatetime
     """提交时间。"""
+    final_body_zh: str | None = None
+    """客服在界面中编辑的中文回复。客服用中文工作，日语由 LLM 从它翻译而来；没有编辑中文时
+    为空。"""
+    ja_edited_directly: bool = False
+    """客服是否直接改过日语正文。直接改过时，日语以客服的修改为准，不再由中文重新翻译，
+    `final_body_zh` 可能与日语不完全一致。"""
+    confirmed_failed_checks: list[DraftCheckKind] = Field(default_factory=list)
+    """发送时未通过、由客服确认后仍然发送的自检项。只用于批准和修改后发送。"""
 
     @model_validator(mode="after")
     def _check_action(self) -> Self:
@@ -38,4 +46,13 @@ class Feedback(Document):
                 raise ValueError("action 为 edited 时 edit_distance 必须大于 0")
         if self.action is FeedbackAction.APPROVED and self.edit_distance != 0:
             raise ValueError("action 为 approved 时 edit_distance 必须为 0")
+        # 以下只约束新增的取值和字段，不收紧已有数据的含义（不需要升 schema_version）
+        sends = self.action in {FeedbackAction.APPROVED, FeedbackAction.EDITED}
+        if not sends and self.confirmed_failed_checks:
+            raise ValueError("只有批准和修改后发送才能有 confirmed_failed_checks")
+        if self.action is FeedbackAction.NO_REPLY:
+            if not (self.reason or "").strip():
+                raise ValueError("action 为 no_reply 时必须写明 reason")
+            if self.final_body_ja is not None or self.edit_distance != 0:
+                raise ValueError("action 为 no_reply 时没有发出的正文")
         return self

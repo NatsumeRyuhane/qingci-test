@@ -253,6 +253,7 @@ export class MockBackend {
       reason,
       edit_distance: distance,
       created_at: created,
+      ja_edited_directly: false,
     };
     this.feedback.push(feedback);
     let mail: OutboundMail | null = null;
