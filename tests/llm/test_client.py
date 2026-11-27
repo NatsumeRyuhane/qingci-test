@@ -258,3 +258,33 @@ async def test_with_usage_isolates_meter() -> None:
 
     assert base.usage.total().calls == 1
     assert scoped.usage.total().calls == 1
+
+
+async def test_reasoning_is_omitted_by_default_and_off_for_translation() -> None:
+    """翻译默认关闭推理：推理模型可能把 max_tokens 全部用在推理上而返回空内容。"""
+    endpoint = FakeEndpoint(chat_reply("訳文"), chat_reply("草稿"))
+    settings = make_settings(llm_model_draft="draft-model", llm_service_tier="flex")
+    client = make_client(endpoint, settings)
+    await client.complete_text(LLMTask.TRANSLATE, [{"role": "user", "content": "x"}])
+    await client.complete_text(LLMTask.DRAFT, [{"role": "user", "content": "x"}])
+    translate, draft = (json.loads(r.content) for r in endpoint.requests)
+    assert translate["reasoning"] == {"enabled": False}
+    assert translate["service_tier"] == "flex"
+    assert translate["model"] == "draft-model"  # 翻译默认用起草模型
+    assert translate["max_tokens"] == 4096
+    assert "reasoning" not in draft
+
+
+async def test_backtranslation_reasoning_is_off_by_default() -> None:
+    """D-019：回译是纯翻译，默认关闭推理。"""
+    endpoint = FakeEndpoint(chat_reply("回译"))
+    client = make_client(endpoint, make_settings(llm_model_backtranslate="b"))
+    await client.complete_text(LLMTask.BACKTRANSLATE, [{"role": "user", "content": "x"}])
+    assert endpoint.body()["reasoning"] == {"enabled": False}
+
+
+async def test_reasoning_effort_is_sent_when_configured() -> None:
+    endpoint = FakeEndpoint(chat_reply("x"))
+    client = make_client(endpoint, make_settings(llm_model_draft="d", llm_reasoning_draft="low"))
+    await client.complete_text(LLMTask.DRAFT, [{"role": "user", "content": "x"}])
+    assert endpoint.body()["reasoning"] == {"effort": "low"}

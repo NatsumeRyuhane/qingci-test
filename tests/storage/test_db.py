@@ -42,3 +42,14 @@ def test_cli_db_upgrade_uses_database_url(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert result.exit_code == 0, result.output
     assert db_file.exists()
+
+
+def test_migrations_have_a_single_head() -> None:
+    """并行的分支各自新增迁移时，合并后会出现两个 head，`copilot db upgrade` 会失败。
+    这时把后合入的那条链的第一个迁移的 `down_revision` 改为另一条链的 head。"""
+    from alembic.script import ScriptDirectory
+
+    from copilot.storage.db import alembic_config
+
+    heads = ScriptDirectory.from_config(alembic_config("sqlite://")).get_heads()
+    assert len(heads) == 1, f"迁移有多个 head：{heads}"

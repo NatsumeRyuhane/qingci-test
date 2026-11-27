@@ -141,12 +141,21 @@ class OpenAICompatibleClient:
             LLMTask.ANALYZE: 4096,
             LLMTask.BACKTRANSLATE: 4096,
             LLMTask.DRAFT: 8192,
+            LLMTask.TRANSLATE: 4096,
         }.get(task)
         if max_tokens is not None:
             extra["max_tokens"] = max_tokens
+        body: dict[str, Any] = {}
         if self._settings.llm_service_tier is not None:
             # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
-            extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}
+            body["service_tier"] = self._settings.llm_service_tier
+        reasoning = self._settings.llm_reasoning(task)
+        if reasoning == "off":
+            body["reasoning"] = {"enabled": False}
+        elif reasoning != "default":
+            body["reasoning"] = {"effort": reasoning}
+        if body:
+            extra["extra_body"] = body
         started = time.perf_counter()
         client = self._client_for(endpoint)
         response = None

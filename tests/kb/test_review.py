@@ -167,6 +167,28 @@ def test_changed_body_needs_rereview(
     assert not template.model_visible and report.body_changed == ["tpl-thanks"]
 
 
+def test_layout_only_change_keeps_approval_and_publishes_new_layout(
+    store: KnowledgeStore, knowledge: Knowledge, tmp_path: Path
+) -> None:
+    """重新构建后正文只在换行上不同（例如接回了硬换行）：内容就是批准过的内容，
+    采用新的排版，审核状态不变（#8）。"""
+    wrapped = "【合成データ】ご丁寧にお礼のご連絡を\nくださりありがとうございます。"
+    drafts = [_draft("tpl-thanks", wrapped, "thanks_reply", "low")]
+    overlay = Overlay()
+    import_decisions(overlay, _decisions(tmp_path, ("tpl-thanks", "approved")), drafts)
+    _publish(store, drafts, overlay, knowledge)
+
+    rebuilt = [_draft("tpl-thanks", THANKS, "thanks_reply", "low")]
+    new, report = merge(rebuilt, overlay, knowledge, store.latest(ReplyTemplate))
+    (template,) = new
+    assert template.review_status is ReviewStatus.APPROVED and template.model_visible
+    assert template.body_ja == THANKS
+    assert report.layout_updated == ["tpl-thanks"] and report.body_changed == []
+    store.add_all(new)
+    again, _ = merge(rebuilt, overlay, knowledge, store.latest(ReplyTemplate))
+    assert again == []  # 只产生一次新版本
+
+
 def test_yaml_round_trip_and_code_guards(
     store: KnowledgeStore, knowledge: Knowledge, tmp_path: Path
 ) -> None:

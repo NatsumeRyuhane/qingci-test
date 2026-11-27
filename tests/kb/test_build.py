@@ -152,3 +152,25 @@ def test_cli(tmp_path: Path) -> None:
     assert stale.exit_code == 1 and "copilot split" in stale.output
     missing = runner.invoke(app, ["kb", "build", "--cases", str(tmp_path / "none.jsonl")])
     assert missing.exit_code == 1
+
+
+def test_candidate_bodies_are_cleaned() -> None:
+    """历史邮件的硬换行接回去，末尾自带的结语去掉（起草时会追加固定结语）。"""
+    wrapped = (
+        "【合成データ】上記をお試しいただいたうえで、ご自身での復旧が難しい場合は、お客様のアカウ\n"
+        "ントの状況を確認いたしますので、下記情報をお送りください。\n"
+        "\n"
+        "引き続き『ぽちゃガチョ！』をよろしくお願いいたします。"
+    )
+    cases = [
+        _anchored("1", wrapped),
+        _plain("2", wrapped, K.CORROBORATED_TEXT, source="1:2"),
+        _plain("3", wrapped, K.CORROBORATED_TEXT, source="1:2"),
+    ]
+    (candidate,), report = build_candidates(cases, _manifest(cases, set()))
+    assert candidate.body_ja == (
+        "【合成データ】上記をお試しいただいたうえで、ご自身での復旧が難しい場合は、お客様のアカウ"
+        "ントの状況を確認いたしますので、下記情報をお送りください。"
+    )
+    assert (report.unwrapped_bodies, report.closings_dropped) == (1, 1)
+    assert any("接回硬换行 1" in line for line in report.lines())

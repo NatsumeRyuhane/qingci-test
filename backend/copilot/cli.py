@@ -633,6 +633,68 @@ def _parse_now(value: str | None) -> "datetime | None":
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=JST)
 
 
+@app.command("seed")
+def seed_command(
+    count: Annotated[int, typer.Option("--count", min=1, max=500, help="挑选多少个线程。")] = 3,
+    ids: Annotated[
+        str | None,
+        typer.Option("--ids", help="只写入这些线程（逗号分隔），不受切分限制。"),
+    ] = None,
+    split: Annotated[
+        str,
+        typer.Option(
+            "--split", help="从哪一侧挑选：dev（默认）或 test。知识库只用 train，所以不提供 train。"
+        ),
+    ] = "dev",
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option("--split-file", help="切分结果。默认 data/processed/split.json。"),
+    ] = None,
+) -> None:
+    """把样本线程重放进工作台，作为演示案件（#8）。只输出线程 ID 和数量。"""
+    from copilot.eval import DEFAULT_MANIFEST, Split, StaleSplitError, read_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.storage import SqlRepository, create_engine_for, session_scope, upgrade_database
+    from copilot.workbench.seed import seed
+
+    if split not in {Split.DEV.value, Split.TEST.value}:
+        typer.echo("--split 只能是 dev 或 test", err=True)
+        raise typer.Exit(2)
+    source = cases_path or DEFAULT_OUTPUT
+    if not source.is_file():
+        typer.echo(f"找不到导入结果：{source}（先运行 copilot ingest）", err=True)
+        raise typer.Exit(1)
+    cases = read_cases(source)
+    wanted = [i.strip() for i in ids.split(",") if i.strip()] if ids else []
+    if not wanted:
+        manifest = split_path or DEFAULT_MANIFEST
+        if not manifest.is_file():
+            typer.echo(f"找不到切分结果：{manifest}（先运行 copilot split）", err=True)
+            raise typer.Exit(1)
+        try:
+            cases = read_manifest(manifest).select(cases, Split(split))
+        except StaleSplitError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+
+    url = get_settings().database_url
+    upgrade_database(url)
+    engine = create_engine_for(url)
+    with session_scope(engine) as session:
+        report = seed(SqlRepository(session), cases, count=count, ids=wanted)
+    engine.dispose()
+    typer.echo(f"写入 {len(report.added)} 个案件：{', '.join(report.added) or '（无）'}")
+    if report.skipped_existing:
+        typer.echo(f"已存在、跳过 {len(report.skipped_existing)} 个")
+    if report.missing:
+        typer.echo(f"找不到或没有玩家邮件：{', '.join(report.missing)}", err=True)
+        raise typer.Exit(1)
+
+
 @app.command("draft")
 def draft_command(
     case_id: Annotated[str, typer.Argument(help="案件 ID（线程 ID）。")],

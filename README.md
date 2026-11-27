@@ -96,9 +96,28 @@ docs/              需求、数据概况、决策记录、设计提案
    uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库
    uv run copilot draft <案件 ID>     # 为一个案件生成分析、草稿和分流（不发送邮件）；--tools 允许调用只读工具
    uv run copilot eval --split dev    # 在留出集上离线评测（--suite security 重放全部安全攻击目录）
+   uv run copilot seed                # 从 dev 中挑选样本线程放进工作台，作为演示案件
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
-   (cd frontend && pnpm dev)          # 前端 http://localhost:5173
+   (cd frontend && pnpm dev)          # 工作台 http://localhost:5173
    ```
+
+   工作台（#8）：每个案件是一个三栏工作区，从左到右完成：左栏是摘要、分析和表单，中栏是邮件线程
+   （最新的在底部），右栏是编辑器。客服用**中文**编辑回复，点“翻译为日语”由 LLM 译成日语并
+   重新自检；直接改日语会先提醒，改过的日语以客服为准、不再发给 LLM。有未通过的自检时要确认后
+   才能发送。底部的案件栏可以切换案件；发送、升级或“无需回复”后自动跳到下一个待处理的案件。
+
+   **模拟邮箱**（`http://localhost:5173/#sim`）和**指标**（`#metrics`）是独立页面，演示时可以和
+   工作台并排摆放：在模拟邮箱投递来信（有 26 封合成示例，含格式异常和恶意来信），它会出现在
+   工作台；批准后回复进入发件箱，不会真正发出任何邮件。开启自动发送（`WORKBENCH_AUTO_SEND`，
+   演示默认开启）时，分流为 `auto_send` 的草稿由系统直接发出，否则也由客服确认后发送。
+
+   **演示**：运行 `scripts/demo.sh`。每次启动都会把演示专用的数据库（`data/processed/demo-workbench.db`，
+   不是 `.env` 中的 `DATABASE_URL`）重置为初始状态：已发布的知识库加 3 个样本案件，然后启动后端和
+   前端；Ctrl-C 同时停止两者。演示中的来信、草稿和发出的回复在下次启动时清空。演示配置按 D-017、
+   D-018（DeepSeek v4.1 Flash、来信后自动起草、自动发送），都可以用同名环境变量覆盖；
+   `scripts/demo.sh --reset` 只重置不启动。
+
+   不想配置 LLM 时：设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容。
 
    备用路线下去掉 `uv run`（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
 

@@ -17,11 +17,13 @@ from copilot.contracts import (
     DraftMode,
     Fact,
     Feedback,
+    FeedbackAction,
     GlossaryEntry,
     InquiryForm,
     Intent,
     Message,
     Notice,
+    OutboundMail,
     Policy,
     ReplyTemplate,
     is_valid_case_id,
@@ -41,6 +43,7 @@ FIXTURES: list[tuple[type[Contract], str]] = [
     (CaseAnalysis, "case_analysis"),
     (Draft, "draft"),
     (Feedback, "feedback"),
+    (OutboundMail, "outbound_mail"),
 ]
 
 
@@ -109,6 +112,7 @@ def test_persisted_models_are_documents() -> None:
         CaseAnalysis,
         Draft,
         Feedback,
+        OutboundMail,
     }
 
 
@@ -298,6 +302,9 @@ def test_fixture_cross_references() -> None:
 
     for feedback in load_models(Feedback, "feedback"):
         assert feedback.draft_id in drafts
+    for mail in load_models(OutboundMail, "outbound_mail"):
+        assert drafts[mail.draft_id].case_id == mail.case_id
+        assert mail.message_seq > drafts[mail.draft_id].message_seq
     for draft in drafts.values():
         for ref in draft.template_refs:
             assert (ref.template_id, ref.template_version) in templates
@@ -432,3 +439,23 @@ def test_tool_name_is_restricted(tool: str) -> None:
     item["trace"][0]["tool"] = tool
     with pytest.raises(ValidationError, match="tool"):
         Draft.model_validate(item)
+
+
+# --- 不回复与编辑记录（#8） ---
+
+
+def test_no_reply_feedback_requires_reason_and_has_no_body() -> None:
+    item = load_items("feedback")[3]
+    assert Feedback.model_validate(item).action is FeedbackAction.NO_REPLY
+    with pytest.raises(ValidationError, match="reason"):
+        Feedback.model_validate(item | {"reason": " "})
+    with pytest.raises(ValidationError, match="没有发出的正文"):
+        Feedback.model_validate(item | {"final_body_ja": "x"})
+
+
+def test_confirmed_failed_checks_only_when_sending() -> None:
+    escalated = load_items("feedback")[2]
+    with pytest.raises(ValidationError, match="confirmed_failed_checks"):
+        Feedback.model_validate(escalated | {"confirmed_failed_checks": ["register"]})
+    edited = Feedback.model_validate(load_items("feedback")[1])
+    assert edited.final_body_zh and edited.confirmed_failed_checks
