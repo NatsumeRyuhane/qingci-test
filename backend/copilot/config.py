@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     embedding_model: str | None = None
 
     # --- 起草与分流（#6） ---
-    draft_auto_send_min_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    draft_auto_send_min_confidence: float = Field(default=0.92, ge=0.0, le=1.0)
     draft_problem_time_lookback_days: int = Field(default=7, ge=1)
     draft_max_tool_steps: int = Field(default=4, ge=1, le=10)
     """“流水线 + 工具”模式中，模型最多调用几次工具（提案 0003 §10）。"""

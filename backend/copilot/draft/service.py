@@ -52,7 +52,7 @@ from copilot.kb.cluster import ClusterIndex
 from copilot.kb.knowledge import StyleGuide
 from copilot.llm import LLMClient
 
-DEFAULT_MIN_CONFIDENCE = 0.85
+DEFAULT_MIN_CONFIDENCE = 0.92
 
 
 class DraftOutcome(Contract):

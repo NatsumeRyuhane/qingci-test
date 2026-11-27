@@ -118,7 +118,7 @@ uv run copilot eval --suite security --concurrency 6 --service-tier default \
 | `test` 放宽重放（39 案） | 39 | `default` | 60.0s / 166.2s / 73.5s | 12.9s / 23.5s | 30.2s / 134.1s | 13.3s / 21.1s |
 
 - **延迟归因**：`draft` 占总耗时的 63%–68%；Gemini 4 系列默认输出约 4.8k–5.8k token（大部分为推理思考 token），而实际 JSON 与回译仅约 800 token。`flex` 与 `default` 的 p50 持平，但 `flex` 的 p95 尾延迟高出 ~40s。
-- **`pipeline` vs `pipeline_with_tools` & 模板检索策略**：PR #30 在 10 个 `dev` 案件上测得 `pipeline_with_tools` 中位数 99s、输入 33k token 且无质量提升；本 PR 已在代码层移除空的 `search_facts` 工具并支持 `--template-top-k` 对比，因额度限制未重复运行该两项 `dev` 对照，MVP 默认保持 `pipeline` 与全量静态模板目录（后续补充额度可用 `copilot eval --tools` / `--template-top-k 15` 与 `--method chronological` 复测）。
+- **`pipeline` vs `pipeline_with_tools` & 模板检索策略**：PR #30 在 10 个 `dev` 案件上测得 `pipeline_with_tools` 中位数 99s、输入 33k token 且无质量提升；本 PR 已在代码层移除空的 `search_facts` 工具并支持 `--template-top-k` 对比，因额度限制未重复运行该两项 `dev` 对照，MVP 默认保持 `pipeline` 与全量静态模板目录（后续补充额度可用 `copilot eval --tools` / `--template-top-k 15` 复测，按时间先后切分对比需先执行 `copilot split --method chronological` 并重新生成知识库和标注产物，再用独立 `--cache` 运行 `copilot eval`）。
 
 ---
 
@@ -134,17 +134,17 @@ uv run copilot eval --suite security --concurrency 6 --service-tier default \
 
 ---
 
-## 5. 主张验证（P-04 至 P-06）与待所有者拍板的建议
+## 5. 主张验证（P-04 至 P-06）与已确认的配置决定（D-017）
 
 1. **P-04（安全与高风险分流）**：全部测试中注入得逞率 **0/26 (0.0%)**，高风险案件误分流为 `auto_send` 为 **0%**。
 2. **P-05（启发式自检误报/漏报）**：
    - `register`：跨 `dev` 与 `test` 共 125 份有 LLM 评审的草稿中，误报 1 例、漏报 0 例；
    - `forbidden_promise`：误报 0 例、漏报 2 例（`dev` 弱证据 1 例 + `test` 强证据 1 例），其中 `dev` 漏报源于 `time_bound=True` 但未关联 `Notice` 的活动模板留在静态目录中，已被 L8 转人工审核拦截。
-3. **P-06（自动发送阈值校准）**：跨 `dev` 与 `test` 放宽口径汇总：
-   - `draft_confidence` 在 `0.85–0.95` 时解决方案一致率为 **66.7%–75.0%**（偏低）；
-   - `draft_confidence >= 0.95` 时解决方案一致率在 `dev` 为 **8/8 (100.0%)**、在 `test` 为 **15/15 (100.0%)**（合计 **23/23 = 100.0%**）。
-4. **提交仓库所有者拍板的建议**：
-   - **置信度阈值与 `auto_send_allowed`**：建议将 `DRAFT_AUTO_SEND_MIN_CONFIDENCE` 从 `0.85` 提高到 **`0.95`**；在完成全量 `dev` 低风险意图（`feedback_acknowledgement`、`thanks_reply`）专项校准前，继续保持全部模板 `auto_send_allowed = False`。
-   - **模型与服务等级**：后台异步预起草与离线评测可用 `flex` 降本，界面手动重新生成用 `default` 控制尾延迟；考虑将 `backtranslate`（甚至 `analyze`/`draft`）切换为 `deepseek/deepseek-v4.1-flash` 或低推理强度模型以降低 30%–50% 延迟与 >20× 成本。
-   - **工具循环**：MVP 保持默认关闭（`pipeline`）。
-   - **后续小修（可另开 issue）**：(a) 在 `analyze` prompt 中明确引导将 `role="system" evidence="strong"` 的纯退信判为 `no_reply=system_message`；(b) 清理 6 个标为 `time_bound=True` 但未关联 `Notice` 的活动模板。
+3. **P-06（自动发送阈值校准）**：跨 `dev` 与 `test` 放宽口径细粒度分布：
+   - Gemini 4 在 `0.85–0.90` 区间仍有方案不一致案例（`test` 3/5、`dev` 1/2），自 **`>= 0.92`** 起在 `test` 为 **18/18 (100.0%)**、在 `dev` 为 **9/9 (100.0%)**；
+   - DeepSeek v4.1 Flash 在 `>= 0.90` 区间方案一致率为 **6/6 (100.0%)**。
+4. **已采纳的配置决定（详见 [decisions.md](decisions.md) D-017）**：
+   - **置信度阈值与 `auto_send_allowed`**：默认 `DRAFT_AUTO_SEND_MIN_CONFIDENCE` 已从 `0.85` 上调至 **`0.92`**；在完成全量 `dev` 低风险意图（`feedback_acknowledgement`、`thanks_reply`）专项校准前，继续保持全部模板 `auto_send_allowed = False`。
+   - **模型与服务等级**：暂定起草流水线（`analyze` / `draft` / `backtranslate`）全链路切换为 `deepseek/deepseek-v4.1-flash`；批处理与后台异步预起草使用 `flex`，界面手动重新生成使用 `default` 控制尾延迟。
+   - **工具循环**：MVP 默认保持关闭（`pipeline`）。
+   - **已登记的后续 issue**：[#34](https://github.com/NatsumeRyuhane/qingci-test/issues/34)（`analyze` prompt 引导识别 `role="system" evidence="strong"` 纯退信为 `no_reply=system_message`）、[#35](https://github.com/NatsumeRyuhane/qingci-test/issues/35)（核查 6 个 `time_bound=True` 但未关联 `Notice` 的模板，含 `tpl-21e4bcfe07bb`）。
