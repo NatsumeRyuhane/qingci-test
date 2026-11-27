@@ -86,16 +86,23 @@
    - 分析提议的敏感标签命中某条升级政策的 `sensitivity_tags`；
    - 情绪为 `angry`；
    - 找不到合适的模板。
-2. **自动发送（`auto_send`）**，以下全部成立：
-   - 模板已批准、`risk` 为 `low`、`auto_send_allowed`，并且是通用模板（不限时、没有占位符），属于分类出的意图；
-   - 意图在自动发送允许清单中（`Intent.auto_send_eligible`）；
-   - 意图分类置信度和草稿信心值都不低于 `DRAFT_AUTO_SEND_MIN_CONFIDENCE`；
-   - 没有敏感标签，情绪不是 `negative` 或 `angry`；
-   - 是线程中的第一封客服回复：被回复的邮件及之前**只有玩家邮件**（证据弱的“客服回复”、系统邮件和无法判断的邮件都算作之前有过回复）；
-   - 上表中每一项检查都有结果并且通过（缺少任何一项都不能自动发送）；
-   - 没有疑似提示注入（`CaseAnalysis.injection_signals` 为空）；
-   - 案件不是 `undetermined`，也没有“不回复”的提议。
-3. 其余为**人工审核（`review`）**。每个未通过的检查和每个不满足的自动发送条件都写进 `route_reasons`；时间窗口无法确定时也在这里说明。
+2. **自动发送（`auto_send`）**：12 个关卡（`AutoSendGate`）**一个不过，全部不过**。`approve_auto_send` 逐一评估每个关卡，只有每个关卡都有结果并且通过，`AutoSendApproval.granted` 才为真；缺少任何一个关卡的结果也不批准。
+
+   | 关卡 | 通过的条件 |
+   |---|---|
+   | `checks_passed` | 上表中每一项检查都有结果并且通过 |
+   | `template_allowed` | 模板已批准、`risk` 为 `low`、`auto_send_allowed`（只有所有者在审核中能打开） |
+   | `template_generic` | 通用模板：不限时、没有占位符 |
+   | `template_in_intent` | 模板属于分类出的意图 |
+   | `intent_eligible` | 意图在自动发送允许清单中（`Intent.auto_send_eligible`） |
+   | `intent_confidence` | 意图分类置信度不低于 `DRAFT_AUTO_SEND_MIN_CONFIDENCE` |
+   | `draft_confidence` | 草稿信心值不低于同一阈值 |
+   | `no_sensitivity_tags` | 分析没有提议敏感标签 |
+   | `sentiment_ok` | 情绪不是 `negative` 或 `angry` |
+   | `first_reply` | 线程中的第一封客服回复：被回复的邮件及之前**只有玩家邮件**（证据弱的“客服回复”、系统邮件和无法判断的邮件都算作之前有过回复） |
+   | `no_injection` | 没有疑似提示注入（`CaseAnalysis.injection_signals` 为空） |
+   | `reply_confirmed` | 案件不是 `undetermined`，也没有“不回复”的提议 |
+3. 其余为**人工审核（`review`）**。每个不通过的关卡的理由都写进 `route_reasons`；时间窗口无法确定时也在这里说明。
 
 **“不回复”**（提案 0003 §8）只在两种情况下自动生效，此时案件设为 `no_reply_needed`，不生成草稿：
 

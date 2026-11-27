@@ -28,7 +28,16 @@ from copilot.contracts import (
     Urgency,
 )
 from copilot.draft.retrieval import Candidate
-from copilot.draft.route import RouteInput, decide_no_reply, first_reply, route
+from copilot.draft.route import (
+    GATES,
+    AutoSendApproval,
+    AutoSendGate,
+    RouteInput,
+    approve_auto_send,
+    decide_no_reply,
+    first_reply,
+    route,
+)
 from copilot.draft.timectx import WindowMatch
 from copilot.ingest.timestamps import JST
 from tests.cases import agent, case, player
@@ -144,95 +153,152 @@ def _with_template(**values: Any) -> Candidate:
     )
 
 
-@pytest.mark.parametrize(
-    ("change", "expected"),
-    [
-        ({"candidate": _with_template(risk=RiskLevel.NORMAL, auto_send=False)}, "不允许自动发送"),
-        (
-            {
-                "candidate": Candidate(
-                    template=GENERIC.template, time_bound=True, window=WindowMatch.INSIDE
-                )
-            },
-            "不是通用模板",
-        ),
-        ({"candidate": _with_template(body="【合成】{{x}}", slots=["x"])}, "不是通用模板"),
-        (
-            {
-                "candidate": Candidate(
-                    template=GENERIC.template,
-                    time_bound=False,
-                    window=WindowMatch.INSIDE,
-                    in_intent=False,
-                )
-            },
-            "不是分类出的",
-        ),
-        ({"intent": intent("syn_thanks", risk=RiskLevel.LOW)}, "允许清单"),
-        ({"intent": None}, "允许清单"),
-        ({"analysis": analysis(intent_confidence=0.5)}, "置信度 0.50"),
-        ({"analysis": analysis(intent_confidence=None)}, "置信度 无"),
-        ({"draft_confidence": 0.6}, "草稿信心值"),
-        ({"analysis": analysis(sensitivity_tags=[SensitivityTag.PAYMENT])}, "敏感标签"),
-        ({"analysis": analysis(sentiment=Sentiment.NEGATIVE)}, "negative"),
-        ({"analysis": analysis(injection_signals=["正文中出现分隔标记"])}, "疑似提示注入"),
-        (
-            {
-                "analysis": analysis(
-                    no_reply=NoReplyProposal(reason=NoReplyReason.OTHER, reason_zh="【合成】")
-                )
-            },
-            "不回复",
-        ),
-        (
-            {"checks": [*PASSED[1:], DraftCheck(kind=PASSED[0].kind, passed=False)]},
-            "检查未通过",
-        ),
-        (
-            {
-                "checks": [
-                    DraftCheck(
-                        kind=DraftCheckKind.TEMPLATE_WINDOW,
-                        passed=False,
-                        detail_zh="无法确定问题发生时间是否在事件窗口内",
-                    )
-                ]
-            },
-            "时间窗口",
-        ),
-    ],
-)
-def test_each_gate_blocks_auto_send(change: dict[str, Any], expected: str) -> None:
+GATE_CASES: list[tuple[AutoSendGate, dict[str, Any], str]] = [
+    (
+        AutoSendGate.CHECKS_PASSED,
+        {"checks": [*PASSED[1:], DraftCheck(kind=PASSED[0].kind, passed=False)]},
+        "检查未通过",
+    ),
+    (
+        AutoSendGate.CHECKS_PASSED,
+        {
+            "checks": [
+                *[c for c in PASSED if c.kind is not DraftCheckKind.TEMPLATE_WINDOW],
+                DraftCheck(
+                    kind=DraftCheckKind.TEMPLATE_WINDOW,
+                    passed=False,
+                    detail_zh="无法确定问题发生时间是否在事件窗口内",
+                ),
+            ]
+        },
+        "时间窗口",
+    ),
+    (AutoSendGate.CHECKS_PASSED, {"checks": []}, "缺少检查结果"),
+    (
+        AutoSendGate.TEMPLATE_ALLOWED,
+        {"candidate": _with_template(risk=RiskLevel.NORMAL, auto_send=False)},
+        "不允许自动发送",
+    ),
+    (
+        AutoSendGate.TEMPLATE_GENERIC,
+        {
+            "candidate": Candidate(
+                template=GENERIC.template, time_bound=True, window=WindowMatch.INSIDE
+            )
+        },
+        "不是通用模板",
+    ),
+    (
+        AutoSendGate.TEMPLATE_GENERIC,
+        {"candidate": _with_template(body="【合成】{{x}}", slots=["x"])},
+        "不是通用模板",
+    ),
+    (
+        AutoSendGate.TEMPLATE_IN_INTENT,
+        {
+            "candidate": Candidate(
+                template=GENERIC.template,
+                time_bound=False,
+                window=WindowMatch.INSIDE,
+                in_intent=False,
+            )
+        },
+        "不是分类出的",
+    ),
+    (
+        AutoSendGate.INTENT_ELIGIBLE,
+        {"intent": intent("syn_thanks", risk=RiskLevel.LOW)},
+        "允许清单",
+    ),
+    (AutoSendGate.INTENT_ELIGIBLE, {"intent": None}, "允许清单"),
+    (AutoSendGate.INTENT_CONFIDENCE, {"analysis": analysis(intent_confidence=0.5)}, "置信度 0.50"),
+    (AutoSendGate.INTENT_CONFIDENCE, {"analysis": analysis(intent_confidence=None)}, "置信度 无"),
+    (AutoSendGate.DRAFT_CONFIDENCE, {"draft_confidence": 0.6}, "草稿信心值"),
+    (
+        AutoSendGate.NO_SENSITIVITY_TAGS,
+        {"analysis": analysis(sensitivity_tags=[SensitivityTag.PAYMENT])},
+        "敏感标签",
+    ),
+    (AutoSendGate.SENTIMENT_OK, {"analysis": analysis(sentiment=Sentiment.NEGATIVE)}, "negative"),
+    (
+        AutoSendGate.FIRST_REPLY,
+        {
+            "case": case(
+                "500",
+                player("500", 1),
+                agent("500", 2, "【合成】回答", RoleEvidenceKind.REPEATED_TEXT),
+                player("500", 3, "【合成】ありがとうございます"),
+            ),
+            "analysis": analysis(message_seq=3),
+        },
+        "第一封",
+    ),
+    (
+        AutoSendGate.NO_INJECTION,
+        {"analysis": analysis(injection_signals=["正文中出现分隔标记"])},
+        "疑似提示注入",
+    ),
+    (
+        AutoSendGate.REPLY_CONFIRMED,
+        {
+            "case": case("500", content="【合成】").model_copy(
+                update={"status": CaseStatus.UNDETERMINED}
+            ),
+            "analysis": analysis(thread_judgement=CaseStatus.OPEN),
+        },
+        "undetermined",
+    ),
+    (
+        AutoSendGate.REPLY_CONFIRMED,
+        {
+            "analysis": analysis(
+                no_reply=NoReplyProposal(reason=NoReplyReason.OTHER, reason_zh="【合成】")
+            )
+        },
+        "不回复",
+    ),
+]
+
+
+@pytest.mark.parametrize(("gate", "change", "expected"), GATE_CASES)
+def test_each_gate_blocks_auto_send(
+    gate: AutoSendGate, change: dict[str, Any], expected: str
+) -> None:
+    """每个关卡单独不通过时：这个关卡不通过，批准不成立，转人工审核并说明理由。"""
     inp = inputs(**change)
+    approval = approve_auto_send(inp)
+    assert approval.results[gate], f"{gate.value} 应当不通过"
+    assert not approval.granted
     decision, why = route(inp)
     assert decision is Route.REVIEW
     assert expected in "\n".join(why)
 
 
-def test_not_first_reply_blocks_auto_send() -> None:
-    thread = case(
-        "500",
-        player("500", 1),
-        agent("500", 2, "【合成】回答", RoleEvidenceKind.REPEATED_TEXT),
-        player("500", 3, "【合成】ありがとうございます"),
-    )
-    inp = inputs(case=thread, analysis=analysis(message_seq=3))
-    assert route(inp)[0] is Route.REVIEW
-    assert "第一封" in reasons(inp)
+def test_every_gate_is_evaluated_and_tested() -> None:
+    assert set(GATES) == set(AutoSendGate)
+    assert len(AutoSendGate) == 12
+    assert set(approve_auto_send(inputs()).results) == set(AutoSendGate)
+    assert {gate for gate, _, _ in GATE_CASES} == set(AutoSendGate)
+
+
+def test_all_gates_passing_is_the_only_approval() -> None:
+    approval = approve_auto_send(inputs())
+    assert approval.granted and approval.reasons == []
+
+
+def test_missing_gate_result_is_not_approval() -> None:
+    results = dict(approve_auto_send(inputs()).results)
+    del results[AutoSendGate.NO_INJECTION]
+    approval = AutoSendApproval(results=results)
+    assert not approval.granted
+    assert approval.missing == [AutoSendGate.NO_INJECTION]
+    assert "缺少关卡结果：no_injection" in approval.reasons
 
 
 def test_first_reply_is_conservative() -> None:
     weak = case("1", player("1", 1), agent("1", 2, "【合成】", RoleEvidenceKind.KEYWORD))
     assert not first_reply(weak, 2)
     assert first_reply(case("1", player("1", 1), player("1", 2)), 2)
-
-
-def test_undetermined_case_never_auto_sends() -> None:
-    thread = case("500", content="【合成】")
-    thread = thread.model_copy(update={"status": CaseStatus.UNDETERMINED})
-    inp = inputs(case=thread, analysis=analysis(thread_judgement=CaseStatus.OPEN))
-    assert route(inp)[0] is Route.REVIEW
-    assert "undetermined" in reasons(inp)
 
 
 def test_review_lists_every_reason() -> None:

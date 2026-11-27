@@ -4,11 +4,10 @@
 
 1. **升级（`escalate`）**，任一条件成立：玩家邮件中出现升级政策的短语；分析提议的敏感标签
    命中升级政策；情绪为 `angry`；找不到合适的模板。
-2. **自动发送（`auto_send`）**，全部条件成立（D-011）：模板已批准、风险低、允许自动发送，
-   并且是通用模板、属于分类出的意图；意图在自动发送允许清单中；意图分类置信度和草稿信心值
-   都不低于阈值；没有敏感标签，情绪不是负面；线程中此前只有玩家邮件（第一封客服回复）；
-   所有检查通过；没有疑似提示注入；案件不是 `undetermined`，也没有“不回复”的提议。
-3. 其余为**人工审核（`review`）**，每个不满足的条件都写进 `route_reasons`。时间窗口无法
+2. **自动发送（`auto_send`）**：`AutoSendGate` 的 12 个关卡**一个不过，全部不过**
+   （D-011）。`approve_auto_send` 逐一评估每个关卡，只有每个关卡都有结果并且通过，
+   `AutoSendApproval.granted` 才为 True；缺少任何一个关卡的结果也不批准。
+3. 其余为**人工审核（`review`）**，每个不通过的关卡的理由都写进 `route_reasons`。时间窗口无法
    确定（`template_window` 不通过）也在这里。
 
 MVP 中不会真正发送任何邮件，`auto_send` 只是界面中显示的建议。
@@ -22,8 +21,9 @@ MVP 中不会真正发送任何邮件，`auto_send` 只是界面中显示的建�
   并且没有疑似注入。
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 from copilot.contracts import (
     Case,
@@ -36,6 +36,7 @@ from copilot.contracts import (
     NoReplyProposal,
     NoReplyReason,
     Policy,
+    ReviewStatus,
     RiskLevel,
     RoleEvidenceKind,
     RoleEvidenceStrength,
@@ -110,42 +111,174 @@ class RouteInput:
     min_confidence: float
 
 
-def _auto_send_blockers(inp: RouteInput) -> list[str]:
-    """不能自动发送的理由。为空表示满足全部条件。"""
-    blockers = []
-    candidate, analysis = inp.candidate, inp.analysis
-    if candidate is not None:
-        template = candidate.template
-        if not template.auto_send_allowed or template.risk is not RiskLevel.LOW:
-            blockers.append(f"模板不允许自动发送（风险 {template.risk.value}）")
-        if candidate.specific:
-            blockers.append("模板是限时模板或带占位符，不是通用模板")
-        if not candidate.in_intent:
-            blockers.append(f"所选模板属于意图 {template.intent}，不是分类出的 {analysis.intent}")
-    if inp.intent is None or not inp.intent.auto_send_eligible:
-        blockers.append(f"意图 {analysis.intent} 不在自动发送允许清单中")
-    confidence = analysis.intent_confidence
-    if confidence is None or confidence < inp.min_confidence:
-        shown = "无" if confidence is None else f"{confidence:.2f}"
-        blockers.append(f"意图分类置信度 {shown} 低于 {inp.min_confidence:.2f}")
-    if inp.draft_confidence < inp.min_confidence:
-        blockers.append(f"草稿信心值 {inp.draft_confidence:.2f} 低于 {inp.min_confidence:.2f}")
-    if analysis.sensitivity_tags:
-        tags = ", ".join(t.value for t in analysis.sensitivity_tags)
-        blockers.append(f"有敏感标签：{tags}")
-    if analysis.sentiment in NEGATIVE:
-        blockers.append(f"玩家情绪为 {analysis.sentiment.value}")
-    if not first_reply(inp.case, analysis.message_seq):
-        blockers.append("不是线程中的第一封客服回复")
-    if analysis.injection_signals:
-        blockers.append(f"疑似提示注入：{'；'.join(analysis.injection_signals)}")
+class AutoSendGate(StrEnum):
+    """自动发送的关卡。**一个不过，全部不过**：只有每一个关卡都有结果并且通过，
+    `AutoSendApproval.granted` 才为 True（D-011，提案 0003 §5、§13）。"""
+
+    CHECKS_PASSED = "checks_passed"
+    """`DraftCheckKind` 的每一项检查都有结果并且通过。"""
+    TEMPLATE_ALLOWED = "template_allowed"
+    """模板已批准、风险为 `low`、`auto_send_allowed`。"""
+    TEMPLATE_GENERIC = "template_generic"
+    """模板是通用模板：不限时、没有占位符。"""
+    TEMPLATE_IN_INTENT = "template_in_intent"
+    """模板属于分类出的意图。"""
+    INTENT_ELIGIBLE = "intent_eligible"
+    """意图在自动发送允许清单中（`Intent.auto_send_eligible`）。"""
+    INTENT_CONFIDENCE = "intent_confidence"
+    """意图分类置信度不低于阈值。"""
+    DRAFT_CONFIDENCE = "draft_confidence"
+    """草稿信心值不低于阈值。"""
+    NO_SENSITIVITY_TAGS = "no_sensitivity_tags"
+    """分析没有提议任何敏感标签。"""
+    SENTIMENT_OK = "sentiment_ok"
+    """情绪不是 `negative` 或 `angry`。"""
+    FIRST_REPLY = "first_reply"
+    """线程中的第一封客服回复（`first_reply`）。"""
+    NO_INJECTION = "no_injection"
+    """没有疑似提示注入。"""
+    REPLY_CONFIRMED = "reply_confirmed"
+    """确实需要回复：案件不是 `undetermined`，也没有“不回复”的提议。"""
+
+
+type Gate = Callable[[RouteInput], list[str]]
+"""一个关卡：返回不通过的理由，空列表表示通过。"""
+
+
+def _checks_passed(inp: RouteInput) -> list[str]:
+    problems = [
+        f"检查未通过（{CHECK_NAMES_ZH.get(c.kind, c.kind.value)}）：{c.detail_zh or '未说明'}"
+        for c in inp.checks
+        if not c.passed
+    ]
+    missing = [CHECK_NAMES_ZH.get(k, k.value) for k in DraftCheckKind if k not in done(inp.checks)]
+    if missing:
+        problems.append(f"缺少检查结果：{'、'.join(missing)}")
+    return problems
+
+
+def _template_allowed(inp: RouteInput) -> list[str]:
+    if inp.candidate is None:
+        return ["没有使用模板"]
+    template = inp.candidate.template
+    if (
+        template.review_status is not ReviewStatus.APPROVED
+        or template.risk is not RiskLevel.LOW
+        or not template.auto_send_allowed
+    ):
+        return [f"模板不允许自动发送（风险 {template.risk.value}）"]
+    return []
+
+
+def _template_generic(inp: RouteInput) -> list[str]:
+    if inp.candidate is None:
+        return ["没有使用模板"]
+    return ["模板是限时模板或带占位符，不是通用模板"] if inp.candidate.specific else []
+
+
+def _template_in_intent(inp: RouteInput) -> list[str]:
+    if inp.candidate is None:
+        return ["没有使用模板"]
+    if inp.candidate.in_intent:
+        return []
+    return [f"所选模板属于意图 {inp.candidate.template.intent}，不是分类出的 {inp.analysis.intent}"]
+
+
+def _intent_eligible(inp: RouteInput) -> list[str]:
+    if inp.intent is not None and inp.intent.auto_send_eligible:
+        return []
+    return [f"意图 {inp.analysis.intent} 不在自动发送允许清单中"]
+
+
+def _intent_confidence(inp: RouteInput) -> list[str]:
+    confidence = inp.analysis.intent_confidence
+    if confidence is not None and confidence >= inp.min_confidence:
+        return []
+    shown = "无" if confidence is None else f"{confidence:.2f}"
+    return [f"意图分类置信度 {shown} 低于 {inp.min_confidence:.2f}"]
+
+
+def _draft_confidence(inp: RouteInput) -> list[str]:
+    if inp.draft_confidence >= inp.min_confidence:
+        return []
+    return [f"草稿信心值 {inp.draft_confidence:.2f} 低于 {inp.min_confidence:.2f}"]
+
+
+def _no_sensitivity_tags(inp: RouteInput) -> list[str]:
+    tags = inp.analysis.sensitivity_tags
+    return [f"有敏感标签：{', '.join(t.value for t in tags)}"] if tags else []
+
+
+def _sentiment_ok(inp: RouteInput) -> list[str]:
+    sentiment = inp.analysis.sentiment
+    return [f"玩家情绪为 {sentiment.value}"] if sentiment in NEGATIVE else []
+
+
+def _first_reply(inp: RouteInput) -> list[str]:
+    return [] if first_reply(inp.case, inp.analysis.message_seq) else ["不是线程中的第一封客服回复"]
+
+
+def _no_injection(inp: RouteInput) -> list[str]:
+    signals = inp.analysis.injection_signals
+    return [f"疑似提示注入：{'；'.join(signals)}"] if signals else []
+
+
+def _reply_confirmed(inp: RouteInput) -> list[str]:
+    problems = []
     if inp.case.status is CaseStatus.UNDETERMINED:
-        judged = analysis.thread_judgement
+        judged = inp.analysis.thread_judgement
         detail = f"，分析判断为 {judged.value}" if judged else ""
-        blockers.append(f"案件状态待判断（undetermined{detail}），请确认是否需要回复")
-    if analysis.no_reply is not None:
-        blockers.append(f"分析提议不回复：{analysis.no_reply.reason_zh}")
-    return blockers
+        problems.append(f"案件状态待判断（undetermined{detail}），请确认是否需要回复")
+    if inp.analysis.no_reply is not None:
+        problems.append(f"分析提议不回复：{inp.analysis.no_reply.reason_zh}")
+    return problems
+
+
+GATES: dict[AutoSendGate, Gate] = {
+    AutoSendGate.CHECKS_PASSED: _checks_passed,
+    AutoSendGate.TEMPLATE_ALLOWED: _template_allowed,
+    AutoSendGate.TEMPLATE_GENERIC: _template_generic,
+    AutoSendGate.TEMPLATE_IN_INTENT: _template_in_intent,
+    AutoSendGate.INTENT_ELIGIBLE: _intent_eligible,
+    AutoSendGate.INTENT_CONFIDENCE: _intent_confidence,
+    AutoSendGate.DRAFT_CONFIDENCE: _draft_confidence,
+    AutoSendGate.NO_SENSITIVITY_TAGS: _no_sensitivity_tags,
+    AutoSendGate.SENTIMENT_OK: _sentiment_ok,
+    AutoSendGate.FIRST_REPLY: _first_reply,
+    AutoSendGate.NO_INJECTION: _no_injection,
+    AutoSendGate.REPLY_CONFIRMED: _reply_confirmed,
+}
+"""每个关卡的判断。`tests/draft/test_route.py` 检查它覆盖 `AutoSendGate` 的全部取值。"""
+
+
+@dataclass(frozen=True)
+class AutoSendApproval:
+    """自动发送的批准：每个关卡的结果（不通过的理由）。"""
+
+    results: Mapping[AutoSendGate, Sequence[str]]
+
+    @property
+    def missing(self) -> list[AutoSendGate]:
+        """没有结果的关卡。"""
+        return [gate for gate in AutoSendGate if gate not in self.results]
+
+    @property
+    def granted(self) -> bool:
+        """**全部**关卡都有结果并且通过时才为 True。缺少任何一个关卡的结果都不批准。"""
+        return not self.missing and not any(self.results.values())
+
+    @property
+    def reasons(self) -> list[str]:
+        """不批准的理由，按关卡顺序；缺少的关卡也列出。"""
+        found = [r for gate in AutoSendGate for r in self.results.get(gate, ())]
+        if self.missing:
+            found.append(f"缺少关卡结果：{'、'.join(g.value for g in self.missing)}")
+        return found
+
+
+def approve_auto_send(inp: RouteInput) -> AutoSendApproval:
+    """逐一评估每个关卡，返回批准。是否自动发送只看 `AutoSendApproval.granted`。"""
+    return AutoSendApproval(results={gate: tuple(GATES[gate](inp)) for gate in AutoSendGate})
 
 
 def route(inp: RouteInput) -> tuple[Route, list[str]]:
@@ -158,18 +291,10 @@ def route(inp: RouteInput) -> tuple[Route, list[str]]:
     if escalate:
         return Route.ESCALATE, escalate
 
-    failed = [
-        f"检查未通过（{CHECK_NAMES_ZH.get(c.kind, c.kind.value)}）：{c.detail_zh or '未说明'}"
-        for c in inp.checks
-        if not c.passed
-    ]
-    missing = [CHECK_NAMES_ZH.get(k, k.value) for k in DraftCheckKind if k not in done(inp.checks)]
-    if missing:
-        failed.append(f"缺少检查结果：{'、'.join(missing)}")
-    blockers = _auto_send_blockers(inp)
-    if not failed and not blockers:
-        return Route.AUTO_SEND, ["低风险的通用模板，自动发送的全部条件都满足（MVP 中只是建议）"]
-    return Route.REVIEW, [*failed, *blockers]
+    approval = approve_auto_send(inp)
+    if approval.granted:
+        return Route.AUTO_SEND, ["低风险的通用模板，自动发送的全部关卡都通过（MVP 中只是建议）"]
+    return Route.REVIEW, approval.reasons
 
 
 @dataclass(frozen=True)
