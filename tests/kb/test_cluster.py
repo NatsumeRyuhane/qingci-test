@@ -1,7 +1,7 @@
 """客服回复的聚类（#5）。SYNTHETIC：全部是合成数据。"""
 
 from copilot.contracts import Case, RoleEvidenceKind
-from copilot.kb.cluster import ClusterEvidence, ClusterIndex, cluster_replies
+from copilot.kb.cluster import ClusterEvidence, ClusterIndex, MatchKind, cluster_replies
 from tests.cases import agent, case, player
 
 K = RoleEvidenceKind
@@ -100,3 +100,11 @@ def test_index_matches_exact_and_near_replies() -> None:
     assert index.match(TRANSFER.replace("、", " 、")) == 0  # 空白不影响
     assert index.match(WINDOW.replace("11:00", "10:00")) == 1  # 只差数字
     assert index.match("【合成データ】まったく別の内容のご案内です。") is None
+
+
+def test_index_reports_how_it_matched() -> None:
+    index = ClusterIndex.from_variants([[REINSTALL], [WINDOW, WINDOW.replace("14:00", "15:00")]])
+    assert index.lookup(REINSTALL) == (0, MatchKind.EXACT)
+    assert index.lookup(WINDOW.replace("15:00", "15:00 ")) == (1, MatchKind.EXACT)
+    assert index.lookup(WINDOW.replace("11:00", "10:00")) == (1, MatchKind.NEAR)
+    assert index.lookup(TRANSFER) is None
