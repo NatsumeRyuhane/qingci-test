@@ -116,6 +116,12 @@ class OpenAICompatibleClient:
             )
         return self._clients[key]
 
+    async def aclose(self) -> None:
+        """关闭所有缓存的底层 AsyncOpenAI 客户端，避免跨事件循环复用连接池。"""
+        for client in self._clients.values():
+            await client.close()
+        self._clients.clear()
+
     @staticmethod
     def _is_transient_region_403(error: PermissionDeniedError) -> bool:
         """服务商（例如 OpenRouter）间歇性的地区 403，重试通常可以成功（#7）。"""
@@ -129,6 +135,10 @@ class OpenAICompatibleClient:
         extra: dict[str, Any] = {}
         if response_format is not None:
             extra["response_format"] = response_format
+        if task is LLMTask.JUDGE:
+            # 评审输出仅含 6 个布尔值与 1–2 句中文说明；显式限制 max_tokens 避免 OpenRouter
+            # 按模型上限（如 65536）预扣额度导致 402。
+            extra["max_tokens"] = 2048
         if self._settings.llm_service_tier is not None:
             # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
             extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}

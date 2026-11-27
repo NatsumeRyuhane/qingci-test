@@ -16,7 +16,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from copilot.contracts import Case, CaseStatus, Message, MessageRole, TimePoint, TimeStatus
+from copilot.contracts import (
+    Case,
+    CaseStatus,
+    Message,
+    MessageRole,
+    RoleEvidenceStrength,
+    TimePoint,
+    TimeStatus,
+)
 from copilot.eval.split import Split, SplitManifest
 from copilot.ingest.pipeline import thread_order
 from copilot.ingest.timestamps import JST
@@ -73,17 +81,23 @@ class TimelineIndex:
             for m in case.messages
             if m.sent_at is not None and (target_seq is None or m.seq < target_seq)
         ]
+        later_times = [
+            m.sent_at
+            for m in case.messages
+            if m.sent_at is not None and target_seq is not None and m.seq > target_seq
+        ]
         pos = self._pos.get(case.id)
         before = [a.sent_at for a in self._anchors if pos is not None and a.position < pos]
         after = [a.sent_at for a in self._anchors if pos is not None and a.position > pos]
         earliest = max([*prior_times, *([before[-1]] if before else [])], default=None)
-        latest = min(after, default=None)
+        latest = min([*later_times, *after], default=None)
 
-        if earliest is not None and latest is not None and earliest <= latest:
+        if earliest is not None and latest is not None:
+            lo, hi = (earliest, latest) if earliest <= latest else (latest, earliest)
             return TimePoint(
                 status=TimeStatus.ESTIMATED,
-                earliest=earliest,
-                latest=latest,
+                earliest=lo,
+                latest=hi,
                 basis_zh="按线程顺序相邻已知时间插值",
             )
         if earliest is not None:
@@ -104,38 +118,63 @@ class TimelineIndex:
 
 
 def truncate_case(case: Case, before_seq: int) -> Case:
-    """只保留 `seq < before_seq` 的邮件，状态按最后一封邮件重新判断。"""
+    """只保留 `seq < before_seq` 的邮件，状态按最后一封邮件重新判断（同 `ingest/pipeline.py`）。"""
     messages = [m for m in case.messages if m.seq < before_seq]
     if not messages:
         raise ValueError(f"案件 {case.id} 在 seq {before_seq} 之前没有邮件")
     last = messages[-1]
     if last.role is MessageRole.PLAYER:
         status = CaseStatus.OPEN
-    elif last.role is MessageRole.AGENT:
+    elif last.role is MessageRole.AGENT and last.role_strength is RoleEvidenceStrength.STRONG:
         status = CaseStatus.REPLIED
     else:
-        status = case.status
+        status = CaseStatus.UNDETERMINED
     return case.model_copy(update={"messages": messages, "status": status})
 
 
+def _truncate_by_cutoff(case: Case, cutoff: datetime | None) -> Case | None:
+    """截断单个线程：遇到第一封 `sent_at > cutoff` 的邮件即停止，其后所有邮件一并裁掉，
+    防止缺乏 `sent_at` 的后续客服回复泄露到历史重放中。"""
+    if cutoff is None:
+        return case
+    kept: list[Message] = []
+    for m in case.messages:
+        if m.sent_at is not None and m.sent_at > cutoff:
+            break
+        kept.append(m)
+    if not kept:
+        return None
+    if len(kept) == len(case.messages):
+        return case
+    last = kept[-1]
+    if last.role is MessageRole.PLAYER:
+        status = CaseStatus.OPEN
+    elif last.role is MessageRole.AGENT and last.role_strength is RoleEvidenceStrength.STRONG:
+        status = CaseStatus.REPLIED
+    else:
+        status = CaseStatus.UNDETERMINED
+    return case.model_copy(update={"messages": kept, "status": status})
+
+
 def replay_corpus(train_cases: Sequence[Case], current: Case, now: TimePoint) -> list[Case]:
-    """历史重放时给相似案件检索的语料：只保留线程顺序在当前案件之前的 train 案件，并去掉
-    发送时间明确晚于“现在”的邮件（docs/security.md H-11、docs/claims.md A-07）。"""
+    """历史重放时给相似案件检索的语料：只保留线程顺序在当前案件之前的 train 案件，并按
+    `now` 的下界截断未来邮件（与 `known_at_for` 一致，docs/security.md H-11、A-07）。"""
     position = thread_order(current.id)
     bounds = now.bounds()
-    cutoff = bounds[1] if bounds is not None else None
+    cutoff = bounds[0] if bounds is not None else None
     result: list[Case] = []
     for other in train_cases:
         if other.id == current.id or thread_order(other.id) >= position:
             continue
-        if cutoff is not None:
-            kept = [m for m in other.messages if m.sent_at is None or m.sent_at <= cutoff]
-            if not kept:
-                continue
-            if len(kept) != len(other.messages):
-                other = other.model_copy(update={"messages": kept})
-        result.append(other)
+        trimmed = _truncate_by_cutoff(other, cutoff)
+        if trimmed is not None:
+            result.append(trimmed)
     return result
+
+
+def replay_history(all_cases: Sequence[Case], current: Case, now: TimePoint) -> list[Case]:
+    """历史重放时给重复提交判断的 `history`：只保留更早的线程，并截断晚于 `now` 下界的未来回复。"""
+    return replay_corpus(all_cases, current, now)
 
 
 @dataclass(frozen=True)

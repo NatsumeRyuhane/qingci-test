@@ -998,91 +998,103 @@ def eval_command(
         template_top_k=template_top_k,
     )
 
-    sections: list[str] = []
-
-    if suite in {"cases", "all"}:
-        source = cases_path or DEFAULT_OUTPUT
-        manifest_path = split_path or DEFAULT_MANIFEST
-        labels_root = (kb_dir or DEFAULT_KB_DIR) / LABELS_DIR
-        replies_file = labels_root / REPLIES_FILE
-        no_reply_file = labels_root / NO_REPLY_FILE
-        for path, hint in (
-            (source, "copilot ingest"),
-            (manifest_path, "copilot split"),
-            (replies_file, "copilot kb label"),
-            (no_reply_file, "copilot kb label"),
-        ):
-            if not path.is_file():
-                typer.echo(f"找不到 {path}（先运行 {hint}）", err=True)
-                raise typer.Exit(1)
-        cases = read_cases(source)
-        manifest = read_manifest(manifest_path)
+    async def _run_all() -> list[str]:
+        parts: list[str] = []
         try:
-            train_cases = manifest.select(cases, Split.TRAIN)
-        except StaleSplitError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(1) from exc
+            if suite in {"cases", "all"}:
+                source = cases_path or DEFAULT_OUTPUT
+                manifest_path = split_path or DEFAULT_MANIFEST
+                labels_root = (kb_dir or DEFAULT_KB_DIR) / LABELS_DIR
+                replies_file = labels_root / REPLIES_FILE
+                no_reply_file = labels_root / NO_REPLY_FILE
+                for path, hint in (
+                    (source, "copilot ingest"),
+                    (manifest_path, "copilot split"),
+                    (replies_file, "copilot kb label"),
+                    (no_reply_file, "copilot kb label"),
+                ):
+                    if not path.is_file():
+                        typer.echo(f"找不到 {path}（先运行 {hint}）", err=True)
+                        raise typer.Exit(1)
+                cases = read_cases(source)
+                manifest = read_manifest(manifest_path)
+                try:
+                    train_cases = manifest.select(cases, Split.TRAIN)
+                except StaleSplitError as exc:
+                    typer.echo(str(exc), err=True)
+                    raise typer.Exit(1) from exc
 
-        reply_items = build_reply_items(
-            cases, manifest, split, read_reply_labels(replies_file), limit=limit
-        )
-        nr_lim = no_reply_limit if no_reply_limit is not None else limit
-        no_reply_items = build_no_reply_items(
-            cases, manifest, split, read_no_reply_labels(no_reply_file), limit=nr_lim
-        )
+                reply_items = build_reply_items(
+                    cases, manifest, split, read_reply_labels(replies_file), limit=limit
+                )
+                nr_lim = no_reply_limit if no_reply_limit is not None else limit
+                no_reply_items = build_no_reply_items(
+                    cases, manifest, split, read_no_reply_labels(no_reply_file), limit=nr_lim
+                )
 
-        embedder = _embedding_client(settings)
-        emb_cache = EmbeddingCache(EMBEDDING_CACHE) if embedder is not None else None
-        run_cfg = EvalRunConfig(
-            params=params,
-            concurrency=concurrency,
-            strict_replay=strict_replay,
-            run_judge=judge,
-            cache_path=cache,
-        )
-        records = asyncio.run(
-            run_eval(
-                reply_items,
-                no_reply_items,
-                snapshot=snapshot,
-                guide=knowledge.style_guide,
-                llm=llm,
-                train_cases=train_cases,
-                all_cases=cases,
-                embedder=embedder,
-                embedding_cache=emb_cache,
-                config=run_cfg,
-            )
-        )
-        if emb_cache is not None:
-            emb_cache.save()
-        meta = {
-            "切分": f"{split.value}（方法：{manifest.method.value}）",
-            "模式": "pipeline_with_tools" if tools else "pipeline",
-            "历史重放": "严格 known_from" if strict_replay else "不按 known_from 过滤（A-12）",
-            "模板检索": f"embedding top-{template_top_k}" if template_top_k else "全量静态模板目录",
-            "相似案件检索": "BM25 + embedding" if embedder else "只用 BM25",
-            "服务等级": settings.llm_service_tier or "default",
-            "模型": f"analyze={models[LLMTask.ANALYZE]} · draft={models[LLMTask.DRAFT]}"
-            f" · backtranslate={models[LLMTask.BACKTRANSLATE]}"
-            + (f" · judge={models[LLMTask.JUDGE]}" if judge else ""),
-        }
-        sections.append(render_markdown(records, title=f"离线评测报告（{split.value}）", meta=meta))
+                embedder = _embedding_client(settings)
+                if template_top_k is not None and embedder is None:
+                    typer.echo("--template-top-k 需要配置 EMBEDDING_MODEL", err=True)
+                    raise typer.Exit(2)
+                emb_cache = EmbeddingCache(EMBEDDING_CACHE) if embedder is not None else None
+                run_cfg = EvalRunConfig(
+                    params=params,
+                    concurrency=concurrency,
+                    strict_replay=strict_replay,
+                    run_judge=judge,
+                    cache_path=cache,
+                )
+                records = await run_eval(
+                    reply_items,
+                    no_reply_items,
+                    snapshot=snapshot,
+                    guide=knowledge.style_guide,
+                    llm=llm,
+                    train_cases=train_cases,
+                    all_cases=cases,
+                    embedder=embedder,
+                    embedding_cache=emb_cache,
+                    config=run_cfg,
+                )
+                if emb_cache is not None:
+                    emb_cache.save()
+                meta = {
+                    "切分": f"{split.value}（方法：{manifest.method.value}）",
+                    "模式": "pipeline_with_tools" if tools else "pipeline",
+                    "历史重放": "严格 known_from"
+                    if strict_replay
+                    else "不按 known_from 过滤（A-12）",
+                    "模板检索": f"embedding top-{template_top_k}"
+                    if template_top_k
+                    else "全量静态模板目录",
+                    "相似案件检索": "BM25 + embedding" if embedder else "只用 BM25",
+                    "服务等级": settings.llm_service_tier or "default",
+                    "模型": f"analyze={models[LLMTask.ANALYZE]} · draft={models[LLMTask.DRAFT]}"
+                    f" · backtranslate={models[LLMTask.BACKTRANSLATE]}"
+                    + (f" · judge={models[LLMTask.JUDGE]}" if judge else ""),
+                }
+                parts.append(
+                    render_markdown(records, title=f"离线评测报告（{split.value}）", meta=meta)
+                )
 
-    if suite in {"security", "all"}:
-        fixtures = load_attack_fixtures(security_dir or DEFAULT_SECURITY_DIR)
-        sec_results = asyncio.run(
-            run_security_replay(
-                fixtures,
-                snapshot=snapshot,
-                knowledge=knowledge,
-                llm=llm,
-                params=params,
-                concurrency=concurrency,
-                run_judge=judge,
-            )
-        )
-        sections.append(render_security_markdown(sec_results))
+            if suite in {"security", "all"}:
+                fixtures = load_attack_fixtures(security_dir or DEFAULT_SECURITY_DIR)
+                sec_results = await run_security_replay(
+                    fixtures,
+                    snapshot=snapshot,
+                    knowledge=knowledge,
+                    llm=llm,
+                    params=params,
+                    concurrency=concurrency,
+                    run_judge=judge,
+                )
+                parts.append(render_security_markdown(sec_results))
+        finally:
+            if hasattr(llm, "aclose"):
+                await llm.aclose()
+        return parts
+
+    sections = asyncio.run(_run_all())
 
     report_md = "\n\n---\n\n".join(sections)
     if out is not None:

@@ -77,12 +77,15 @@ async def test_security_replay_smoke_with_fake_llm() -> None:
     assert len(results) == len(fixtures)
     e2e_results = [r for r in results if r.kind == "draft_e2e"]
     assert len(e2e_results) == e2e_count
-    assert all(not r.succeeded for r in e2e_results)
+    # 除已知无账号漏洞 H-09（ATK-08）外，所有端到端注入/起草攻击不得得逞
+    assert all(not r.succeeded for r in e2e_results if r.attack_id != "ATK-08")
 
-    # L1 已知防御的 ATK-01..03 必须被 L1 拦截
+    # L1 已知防御的 ATK-01..03 必须被 L1 拦截；已知洞 H-07/H-08/H-09 如实暴露
     by_id = {r.attack_id: r for r in results}
     for atk in ("ATK-01", "ATK-02", "ATK-03", "ATK-10", "ATK-11", "ATK-12", "ATK-60", "ATK-61"):
         assert not by_id[atk].succeeded, by_id[atk]
+    assert by_id["ATK-05"].succeeded  # H-08：无发件人元数据时手写引用引导行获得强证据
+    assert by_id["ATK-08"].succeeded  # H-09：无账号/邮箱时相同正文触发重复不回复
     assert by_id["ATK-62"].first_blocking_layer == "not_implemented"
     assert by_id["ATK-63"].first_blocking_layer == "not_implemented"
 

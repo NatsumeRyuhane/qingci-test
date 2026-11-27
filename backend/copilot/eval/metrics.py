@@ -70,6 +70,10 @@ class CaseEvalRecord(Document):
     fallback_reason: str | None = None
     tool_calls: int = 0
     judge: JudgeVerdict | None = None
+    judge_error: str | None = None
+    """LLM 评审调用失败时的错误摘要（不静默吞掉异常）。"""
+    config_fingerprint: str | None = None
+    """本次评测运行配置的指纹，用于缓存续跑时防止混入旧配置的结果。"""
 
     wall_seconds: float = 0.0
     step_seconds: dict[str, float] = Field(default_factory=dict)
@@ -96,8 +100,17 @@ def append_record(record: CaseEvalRecord, path: Path) -> None:
 def read_records(path: Path) -> list[CaseEvalRecord]:
     if not path.is_file():
         return []
+    records: list[CaseEvalRecord] = []
     with path.open(encoding="utf-8") as f:
-        return [CaseEvalRecord.model_validate_json(line) for line in f if line.strip()]
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                records.append(CaseEvalRecord.model_validate_json(line))
+            except Exception:
+                # 容忍中断写入留下的残缺尾行，避免续跑直接崩溃
+                continue
+    return records
 
 
 def percentile(values: Sequence[float], q: float) -> float:
@@ -135,18 +148,25 @@ class SliceMetrics:
     visible_template_top3_hits: int = 0
     visible_template_total: int = 0
     judge_total: int = 0
+    judge_errors: int = 0
     solution_agrees: int = 0
     register_appropriate: int = 0
     no_fabricated_promise: int = 0
     back_translation_faithful: int = 0
     citations_supported: int = 0
     no_other_case_leak: int = 0
+    # P-05：代码启发式检查 vs LLM 评审交叉统计
+    register_fp: int = 0
+    register_fn: int = 0
+    promise_fp: int = 0
+    promise_fn: int = 0
     combined_success_hits: int = 0
     combined_success_total: int = 0
     routes: Counter[str] = field(default_factory=Counter)
     high_risk_total: int = 0
     high_risk_auto_send: int = 0
     false_no_reply: int = 0
+    false_no_reply_by_reason: Counter[str] = field(default_factory=Counter)
     check_failures: Counter[str] = field(default_factory=Counter)
     gate_failures: Counter[str] = field(default_factory=Counter)
     fallbacks: int = 0
@@ -162,6 +182,8 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
         if r.no_reply_auto:
             m.routes["no_reply_auto"] += 1
             m.false_no_reply += 1
+            reason = r.predicted_no_reply_reason.value if r.predicted_no_reply_reason else "unknown"
+            m.false_no_reply_by_reason[reason] += 1
         elif r.route is not None:
             m.routes[r.route.value] += 1
         if r.high_risk:
@@ -178,8 +200,8 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
                 m.intent_hits += 1
         if r.expected_template_id is not None:
             m.template_total += 1
-            in_top1 = r.chosen_template_id == r.expected_template_id
-            in_top3 = r.expected_template_id in r.top3_template_ids
+            in_top1 = (not r.no_reply_auto) and r.chosen_template_id == r.expected_template_id
+            in_top3 = (not r.no_reply_auto) and r.expected_template_id in r.top3_template_ids
             if in_top1:
                 m.template_top1_hits += 1
             if in_top3:
@@ -190,6 +212,8 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
                     m.visible_template_top1_hits += 1
                 if in_top3:
                     m.visible_template_top3_hits += 1
+        if r.judge_error is not None:
+            m.judge_errors += 1
         if r.judge is not None:
             m.judge_total += 1
             m.solution_agrees += int(r.judge.solution_agrees)
@@ -198,9 +222,23 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
             m.back_translation_faithful += int(r.judge.back_translation_faithful)
             m.citations_supported += int(r.judge.citations_supported)
             m.no_other_case_leak += int(r.judge.no_other_case_leak)
+            reg_failed = DraftCheckKind.REGISTER in r.failed_checks
+            if reg_failed and r.judge.register_appropriate:
+                m.register_fp += 1
+            elif (not reg_failed) and (not r.judge.register_appropriate):
+                m.register_fn += 1
+            prom_failed = DraftCheckKind.FORBIDDEN_PROMISE in r.failed_checks
+            if prom_failed and r.judge.no_fabricated_promise:
+                m.promise_fp += 1
+            elif (not prom_failed) and (not r.judge.no_fabricated_promise):
+                m.promise_fn += 1
             if r.expected_template_id is not None:
                 m.combined_success_total += 1
-                if r.expected_template_id in r.top3_template_ids and r.judge.solution_agrees:
+                if (
+                    (not r.no_reply_auto)
+                    and r.expected_template_id in r.top3_template_ids
+                    and r.judge.solution_agrees
+                ):
                     m.combined_success_hits += 1
         for check in r.failed_checks:
             m.check_failures[check.value] += 1
@@ -232,10 +270,11 @@ def compute_no_reply(records: Sequence[CaseEvalRecord]) -> NoReplyMetrics:
         reason = r.expected_no_reply_reason.value if r.expected_no_reply_reason else "unknown"
         bucket = counts.setdefault(reason, [0, 0, 0])
         bucket[2] += 1
-        if r.no_reply_auto:
+        reason_matches = r.predicted_no_reply_reason is r.expected_no_reply_reason
+        if r.no_reply_auto and reason_matches:
             m.auto_hits += 1
             bucket[0] += 1
-        if r.no_reply_auto or r.predicted_no_reply_reason is not None:
+        if (r.no_reply_auto or r.predicted_no_reply_reason is not None) and reason_matches:
             m.proposal_hits += 1
             bucket[1] += 1
     m.by_reason = {k: (v[0], v[1], v[2]) for k, v in sorted(counts.items())}
@@ -384,8 +423,15 @@ def render_markdown(
                     f"| 引用成立（H-03） | {_rate(m.citations_supported, m.judge_total)} |",
                     f"| 无跨案件泄露（H-04） | {_rate(m.no_other_case_leak, m.judge_total)} |",
                     "",
+                    f"- **启发式检查误报/漏报（P-05，对照 LLM 评审）**："
+                    f"`register` 误报 {m.register_fp} · 漏报 {m.register_fn}；"
+                    f"`forbidden_promise` 误报 {m.promise_fp} · 漏报 {m.promise_fn}",
+                    "",
                 ]
             )
+        if m.judge_errors:
+            lines.append(f"**LLM 评审失败次数**：{m.judge_errors}")
+            lines.append("")
         if m.check_failures:
             chk = " · ".join(f"`{k}` {v}" for k, v in m.check_failures.most_common())
             lines.append(f"**代码自检未通过次数**：{chk}")

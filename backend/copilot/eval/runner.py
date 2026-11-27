@@ -1,29 +1,40 @@
 """批量并发评测执行器（#7）。
 
 在留出集（dev 或 test）上并发运行 `draft_case` 和可选的 `judge_draft`，按案件隔离用量与延迟，
-支持断点续跑（JSONL 缓存）。
+支持带配置指纹的断点续跑（JSONL 缓存）。
 """
 
 import asyncio
+import hashlib
+import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from copilot.contracts import Case, DraftMode, RiskLevel, Route
+from copilot.contracts import (
+    Case,
+    Citation,
+    DraftMode,
+    EntryType,
+    InquiryCategory,
+    RiskLevel,
+)
 from copilot.draft.retrieval import KnowledgeSnapshot, build_view
-from copilot.draft.route import RouteInput, approve_auto_send
+from copilot.draft.route import RouteInput, approve_auto_send, escalation_reasons
 from copilot.draft.service import DraftParams, draft_case
 from copilot.draft.similar import EmbeddingCache, SimilarCaseRetriever
 from copilot.draft.timectx import build_time_context, known_at_for
 from copilot.eval.judge import judge_draft
 from copilot.eval.metrics import CaseEvalRecord, append_record, read_records
-from copilot.eval.replay import NoReplyEvalItem, ReplyEvalItem, replay_corpus
+from copilot.eval.replay import NoReplyEvalItem, ReplyEvalItem, replay_corpus, replay_history
 from copilot.ingest.timestamps import JST
 from copilot.kb.knowledge import StyleGuide
 from copilot.llm import LLMClient, OpenAICompatibleClient
 from copilot.llm.embedding import EmbeddingClient
+
+HIGH_RISK_CATEGORIES = {InquiryCategory.PURCHASE, InquiryCategory.DATA_TRANSFER}
 
 
 @dataclass(frozen=True)
@@ -36,7 +47,24 @@ class EvalRunConfig:
     """为真时按 `known_from` 过滤知识库版本（D-012）；为假时不过滤（docs/claims.md A-12 对比）。"""
     run_judge: bool = True
     cache_path: Path | None = None
-    """JSONL 缓存文件。存在时跳过已完成的样本，每完成一条立即追加写入。"""
+    """JSONL 缓存文件。存在时只复用同配置指纹的已完成样本，每完成一条立即追加写入。"""
+
+    def fingerprint(self) -> str:
+        payload = json.dumps(
+            {
+                "analyze_model": self.params.analyze_model,
+                "draft_model": self.params.draft_model,
+                "min_confidence": self.params.min_confidence,
+                "lookback_days": self.params.lookback_days,
+                "tools": self.params.tools,
+                "max_tool_steps": self.params.max_tool_steps,
+                "template_top_k": self.params.template_top_k,
+                "strict_replay": self.strict_replay,
+                "run_judge": self.run_judge,
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def _scoped_client(llm: LLMClient) -> LLMClient:
@@ -45,14 +73,48 @@ def _scoped_client(llm: LLMClient) -> LLMClient:
     return llm
 
 
-def _template_lookup(snapshot: KnowledgeSnapshot) -> dict[str, tuple[str, RiskLevel]]:
-    """模板 ID -> (最新版本的 intent, risk)，用于对照标准答案计算意图准确率与高风险标记。"""
+def _template_lookup(
+    snapshot: KnowledgeSnapshot,
+) -> tuple[dict[tuple[str, int], tuple[str, RiskLevel]], dict[str, tuple[str, RiskLevel]]]:
+    """返回（(id, version) -> (intent, risk)，id -> 最新版本 (intent, risk)）。"""
+    by_ver: dict[tuple[str, int], tuple[str, RiskLevel]] = {}
     latest: dict[str, tuple[int, str, RiskLevel]] = {}
     for t in snapshot.templates:
+        by_ver[(t.id, t.version)] = (t.intent, t.risk)
         prev = latest.get(t.id)
         if prev is None or t.version > prev[0]:
             latest[t.id] = (t.version, t.intent, t.risk)
-    return {tid: (intent, risk) for tid, (_, intent, risk) in latest.items()}
+    return by_ver, {tid: (intent, risk) for tid, (_, intent, risk) in latest.items()}
+
+
+def summarize_citations(citations: Sequence[Citation], snapshot: KnowledgeSnapshot) -> list[str]:
+    """把草稿引用的条目还原成简短中文摘要，供 LLM 评审检查引用是否成立（docs/security.md H-03）。"""
+    if not citations:
+        return []
+    index: dict[tuple[EntryType, str, int], str] = {}
+    for t in snapshot.templates:
+        index[(EntryType.TEMPLATE, t.id, t.version)] = (
+            f"模板《{t.title_zh}》（意图 {t.intent}）：{t.use_when_zh}"
+        )
+    for i in snapshot.intents:
+        req = f"；需要索要：{'、'.join(i.required_info_zh)}" if i.required_info_zh else ""
+        index[(EntryType.INTENT, i.id, i.version)] = (
+            f"意图《{i.title_zh}》：{i.description_zh}{req}"
+        )
+    for n in snapshot.notices:
+        index[(EntryType.NOTICE, n.id, n.version)] = f"公告《{n.title_zh}》：{n.description_zh}"
+    for p in snapshot.policies:
+        index[(EntryType.POLICY, p.id, p.version)] = f"政策《{p.title_zh}》：{p.description_zh}"
+    for f in snapshot.facts:
+        index[(EntryType.FACT, f.id, f.version)] = f"事实：{f.statement_zh}"
+    for g in snapshot.glossary:
+        index[(EntryType.GLOSSARY, g.id, g.version)] = f"术语：{g.term_ja} = {g.term_zh}"
+    out = []
+    for c in citations:
+        key = (c.entry_type, c.entry_id, c.entry_version)
+        desc = index.get(key, "（知识库中未找到该条目）")
+        out.append(f"- [{c.entry_type.value}:{c.entry_id} v{c.entry_version}] {desc}")
+    return out
 
 
 def _top3_templates(chosen_id: str | None, candidate_ids: Sequence[str]) -> list[str]:
@@ -78,7 +140,9 @@ async def evaluate_reply_item(
     embedder: EmbeddingClient | None,
     embedding_cache: EmbeddingCache | None,
     config: EvalRunConfig,
-    template_meta: dict[str, tuple[str, RiskLevel]],
+    template_by_ver: dict[tuple[str, int], tuple[str, RiskLevel]],
+    template_latest: dict[str, tuple[str, RiskLevel]],
+    fingerprint: str,
 ) -> CaseEvalRecord:
     """评测单个历史回复样本。"""
     case_llm = _scoped_client(llm)
@@ -90,11 +154,18 @@ async def evaluate_reply_item(
 
     expected_tid = item.label.template_id
     expected_visible = view.template(expected_tid) is not None if expected_tid is not None else None
-    expected_intent, expected_risk = (
-        template_meta.get(expected_tid, (None, None)) if expected_tid is not None else (None, None)
-    )
+    if expected_tid is not None and item.label.template_version is not None:
+        expected_intent, expected_risk = template_by_ver.get(
+            (expected_tid, item.label.template_version),
+            template_latest.get(expected_tid, (None, None)),
+        )
+    elif expected_tid is not None:
+        expected_intent, expected_risk = template_latest.get(expected_tid, (None, None))
+    else:
+        expected_intent, expected_risk = (None, None)
 
     corpus = replay_corpus(train_cases, item.case, item.now)
+    history = replay_history(all_cases, item.case, item.now)
     retriever = SimilarCaseRetriever(corpus, embedder=embedder, cache=embedding_cache)
 
     started = time.perf_counter()
@@ -105,7 +176,7 @@ async def evaluate_reply_item(
             guide=guide,
             llm=case_llm,
             params=config.params,
-            history=all_cases,
+            history=history,
             retriever=retriever,
             now=item.now,
             replay=config.strict_replay,
@@ -128,6 +199,7 @@ async def evaluate_reply_item(
             expected_template_id=expected_tid,
             expected_template_visible=expected_visible,
             expected_template_risk=expected_risk,
+            config_fingerprint=fingerprint,
             wall_seconds=round(time.perf_counter() - started, 3),
             error=f"{type(exc).__name__}: {str(exc)[:200]}",
         )
@@ -136,13 +208,17 @@ async def evaluate_reply_item(
     analysis = outcome.analysis
     draft = outcome.draft
     chosen_id = draft.template_refs[0].template_id if draft and draft.template_refs else None
-    candidates = view.candidates(analysis.intent)
-    top3 = _top3_templates(chosen_id, [c.template.id for c in candidates])
+    # 使用 draft_case 实际提供给模型的候选列表（含 template_top_k 过滤结果）；
+    # 若误判为 no_reply_auto（无草稿），不计入模板命中。
+    top3 = _top3_templates(chosen_id, outcome.candidate_template_ids) if draft is not None else []
 
     failed_checks = [c.kind for c in draft.checks if not c.passed] if draft else []
     failed_gates = []
+    chosen_risk: RiskLevel | None = None
     if draft is not None:
         cand = view.candidate(chosen_id, analysis.intent) if chosen_id else None
+        if cand is not None:
+            chosen_risk = cand.template.risk
         approval = approve_auto_send(
             RouteInput(
                 case=item.case,
@@ -157,24 +233,33 @@ async def evaluate_reply_item(
         )
         failed_gates = [g for g, reasons in approval.results.items() if reasons]
 
-    intent_obj = view.intents.get(analysis.intent)
+    # 高风险判定只依据固有风险/标准答案/政策触发词，不依赖模型是否输出 ESCALATE
+    expected_intent_obj = view.intents.get(expected_intent) if expected_intent else None
     high_risk = (
         expected_risk is RiskLevel.HIGH
-        or (intent_obj is not None and intent_obj.default_risk is RiskLevel.HIGH)
-        or (draft is not None and draft.route is Route.ESCALATE)
+        or chosen_risk is RiskLevel.HIGH
+        or (expected_intent_obj is not None and expected_intent_obj.default_risk is RiskLevel.HIGH)
+        or item.case.category in HIGH_RISK_CATEGORIES
+        or bool(escalation_reasons(item.case, analysis, view.escalation_triggers))
     )
 
-    # 先记录起草阶段（不含 judge）的用量和耗时
     step_seconds = {task.value: round(u.seconds, 3) for task, u in case_llm.usage.tasks.items()}
     draft_total = case_llm.usage.total()
 
     verdict = None
+    judge_error: str | None = None
     if config.run_judge and draft is not None:
         judge_llm = _scoped_client(llm)
         try:
-            verdict = await judge_draft(item.case, draft, item.actual_reply.body, judge_llm)
-        except Exception:
-            verdict = None
+            verdict = await judge_draft(
+                item.case,
+                draft,
+                item.actual_reply.body,
+                judge_llm,
+                cited_summaries=summarize_citations(draft.citations, snapshot),
+            )
+        except Exception as exc:
+            judge_error = f"{type(exc).__name__}: {str(exc)[:200]}"
 
     return CaseEvalRecord(
         kind="reply",
@@ -209,6 +294,8 @@ async def evaluate_reply_item(
         fallback_reason=draft.fallback_reason if draft else None,
         tool_calls=len(draft.trace) if draft else 0,
         judge=verdict,
+        judge_error=judge_error,
+        config_fingerprint=fingerprint,
         wall_seconds=round(wall, 3),
         step_seconds=step_seconds,
         prompt_tokens=draft_total.prompt_tokens,
@@ -227,6 +314,7 @@ async def evaluate_no_reply_item(
     embedder: EmbeddingClient | None,
     embedding_cache: EmbeddingCache | None,
     config: EvalRunConfig,
+    fingerprint: str,
 ) -> CaseEvalRecord:
     """评测单个“不回复”样本。"""
     case_llm = _scoped_client(llm)
@@ -234,6 +322,7 @@ async def evaluate_no_reply_item(
         item.case, now=item.now, lookback_days=config.params.lookback_days
     )
     corpus = replay_corpus(train_cases, item.case, item.now)
+    history = replay_history(all_cases, item.case, item.now)
     retriever = SimilarCaseRetriever(corpus, embedder=embedder, cache=embedding_cache)
 
     started = time.perf_counter()
@@ -244,7 +333,7 @@ async def evaluate_no_reply_item(
             guide=guide,
             llm=case_llm,
             params=config.params,
-            history=all_cases,
+            history=history,
             retriever=retriever,
             now=item.now,
             replay=config.strict_replay,
@@ -258,6 +347,7 @@ async def evaluate_no_reply_item(
             now_status=time_ctx.now.status,
             problem_time_status=time_ctx.problem_time.status,
             expected_no_reply_reason=item.label.reason,
+            config_fingerprint=fingerprint,
             wall_seconds=round(time.perf_counter() - started, 3),
             error=f"{type(exc).__name__}: {str(exc)[:200]}",
         )
@@ -278,6 +368,7 @@ async def evaluate_no_reply_item(
         no_reply_auto=outcome.no_reply_auto,
         expected_no_reply_reason=item.label.reason,
         predicted_no_reply_reason=outcome.no_reply.reason if outcome.no_reply else None,
+        config_fingerprint=fingerprint,
         wall_seconds=round(wall, 3),
         step_seconds=step_seconds,
         prompt_tokens=draft_total.prompt_tokens,
@@ -298,14 +389,19 @@ async def run_eval(
     embedding_cache: EmbeddingCache | None = None,
     config: EvalRunConfig,
 ) -> list[CaseEvalRecord]:
-    """并发运行所有待评测样本，支持 JSONL 缓存续跑。"""
+    """并发运行所有待评测样本，支持同配置指纹的 JSONL 缓存续跑。"""
+    fingerprint = config.fingerprint()
     existing: dict[tuple[str, str, str | None], CaseEvalRecord] = {}
     if config.cache_path is not None and config.cache_path.is_file():
         for rec in read_records(config.cache_path):
-            if rec.error is None:
+            if (
+                rec.error is None
+                and rec.judge_error is None
+                and rec.config_fingerprint == fingerprint
+            ):
                 existing[(rec.kind, rec.case_id, rec.message_id)] = rec
 
-    template_meta = _template_lookup(snapshot)
+    template_by_ver, template_latest = _template_lookup(snapshot)
     sem = asyncio.Semaphore(max(1, config.concurrency))
     write_lock = asyncio.Lock()
 
@@ -324,7 +420,9 @@ async def run_eval(
                 embedder=embedder,
                 embedding_cache=embedding_cache,
                 config=config,
-                template_meta=template_meta,
+                template_by_ver=template_by_ver,
+                template_latest=template_latest,
+                fingerprint=fingerprint,
             )
         if config.cache_path is not None:
             async with write_lock:
@@ -346,6 +444,7 @@ async def run_eval(
                 embedder=embedder,
                 embedding_cache=embedding_cache,
                 config=config,
+                fingerprint=fingerprint,
             )
         if config.cache_path is not None:
             async with write_lock:

@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, Field
 
 from copilot.contracts import (
     Case,
@@ -68,6 +68,8 @@ class DraftOutcome(Contract):
     no_reply_reason_zh: str | None = None
     proposed_status: CaseStatus | None = None
     """建议的案件状态：`drafted`、`escalated` 或 `no_reply_needed`。由调用方决定是否写入。"""
+    candidate_template_ids: list[str] = Field(default_factory=list)
+    """实际提供给起草模型的候选模板 ID 列表（按适用程度排序，含 template_top_k 过滤结果）。"""
     created_at: AwareDatetime
 
 
@@ -284,5 +286,6 @@ async def draft_case(
         no_reply=decision.proposal if decision else None,
         no_reply_reason_zh=decision.reason_zh if decision else None,
         proposed_status=status,
+        candidate_template_ids=[c.template.id for c in candidates],
         created_at=created_at,
     )
