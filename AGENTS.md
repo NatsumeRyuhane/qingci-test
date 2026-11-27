@@ -204,6 +204,7 @@ uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档
 | ORM 模型 | `uv run alembic revision --autogenerate -m "<说明>"`，检查生成的迁移脚本 |
 | 契约模型（`backend/copilot/contracts/`） | 同步 `tests/fixtures/contracts/` 中的合成数据和 [docs/architecture.md](docs/architecture.md)；不兼容的改动要把 `schema_version` 加 1（见该文档的“约定”） |
 | 环境变量 | 同步 `.env.example`（`tests/test_config.py` 会检查） |
+| 新增或改变系统的一条保证（安全、分流、知识库的规则） | 在 [docs/claims.md](docs/claims.md) 中写明这条主张、保证它的代码和守护它的测试；还没有测试的写进“待验证”，并注明由哪个 issue 补上（`tests/test_claims.py` 会检查引用的测试存在） |
 
 文档改动：确认所有相对链接都能正确解析。
 

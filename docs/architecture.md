@@ -57,7 +57,7 @@
 
 ## 起草：时间、知识、检查与分流（#6）
 
-代码在 [`backend/copilot/draft/`](../backend/copilot/draft/)，设计见 [提案 0003](proposals/0003-knowledge-base.md) §5、§8–§10、§13。原则：**安全相关的判断全部由代码执行，并假设模型已被攻破**。模型只负责理解和写作，时间窗口、政策、可用的知识和分流都不交给模型。
+代码在 [`backend/copilot/draft/`](../backend/copilot/draft/)，设计见 [提案 0003](proposals/0003-knowledge-base.md) §5、§8–§10、§13。原则：**安全相关的判断全部由代码执行，并假设模型已被攻破**。模型只负责理解和写作，时间窗口、政策、可用的知识和分流都不交给模型。每条规则对应的主张和守护它的测试见 [claims.md](claims.md)。
 
 **时间上下文**（`timectx.py`）。“现在”在生产中是系统时间（`known`），历史重放时是指定的时间，此时知识库只看 `known_from` 不晚于它的版本。问题发生时间来自表单：完整的日期和时间为 `known`（晚于“现在”的视为无效，为 `unavailable`）；只有 `HH:MM` 为 `estimated`，日期区间是“现在”之前 `DRAFT_PROBLEM_TIME_LOOKBACK_DAYS` 天；没有就是 `unavailable`。时间与窗口的匹配结果为 `inside`、`outside` 或 `uncertain`（区间跨过边界，或问题发生时间缺失而事件已开始）。
 
