@@ -21,6 +21,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY backend ./backend
+# 人工编写的运营知识（不含客户原文）。`copilot kb publish` 按相对路径读取 knowledge/。
+COPY knowledge ./knowledge
 RUN uv sync --frozen --no-dev --no-editable
 
 # 非 root 用户。compose 会用 COPILOT_UID/COPILOT_GID 覆盖成数据目录的属主，
