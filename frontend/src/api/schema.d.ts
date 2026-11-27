@@ -84,6 +84,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/drafts/{draft_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Feedback
+         * @description 批准（进入发件箱）、修改后批准、升级处理或驳回。
+         *
+         *     只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。
+         */
+        post: operations["create_feedback_v1_drafts__draft_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/health": {
         parameters: {
             query?: never;
@@ -96,6 +118,26 @@ export interface paths {
          * @description 服务存活检查，供前端、部署脚本和容器健康检查使用。
          */
         get: operations["health_v1_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sim/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Outbox
+         * @description 发件箱：系统发出的回复，最新的在前，可只看一个案件的。
+         */
+        get: operations["outbox_v1_sim_outbox_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -539,6 +581,25 @@ export interface components {
          */
         FeedbackAction: "approved" | "edited" | "escalated" | "rejected";
         /**
+         * FeedbackRequest
+         * @description 客服对草稿的处理。编辑距离和时间由服务端计算。
+         */
+        FeedbackRequest: {
+            action: components["schemas"]["FeedbackAction"];
+            /** Actor */
+            actor: string;
+            /** Final Body Ja */
+            final_body_ja?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** FeedbackResponse */
+        FeedbackResponse: {
+            case_status: components["schemas"]["CaseStatus"];
+            feedback: components["schemas"]["Feedback"];
+            mail: components["schemas"]["OutboundMail"] | null;
+        };
+        /**
          * Health
          * @description `GET /v1/health` 的响应。
          */
@@ -686,6 +747,66 @@ export interface components {
          * @enum {string}
          */
         NoReplyReason: "duplicate" | "system_message" | "other";
+        /**
+         * OutboundMail
+         * @description 系统发出的一封回复，即发件箱中的一项。
+         *
+         *     客服批准（或修改后批准）草稿时，与 `Feedback` 在同一个事务中写入，回复同时作为一封
+         *     客服邮件追加到案件。MVP 中没有真实的邮件系统，发件箱就是终点（模拟邮箱，#8）；
+         *     以后接入真实发送时，由发送程序读取发件箱投递，工作台不需要改动。
+         */
+        OutboundMail: {
+            /**
+             * Body Ja
+             * @description 发出的正文（日语）：原样批准时是草稿正文，修改后批准时是客服修改后的正文。
+             */
+            body_ja: string;
+            /**
+             * Case Id
+             * @description 所属案件 ID。
+             */
+            case_id: string;
+            /**
+             * Draft Id
+             * @description 来源草稿 ID（`Draft.id`）。
+             */
+            draft_id: string;
+            /**
+             * Id
+             * @description 发件 ID。默认随机生成。
+             */
+            id?: string;
+            /**
+             * Message Seq
+             * @description 这封回复追加到案件后，作为客服邮件的 `seq`。
+             */
+            message_seq: number;
+            /**
+             * Schema Version
+             * @description 本模型的 schema 版本。
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Sent At
+             * Format: date-time
+             * @description 发送时间。
+             */
+            sent_at: string;
+            /**
+             * Sent By
+             * @description 点击发送的客服，与对应 `Feedback.actor` 相同。
+             */
+            sent_by: string;
+        };
+        /** Outbox */
+        Outbox: {
+            /** Items */
+            items: components["schemas"]["OutboundMail"][];
+            /** Total */
+            total: number;
+        };
         /**
          * Platform
          * @description 玩家使用的平台，对应表单的 `ご利用環境`。
@@ -1211,6 +1332,86 @@ export interface operations {
             };
         };
     };
+    create_feedback_v1_drafts__draft_id__feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     health_v1_health_get: {
         parameters: {
             query?: never;
@@ -1227,6 +1428,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    outbox_v1_sim_outbox_get: {
+        parameters: {
+            query?: {
+                case_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Outbox"];
                 };
             };
             /** @description Unauthorized */

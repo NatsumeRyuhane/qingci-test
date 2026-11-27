@@ -6,18 +6,26 @@ from fastapi import APIRouter, Path, Query
 from pydantic import AwareDatetime, BaseModel, Field
 
 from copilot.api.deps import DrafterDep, Repo
-from copilot.contracts import Case, CaseAnalysis, Draft, Feedback
+from copilot.contracts import Case, CaseAnalysis, Draft, Feedback, OutboundMail
 from copilot.contracts.case import CASE_ID_CHARS
-from copilot.contracts.enums import CaseStatus, InquiryCategory, Route, Sentiment, Urgency
+from copilot.contracts.enums import (
+    CaseStatus,
+    FeedbackAction,
+    InquiryCategory,
+    Route,
+    Sentiment,
+    Urgency,
+)
 from copilot.draft import latest_player_message
 from copilot.storage import NotFoundError
-from copilot.workbench import generate_draft
+from copilot.workbench import generate_draft, submit_feedback
 
 PREVIEW_CHARS = 80
 MAX_BODY_CHARS = 20_000
 """客服编辑后的正文上限。远大于样本中最长的回复，只用来拒绝异常的请求。"""
 
 CaseIdPath = Annotated[str, Path(pattern=rf"^{CASE_ID_CHARS}$")]
+CaseIdQuery = Annotated[str | None, Query(pattern=rf"^{CASE_ID_CHARS}$")]
 DraftIdPath = Annotated[str, Path(min_length=1, max_length=64)]
 
 
@@ -69,6 +77,26 @@ class BacktranslateRequest(BaseModel):
 
 class BacktranslateResponse(BaseModel):
     back_translation_zh: str
+
+
+class FeedbackRequest(BaseModel):
+    """客服对草稿的处理。编辑距离和时间由服务端计算。"""
+
+    actor: str = Field(min_length=1, max_length=64)
+    """界面上选择的“当前客服”（MVP 中不是身份，见 #13）。"""
+    action: FeedbackAction
+    final_body_ja: str | None = Field(default=None, max_length=MAX_BODY_CHARS)
+    """修改后批准时必填：修改后的正文。"""
+    reason: str | None = Field(default=None, max_length=2000)
+    """升级处理和驳回时必填，修改后批准时可选。"""
+
+
+class FeedbackResponse(BaseModel):
+    feedback: Feedback
+    mail: OutboundMail | None
+    """批准或修改后批准时进入发件箱的回复。"""
+    case_status: CaseStatus
+    """处理后的案件状态。"""
 
 
 def _summary(repo: Repo, case: Case) -> CaseSummary:
@@ -144,5 +172,25 @@ def router() -> APIRouter:
         if repo.get_draft(draft_id) is None:
             raise NotFoundError(f"草稿不存在：{draft_id}")
         return BacktranslateResponse(back_translation_zh=drafter.backtranslate(body.body_ja))
+
+    @r.post("/drafts/{draft_id}/feedback", status_code=201)
+    def create_feedback(
+        repo: Repo, draft_id: DraftIdPath, body: FeedbackRequest
+    ) -> FeedbackResponse:
+        """批准（进入发件箱）、修改后批准、升级处理或驳回。
+
+        只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。
+        """
+        result = submit_feedback(
+            repo,
+            draft_id,
+            actor=body.actor,
+            action=body.action,
+            final_body_ja=body.final_body_ja,
+            reason=body.reason,
+        )
+        return FeedbackResponse(
+            feedback=result.feedback, mail=result.mail, case_status=result.case.status
+        )
 
     return r

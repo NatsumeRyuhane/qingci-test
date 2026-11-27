@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from pydantic import BaseModel
 
 from copilot import __version__
-from copilot.api import cases
+from copilot.api import cases, sim
 from copilot.api.auth import authorize
 from copilot.api.errors import ERROR_RESPONSES, install_error_handling
 from copilot.config import Settings, get_settings
@@ -41,6 +41,7 @@ def _v1_router() -> APIRouter:
     )
     router.include_router(_meta_router())
     router.include_router(cases.router())
+    router.include_router(sim.router())
     return router
 
 
