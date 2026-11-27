@@ -27,7 +27,7 @@ import {
 import { usePolling } from "../lib/polling";
 import { fetchQueue, nextCaseId } from "../lib/queue";
 import { caseHref } from "../lib/route";
-import { Editor, GeneratePrompt } from "./Editor";
+import { DraftingProgress, Editor, GeneratePrompt } from "./Editor";
 
 const FORM_FIELDS: [keyof InquiryForm, string][] = [
   ["category", "类别"],
@@ -278,15 +278,23 @@ export function Workspace({ caseId, actor }: { caseId: string; actor: string }) 
     loadQueue();
   }, [load, loadQueue]);
 
-  // 定时刷新队列；当前案件有新来信时提示，不直接替换（避免打断正在编辑的内容）
+  // 定时刷新。没有在编辑的内容时（还没有草稿、或已结案）直接换成最新数据，自动起草完成后草稿会
+  // 自己出现；正在编辑时只更新起草状态，有新来信或新草稿时提示，不打断编辑。
   usePolling(() => {
     loadQueue();
     call(api.GET("/v1/cases/{case_id}", { params: { path: { case_id: caseId } } }))
       .then((fresh) => {
-        if (detail && fresh.case.messages.length > detail.case.messages.length) setNewMail(true);
+        setDetail((current) => {
+          if (!current) return fresh;
+          const editing = current.draft && !CLOSED_STATUSES.has(current.case.status ?? "open");
+          if (!editing) return fresh;
+          if (fresh.case.messages.length > current.case.messages.length) setNewMail(true);
+          if (fresh.draft && fresh.draft.id !== current.draft?.id) setNewMail(true);
+          return { ...current, drafting: fresh.drafting };
+        });
       })
       .catch(() => undefined);
-  });
+  }, 3000);
 
   const resolved = async (message: string) => {
     const next = await nextCaseId(caseId).catch(() => null);
@@ -313,7 +321,7 @@ export function Workspace({ caseId, actor }: { caseId: string; actor: string }) 
           )}
           {newMail && (
             <p className="notice notice-warn">
-              这个案件有新的来信。{" "}
+              这个案件有新的来信或新的草稿。{" "}
               <button type="button" className="link" onClick={() => void load()}>
                 刷新（未发送的修改会丢失）
               </button>
@@ -331,6 +339,11 @@ export function Workspace({ caseId, actor }: { caseId: string; actor: string }) 
             <Thread detail={detail} />
           </section>
           <section className="ws-column ws-right" aria-label="回复">
+            {detail.draft && detail.drafting && detail.drafting.state !== "failed" && (
+              <p className="notice notice-info">
+                <span className="spinner" aria-hidden="true" /> 正在为新的来信重新起草…
+              </p>
+            )}
             {detail.draft ? (
               <Editor
                 key={detail.draft.id}
@@ -343,8 +356,17 @@ export function Workspace({ caseId, actor }: { caseId: string; actor: string }) 
               <p className="editor-empty">
                 案件已结案（{label(STATUS_LABELS, detail.case.status ?? "open")}），没有草稿。
               </p>
+            ) : detail.drafting && detail.drafting.state !== "failed" ? (
+              <DraftingProgress
+                since={detail.drafting.since}
+                queued={detail.drafting.state === "queued"}
+              />
             ) : (
-              <GeneratePrompt caseId={caseId} onGenerated={load} />
+              <GeneratePrompt
+                caseId={caseId}
+                onGenerated={load}
+                failure={detail.drafting?.error ?? null}
+              />
             )}
           </section>
         </div>

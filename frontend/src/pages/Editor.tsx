@@ -4,7 +4,7 @@
 // - 直接改日语会先弹出提醒：改过的日语以客服为准，不会发给 LLM，也不会被中文的翻译覆盖；
 //   保存时只运行代码自检。
 // - 发送前，日语正文有未通过的自检时，需要逐项确认后才能发送（后端同样会检查）。
-import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   api,
   type CaseDetail,
@@ -18,6 +18,7 @@ import {
 import { ErrorNotice, RouteBadge } from "../components/Badges";
 import { SafeText } from "../components/SafeText";
 import { ACTION_LABELS, CHECK_LABELS, CLOSED_STATUSES, formatTime, label } from "../lib/labels";
+import { useScrollSync } from "../lib/scrollSync";
 
 type SecondaryAction = Extract<FeedbackAction, "escalated" | "rejected" | "no_reply">;
 
@@ -158,12 +159,36 @@ function Dialog({
   );
 }
 
+/** 后台自动起草进行中。完成后工作区的定时刷新会自动换成草稿。 */
+export function DraftingProgress({ since, queued }: { since: string; queued: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.max(0, Math.round((now - new Date(since).getTime()) / 1000));
+  return (
+    <div className="editor-empty drafting" role="status">
+      <span className="spinner large" aria-hidden="true" />
+      <p>
+        <strong>{queued ? "排队等待自动起草…" : "正在自动分析和起草…"}</strong>
+        <span className="meta"> 已等待 {seconds} 秒</span>
+      </p>
+      <p className="meta">
+        来信后会自动开始，通常需要 1 分钟左右。完成后草稿会自动显示，不需要刷新。
+      </p>
+    </div>
+  );
+}
+
 export function GeneratePrompt({
   caseId,
   onGenerated,
+  failure = null,
 }: {
   caseId: string;
   onGenerated: () => Promise<void>;
+  failure?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,10 +205,22 @@ export function GeneratePrompt({
   };
   return (
     <div className="editor-empty">
-      <p>还没有草稿。分析来信并生成回复草稿后，在这里用中文编辑。</p>
+      {failure ? (
+        <p className="notice notice-error">自动起草失败：{failure}</p>
+      ) : (
+        <p>还没有草稿。</p>
+      )}
       <ErrorNotice message={error} />
       <button type="button" className="primary" onClick={generate} disabled={busy}>
-        {busy ? "正在分析和起草…" : "生成草稿"}
+        {busy ? (
+          <>
+            <span className="spinner" aria-hidden="true" /> 正在分析和起草…
+          </>
+        ) : failure ? (
+          "重试"
+        ) : (
+          "生成草稿"
+        )}
       </button>
     </div>
   );
@@ -216,6 +253,16 @@ export function Editor({
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const zhRef = useRef<HTMLTextAreaElement>(null);
+  const jaRef = useRef<HTMLTextAreaElement>(null);
+  const { onScrollA: onZhScroll, onScrollB: onJaScroll } = useScrollSync(zhRef, jaRef);
+  const [justTranslated, setJustTranslated] = useState(0);
+  useEffect(() => {
+    if (!justTranslated) return;
+    const id = setTimeout(() => setJustTranslated(0), 1200);
+    return () => clearTimeout(id);
+  }, [justTranslated]);
 
   const failed = checks.filter((c) => !c.passed);
   const disabled = closed || busy !== null || !actor.trim();
@@ -251,6 +298,7 @@ export function Editor({
     setJaManual(false);
     setJaUnlocked(false);
     setConfirming(false);
+    setJustTranslated(Date.now());
   };
 
   const requestTranslate = () => {
@@ -362,6 +410,8 @@ export function Editor({
           </span>
           <textarea
             aria-labelledby="pane-zh"
+            ref={zhRef}
+            onScroll={onZhScroll}
             value={zh}
             onChange={(e) => {
               setZh(e.target.value);
@@ -401,10 +451,14 @@ export function Editor({
           </span>
           <textarea
             aria-labelledby="pane-ja"
+            ref={jaRef}
+            onScroll={onJaScroll}
             lang="ja"
             value={ja}
             readOnly={!jaUnlocked}
-            className={jaUnlocked ? undefined : "locked"}
+            className={[jaUnlocked ? "" : "locked", justTranslated ? "just-updated" : ""]
+              .filter(Boolean)
+              .join(" ")}
             onClick={() => !jaUnlocked && setDialog("unlock-ja")}
             onKeyDown={(e) => {
               if (!jaUnlocked && e.key.length === 1) setDialog("unlock-ja");

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DraftCheck } from "../api/client";
 import { type Call, mockApi } from "../test/api";
 import { DRAFT, detail } from "../test/fixtures";
@@ -35,6 +35,7 @@ const posts = (calls: Call[], suffix: string) =>
 describe("Workspace", () => {
   afterEach(() => {
     window.location.hash = "";
+    vi.useRealTimers();
   });
 
   it("三栏：案件信息、线程（标出不可见字符）、编辑器；底部有案件栏", async () => {
@@ -137,5 +138,40 @@ describe("Workspace", () => {
     render(<Workspace caseId="SIM-1" actor="客服A" />);
     fireEvent.click(await screen.findByRole("button", { name: "生成草稿" }));
     await waitFor(() => expect(posts(calls, "/drafts")).toHaveLength(1));
+  });
+
+  it("自动起草进行中时显示进度，草稿完成后自动出现，不需要手动操作", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let ready = false;
+    const running = { state: "running", since: "2026-11-27T09:00:00+09:00" } as const;
+    mockApi(
+      routes({
+        "GET /v1/cases/:id": () => (ready ? detail() : detail({ draft: null, drafting: running })),
+      }),
+    );
+    render(<Workspace caseId="SIM-1" actor="客服A" />);
+
+    expect(await screen.findByText("正在自动分析和起草…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成草稿" })).not.toBeInTheDocument();
+    ready = true;
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(await screen.findByRole("textbox", { name: /中文（编辑这里）/ })).toHaveValue(
+      DRAFT.back_translation_zh,
+    );
+  });
+
+  it("自动起草失败时显示原因，可以重试", async () => {
+    const failed = {
+      state: "failed",
+      since: "2026-11-27T09:00:00+09:00",
+      error: "起草服务调用失败",
+    } as const;
+    mockApi(routes({ "GET /v1/cases/:id": () => detail({ draft: null, drafting: failed }) }));
+    render(<Workspace caseId="SIM-1" actor="客服A" />);
+
+    expect(await screen.findByText(/自动起草失败：起草服务调用失败/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });

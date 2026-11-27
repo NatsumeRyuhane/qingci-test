@@ -136,7 +136,15 @@ export function Inbox() {
                   <span className="case-row-head">
                     <span className="case-id">{item.id}</span>
                     <StatusBadge status={item.status} />
-                    <RouteBadge route={item.route} />
+                    {item.drafting && item.drafting.state !== "failed" ? (
+                      <span className="badge badge-muted">
+                        <span className="spinner" aria-hidden="true" /> 起草中
+                      </span>
+                    ) : item.drafting?.state === "failed" ? (
+                      <span className="badge badge-route-escalate">起草失败</span>
+                    ) : (
+                      <RouteBadge route={item.route} />
+                    )}
                     <span className="meta">{label(CATEGORY_LABELS, item.category)}</span>
                     {item.urgency && (
                       <span className={`meta urgency-${item.urgency}`}>
