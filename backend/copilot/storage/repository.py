@@ -14,9 +14,9 @@ from typing import Protocol
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
-from copilot.contracts import Case, CaseAnalysis, Draft, Feedback
+from copilot.contracts import Case, CaseAnalysis, Draft, Feedback, OutboundMail
 from copilot.contracts.enums import CaseStatus, InquiryCategory, Route
-from copilot.storage.tables import AnalysisRow, CaseRow, DraftRow, FeedbackRow
+from copilot.storage.tables import AnalysisRow, CaseRow, DraftRow, FeedbackRow, OutboxRow
 
 Clock = Callable[[], datetime]
 
@@ -38,7 +38,7 @@ class Page[T]:
 
 
 class Repository(Protocol):
-    """案件、分析、草稿与反馈的存储。"""
+    """案件、分析、草稿、反馈与发件箱的存储。"""
 
     def save_case(self, case: Case) -> None:
         """新建或整体替换一个案件，并把它的更新时间设为现在。"""
@@ -74,6 +74,14 @@ class Repository(Protocol):
 
     def list_feedback(self, *, draft_id: str | None = None) -> list[Feedback]:
         """按写入顺序列出反馈，可只列一封草稿的。"""
+        ...
+
+    def add_outbound_mail(self, mail: OutboundMail) -> None: ...
+
+    def list_outbound_mail(
+        self, *, case_id: str | None = None, limit: int = 50, offset: int = 0
+    ) -> Page[OutboundMail]:
+        """发件箱，最新发出的在前，可只列一个案件的。"""
         ...
 
 
@@ -207,3 +215,32 @@ class SqlRepository:
         if draft_id is not None:
             query = query.where(FeedbackRow.draft_id == draft_id)
         return [Feedback.model_validate(row.doc) for row in self._session.scalars(query)]
+
+    # --- 发件箱 ---
+
+    def add_outbound_mail(self, mail: OutboundMail) -> None:
+        self._require_case(mail.case_id)
+        if self.get_draft(mail.draft_id) is None:
+            raise NotFoundError(f"草稿不存在：{mail.draft_id!r}")
+        self._session.add(
+            OutboxRow(
+                id=mail.id,
+                case_id=mail.case_id,
+                draft_id=mail.draft_id,
+                sent_at=mail.sent_at,
+                doc=mail.model_dump(mode="json"),
+            )
+        )
+        self._session.flush()
+
+    def list_outbound_mail(
+        self, *, case_id: str | None = None, limit: int = 50, offset: int = 0
+    ) -> Page[OutboundMail]:
+        query = select(OutboxRow)
+        if case_id is not None:
+            query = query.where(OutboxRow.case_id == case_id)
+        total = self._session.scalar(select(func.count()).select_from(query.subquery())) or 0
+        rows = self._session.scalars(
+            query.order_by(OutboxRow.row_id.desc()).limit(limit).offset(offset)
+        )
+        return Page(items=[OutboundMail.model_validate(row.doc) for row in rows], total=total)

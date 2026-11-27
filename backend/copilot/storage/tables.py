@@ -53,3 +53,15 @@ class FeedbackRow(Base):
     action: Mapped[str] = mapped_column(String(32), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     doc: Mapped[dict[str, object]] = mapped_column(JSON)
+
+
+class OutboxRow(Base):
+    __tablename__ = "outbox"
+
+    row_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    """写入顺序，发件箱按它倒序排列。"""
+    id: Mapped[str] = mapped_column(String(64), unique=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("drafts.id", ondelete="CASCADE"))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    doc: Mapped[dict[str, object]] = mapped_column(JSON)

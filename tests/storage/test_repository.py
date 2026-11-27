@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 
-from copilot.contracts import Case, CaseAnalysis, Draft, Feedback
+from copilot.contracts import Case, CaseAnalysis, Draft, Feedback, OutboundMail
 from copilot.contracts.enums import (
     CaseStatus,
     FeedbackAction,
@@ -187,6 +187,33 @@ def test_feedback_round_trip(repo: Repository) -> None:
     assert repo.list_feedback(draft_id=two.id) == [edited]
 
 
+def mail(case_id: str, draft_id: str) -> OutboundMail:
+    return OutboundMail(
+        case_id=case_id,
+        message_seq=2,
+        draft_id=draft_id,
+        body_ja="【合成データ】送信済み",
+        sent_by="客服A",
+        sent_at=T0,
+    )
+
+
+def test_outbox_lists_newest_first_and_filters_by_case(repo: Repository) -> None:
+    repo.save_case(case("SYN-1"))
+    repo.save_case(case("SYN-2"))
+    d1, d2 = draft("SYN-1"), draft("SYN-2")
+    repo.add_draft(d1)
+    repo.add_draft(d2)
+    first, second = mail("SYN-1", d1.id), mail("SYN-2", d2.id)
+    repo.add_outbound_mail(first)
+    repo.add_outbound_mail(second)
+
+    page = repo.list_outbound_mail()
+    assert page.items == [second, first] and page.total == 2
+    assert repo.list_outbound_mail(case_id="SYN-1").items == [first]
+    assert repo.list_outbound_mail(limit=1, offset=1).items == [first]
+
+
 def test_references_to_missing_objects_are_rejected(repo: Repository) -> None:
     with pytest.raises(NotFoundError):
         repo.add_analysis(analysis("SYN-404"))
@@ -194,6 +221,11 @@ def test_references_to_missing_objects_are_rejected(repo: Repository) -> None:
         repo.add_draft(draft("SYN-404"))
     with pytest.raises(NotFoundError):
         repo.add_feedback(feedback("no-such-draft"))
+    with pytest.raises(NotFoundError):
+        repo.add_outbound_mail(mail("SYN-404", "no-such-draft"))
+    repo.save_case(case("SYN-1"))
+    with pytest.raises(NotFoundError):
+        repo.add_outbound_mail(mail("SYN-1", "no-such-draft"))
 
 
 def test_session_scope_rolls_back_on_error(database_url: str) -> None:
