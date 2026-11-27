@@ -13,6 +13,8 @@ db_app = typer.Typer(help="数据库管理。", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 contracts_app = typer.Typer(help="共享数据契约（#3）。", no_args_is_help=True)
 app.add_typer(contracts_app, name="contracts")
+kb_app = typer.Typer(help="知识库（#5）。", no_args_is_help=True)
+app.add_typer(kb_app, name="kb")
 
 
 @app.callback()
@@ -161,3 +163,49 @@ def split_command(
     if stats:
         for line in split_stats(cases, manifest):
             typer.echo(line)
+
+
+@kb_app.command("build")
+def kb_build(
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option("--split", help="切分结果（copilot split）。默认 data/processed/split.json。"),
+    ] = None,
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out-dir", help="输出目录。默认 data/processed/kb。"),
+    ] = None,
+) -> None:
+    """只用 train 线程构建模板候选，按覆盖率排列（#5，D-012）。重复运行保持模板 ID 不变。"""
+    from copilot.eval import DEFAULT_MANIFEST, StaleSplitError, read_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.kb.build import (
+        CANDIDATES_FILE,
+        DEFAULT_KB_DIR,
+        build_candidates,
+        read_candidates,
+        write_candidates,
+    )
+
+    source = cases_path or DEFAULT_OUTPUT
+    manifest_path = split_path or DEFAULT_MANIFEST
+    for path, hint in ((source, "copilot ingest"), (manifest_path, "copilot split")):
+        if not path.is_file():
+            typer.echo(f"找不到 {path}（先运行 {hint}）", err=True)
+            raise typer.Exit(1)
+    target = (out_dir or DEFAULT_KB_DIR) / CANDIDATES_FILE
+    try:
+        candidates, report = build_candidates(
+            read_cases(source), read_manifest(manifest_path), read_candidates(target)
+        )
+    except StaleSplitError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    write_candidates(candidates, target)
+    typer.echo(f"已写入 {target}：{len(candidates)} 个模板候选")
+    for line in report.lines():
+        typer.echo(line)

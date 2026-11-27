@@ -169,6 +169,7 @@ cp .env.example .env               # 填写 LLM_* 等变量，说明见文件内
 uv run copilot db upgrade          # 创建或迁移数据库（DATABASE_URL）
 uv run copilot ingest --stats      # 清洗样本表格（SAMPLE_DATA_PATH），写出 data/interim/cases.jsonl
 uv run copilot split --stats       # 切分为 train/dev/test（D-012），写出 data/processed/split.json
+uv run copilot kb build            # 只用 train 构建模板候选（#5），写出 data/processed/kb/candidates.jsonl
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
@@ -210,7 +211,7 @@ README.md            项目概览与上手指南
 .env.example         应用读取的全部环境变量，不含值
 pyproject.toml       后端的包定义与工具配置（uv.lock、requirements*.txt 为锁定的依赖）
 alembic.ini          仅供开发时生成数据库迁移
-backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
+backend/copilot/     后端：api/（REST API）、contracts/（共享数据契约）、ingest/（导入与清洗）、eval/（切分与评测）、kb/（知识库）、llm/（LLM 客户端）、storage/（数据库与迁移）、config.py、cli.py
 tests/               后端测试（只用合成数据；tests/live/ 默认不运行；fixtures/ 为合成测试数据）
 frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts 由后端 OpenAPI 生成
 scripts/             辅助脚本（导出 requirements、生成 API 类型）
