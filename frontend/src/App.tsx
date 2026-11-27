@@ -78,12 +78,6 @@ export function App() {
           )}
         </span>
       </header>
-      {import.meta.env.MODE === "demo" && (
-        <p className="notice notice-warn demo-banner">
-          演示模式：后端在浏览器中模拟，数据全部是合成的，刷新页面后恢复初始状态。不调用 LLM，
-          草稿是预先写好的示例。
-        </p>
-      )}
       <main>
         {route.page === "inbox" && <Inbox />}
         {route.page === "case" && (

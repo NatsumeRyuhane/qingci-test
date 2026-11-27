@@ -105,9 +105,7 @@ docs/              需求、数据概况、决策记录、设计提案
    投递一封玩家来信，它会出现在收件箱中；批准后回复进入发件箱，不会真正发出任何邮件。
    `auto_send` 的草稿也需要客服点击发送。
 
-   不想配置 LLM 时：`.env` 中设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容；
-   或者只运行前端的演示模式 `(cd frontend && pnpm dev:demo)`，后端在浏览器中模拟，数据全部是
-   合成的。`pnpm build:demo` 生成可以静态托管的版本（`frontend/dist-demo/`）。
+   不想配置 LLM 时：`.env` 中设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容。
 
    备用路线下去掉 `uv run`（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
 
