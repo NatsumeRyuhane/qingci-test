@@ -137,7 +137,7 @@ def test_calls_share_one_event_loop(url: str, tmp_path: Path) -> None:
 
     fake.complete_text = recording  # type: ignore[method-assign]
     fake.queue(LLMTask.BACKTRANSLATE, "一", "二")
-    fake.queue(LLMTask.DRAFT, "三")
+    fake.queue(LLMTask.TRANSLATE, "三")
     drafter = _drafter(url, tmp_path, fake)
 
     drafter.backtranslate("x")

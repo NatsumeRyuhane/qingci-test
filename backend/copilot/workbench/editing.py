@@ -1,7 +1,7 @@
 """客服编辑回复（#8）：客服用中文工作，LLM 把中文译成日语；编辑后的日语重新自检。
 
-- **中文 → 日语**（`translate_reply`）：使用起草模型（`LLM_MODEL_DRAFT`），按风格指南的固定问候语、
-  结语和声明组装，术语按术语表翻译。中文是客服写的，但同样放进分隔标记作为数据。
+- **中文 → 日语**（`translate_reply`）：任务 `translate`（默认用起草模型，并关闭推理），按风格
+  指南的固定问候语、结语和声明组装，术语按术语表翻译。中文是客服写的，但同样放进分隔标记作为数据。
 - **自检**（`check_edited`）：只在代码中运行、不调用 LLM，所以客服直接改过的日语也能检查：
   必需结构、语体、不允许的承诺、占位符、内容安全。整段答复都按“新增文字”检查（客服的修改
   不区分模板原文）。不检查引用：客服自己写的说法本来就没有引用。模板有效期与正文无关，
@@ -60,7 +60,7 @@ async def translate_reply(
         {"role": "system", "content": system},
         {"role": "user", "content": data_block("reply_zh", body_zh)},
     ]
-    return (await llm.complete_text(LLMTask.DRAFT, messages)).strip()
+    return (await llm.complete_text(LLMTask.TRANSLATE, messages)).strip()
 
 
 def _core(body_ja: str, guide: StyleGuide) -> str:

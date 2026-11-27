@@ -20,11 +20,16 @@ class LLMTask(StrEnum):
     JUDGE = "judge"
     ANNOTATE = "annotate"
     """知识库模板的标注（#5）：中文说明、意图、风险等。离线批处理，调用次数少，可以用较强的模型。"""
+    TRANSLATE = "translate"
+    """工作台中把客服编辑的中文回复译成日语（#8）。没有单独配置模型时使用起草模型。"""
 
 
 JsonMode = Literal["json_schema", "json_object", "none"]
 ServiceTier = Literal["default", "flex", "priority"]
 """请求的服务等级（例如 OpenRouter 的 `service_tier`）。flex 更便宜、优先级更低。"""
+ReasoningMode = Literal["default", "off", "low", "medium", "high"]
+"""推理（思考）模型的推理强度（OpenRouter 的 `reasoning` 参数）。`default` 不发送参数，
+由模型决定。"""
 
 
 class MissingConfigError(RuntimeError):
@@ -57,18 +62,30 @@ class Settings(BaseSettings):
     llm_model_backtranslate: str | None = None
     llm_model_judge: str | None = None
     llm_model_annotate: str | None = None
+    llm_model_translate: str | None = None
 
     llm_base_url_analyze: str | None = None
     llm_base_url_draft: str | None = None
     llm_base_url_backtranslate: str | None = None
     llm_base_url_judge: str | None = None
     llm_base_url_annotate: str | None = None
+    llm_base_url_translate: str | None = None
 
     llm_api_key_analyze: SecretStr | None = None
     llm_api_key_draft: SecretStr | None = None
     llm_api_key_backtranslate: SecretStr | None = None
     llm_api_key_judge: SecretStr | None = None
     llm_api_key_annotate: SecretStr | None = None
+    llm_api_key_translate: SecretStr | None = None
+
+    llm_reasoning_analyze: ReasoningMode = "default"
+    llm_reasoning_draft: ReasoningMode = "default"
+    llm_reasoning_backtranslate: ReasoningMode = "default"
+    llm_reasoning_judge: ReasoningMode = "default"
+    llm_reasoning_annotate: ReasoningMode = "default"
+    llm_reasoning_translate: ReasoningMode = "off"
+    """翻译不需要推理。推理模型（例如 DeepSeek v4.1 Flash）在翻译时会把 max_tokens 全部用在推理上，
+    返回空内容（实测 8192 个 token 全是推理，60 秒后失败；关闭推理后 6 秒完成）。"""
 
     # --- Embedding：OpenAI 兼容的 /v1/embeddings ---
     embedding_base_url: str | None = None
@@ -118,8 +135,19 @@ class Settings(BaseSettings):
             f"任务 {suffix}",
             base_url=("LLM_BASE_URL", getattr(self, f"llm_base_url_{suffix}") or self.llm_base_url),
             api_key=("LLM_API_KEY", getattr(self, f"llm_api_key_{suffix}") or self.llm_api_key),
-            model=(f"LLM_MODEL_{suffix.upper()}", getattr(self, f"llm_model_{suffix}")),
+            model=(f"LLM_MODEL_{suffix.upper()}", self._llm_model(task)),
         )
+
+    def _llm_model(self, task: LLMTask) -> str | None:
+        model: str | None = getattr(self, f"llm_model_{task.value}")
+        if model is None and task is LLMTask.TRANSLATE:
+            return self.llm_model_draft  # 翻译默认用起草模型
+        return model
+
+    def llm_reasoning(self, task: LLMTask) -> ReasoningMode:
+        """某个任务的推理强度。"""
+        mode: ReasoningMode = getattr(self, f"llm_reasoning_{task.value}")
+        return mode
 
     def embedding_endpoint(self) -> Endpoint:
         """embedding 使用的端点。没有单独配置端点和 key 时，回落到全局的 LLM 端点。"""
