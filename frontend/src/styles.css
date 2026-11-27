@@ -48,6 +48,31 @@
   }
 }
 
+/* 宿主页面显式指定深色主题时（例如嵌入在预览页中）。 */
+:root[data-theme="dark"] {
+  --bg: #14171d;
+  --surface: #1d222b;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --border: #343b47;
+  --accent: #6f9bff;
+  --accent-text: #0d1424;
+  --ok-bg: #173826;
+  --ok-text: #9be3b8;
+  --warn-bg: #3d3014;
+  --warn-text: #f3cf7a;
+  --error-bg: #431d1d;
+  --error-text: #ffaaaa;
+  --info-bg: #1b2c4b;
+  --info-text: #a9c6ff;
+  --route-auto: #9be3b8;
+  --route-review: #a9c6ff;
+  --route-escalate: #ffaaaa;
+  --invisible-bg: #5a1a47;
+  --invisible-text: #ffc2ea;
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -520,6 +545,12 @@ td {
 
 th:first-child {
   text-align: left;
+}
+
+.demo-banner {
+  margin: 0;
+  border-radius: 0;
+  padding: 0.4rem 16px;
 }
 
 .actor input {
