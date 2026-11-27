@@ -269,3 +269,54 @@ async def test_back_translation_gets_the_glossary_and_draft_as_data() -> None:
     system, user = (m["content"] for m in fake.calls[0].messages)
     assert "ぽちゃガチョ！" in system and "不翻译" in system
     assert user.startswith("<draft>") and "＜/draft>" in user
+
+
+class _FailingEmbedder:
+    model_name = "failing-embed"
+    cache_namespace = "https://embed.example/v1|failing-embed"
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("embedding 服务不可用")
+
+
+async def test_retrieval_failure_does_not_block_auto_no_reply(guide: StyleGuide) -> None:
+    original = replied("400", RoleEvidenceKind.QUOTE_CORROBORATION)
+    retriever = SimilarCaseRetriever([original], embedder=_FailingEmbedder())  # type: ignore[arg-type]
+    outcome, fake = await run(
+        guide, case("401", content=FORM), history=[original], retriever=retriever
+    )
+    assert outcome.draft is None and outcome.no_reply_auto
+    assert outcome.proposed_status is CaseStatus.NO_REPLY_NEEDED
+    assert [c.task for c in fake.calls] == [LLMTask.ANALYZE]
+
+
+async def test_retrieval_failure_raises_when_draft_needed(guide: StyleGuide) -> None:
+    original = replied("400", RoleEvidenceKind.QUOTE_CORROBORATION)
+    retriever = SimilarCaseRetriever([original], embedder=_FailingEmbedder())  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="embedding 服务不可用"):
+        await run(guide, THANKS_CASE, draft=draft_reply(), retriever=retriever)
+
+
+async def test_candidate_template_ids_capped_to_prompt_limit(guide: StyleGuide) -> None:
+    from copilot.draft.compose import MAX_CANDIDATES
+
+    many_templates = [
+        template(f"tpl-syn-{i:02d}", intent_id="syn_thanks", body=THANKS_BODY)
+        for i in range(MAX_CANDIDATES + 3)
+    ]
+    snap = KnowledgeSnapshot(
+        intents=[intent("syn_thanks", risk=RiskLevel.LOW, auto_send=False)],
+        templates=many_templates,
+        policies=[forbidden(), trigger()],
+    )
+    fake = FakeLLMClient()
+    fake.queue(LLMTask.ANALYZE, analysis_reply())
+    fake.queue(
+        LLMTask.DRAFT,
+        draft_reply(template_id="tpl-syn-00"),
+    )
+    fake.queue(LLMTask.BACKTRANSLATE, "【合成】回译")
+    outcome = await draft_case(
+        THANKS_CASE, snapshot=snap, guide=guide, llm=fake, params=PARAMS, now=NOW, created_at=KNOWN
+    )
+    assert len(outcome.candidate_template_ids) == MAX_CANDIDATES

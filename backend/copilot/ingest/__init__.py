@@ -11,12 +11,13 @@ from copilot.ingest.pipeline import (
     thread_order,
     write_cases,
 )
-from copilot.ingest.sheet import SheetFormatError, SheetRow, read_sheet
+from copilot.ingest.sheet import SheetFormatError, SheetResourceLimitError, SheetRow, read_sheet
 
 __all__ = [
     "DEFAULT_OUTPUT",
     "IngestStats",
     "SheetFormatError",
+    "SheetResourceLimitError",
     "SheetRow",
     "build_cases",
     "read_cases",

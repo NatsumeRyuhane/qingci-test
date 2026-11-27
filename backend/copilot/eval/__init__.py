@@ -1,7 +1,7 @@
 """评测（#7）：数据切分、历史重放、LLM 评审、指标汇总、批量评测与安全攻击重放。"""
 
 # split 必须在依赖 kb.labels 的模块之前导入，避免与 copilot.kb.labels 循环导入。
-from copilot.eval.judge import JudgeVerdict, build_judge_messages, judge_draft
+from copilot.eval.judge import JudgeScores, JudgeVerdict, build_judge_messages, judge_draft
 from copilot.eval.metrics import (
     CaseEvalRecord,
     LatencySummary,
@@ -43,6 +43,7 @@ __all__ = [
     "DEFAULT_REPLAY_NOW",
     "CaseEvalRecord",
     "EvalRunConfig",
+    "JudgeScores",
     "JudgeVerdict",
     "LatencySummary",
     "NoReplyEvalItem",

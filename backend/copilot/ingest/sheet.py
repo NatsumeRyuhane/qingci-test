@@ -35,6 +35,10 @@ class SheetFormatError(ValueError):
     """表格结构与预期不符。"""
 
 
+class SheetResourceLimitError(SheetFormatError):
+    """表格超出大小、文件数、行数或字段长度等资源上限（#18）。"""
+
+
 @dataclass(frozen=True)
 class SheetRow:
     thread_id: str
@@ -89,7 +93,7 @@ def _as_id(value: object, row: int) -> str:
     if not text:
         raise SheetFormatError(f"第 {row} 行的 メールID 为空")
     if len(text) > MAX_ID_CHARS:
-        raise SheetFormatError(f"第 {row} 行的 メールID 超过 {MAX_ID_CHARS} 字符")
+        raise SheetResourceLimitError(f"第 {row} 行的 メールID 超过 {MAX_ID_CHARS} 字符")
     if not is_valid_case_id(text):
         raise SheetFormatError(
             f"第 {row} 行的 メールID 含有不允许的字符（只允许 ASCII 字母、数字、_ 和 -）："
@@ -112,7 +116,7 @@ def _check_archive_metadata(path: Path) -> None:
     中央目录大小，防止包含海量空文件的压缩包耗尽内存。不支持 zip64（xlsx 用不到）。"""
     size = path.stat().st_size
     if size > MAX_ARCHIVE_BYTES:
-        raise SheetFormatError(f"表格文件共 {size} 字节，超过上限 {MAX_ARCHIVE_BYTES} 字节")
+        raise SheetResourceLimitError(f"表格文件共 {size} 字节，超过上限 {MAX_ARCHIVE_BYTES} 字节")
     with path.open("rb") as f:
         # 多读 zip64 定位记录的长度：注释最长时，定位记录也一定在读到的范围内。
         tail_size = min(size, _ZIP64_LOCATOR_SIZE + _EOCD_SIZE + _MAX_COMMENT)
@@ -128,9 +132,9 @@ def _check_archive_metadata(path: Path) -> None:
     if is_zip64 or entries == 0xFFFF or directory_size == 0xFFFFFFFF:
         raise SheetFormatError("不支持 zip64 格式的表格")
     if entries > MAX_MEMBERS:
-        raise SheetFormatError(f"表格中有 {entries} 个文件，超过上限 {MAX_MEMBERS}")
+        raise SheetResourceLimitError(f"表格中有 {entries} 个文件，超过上限 {MAX_MEMBERS}")
     if directory_size > MAX_CENTRAL_DIRECTORY_BYTES:
-        raise SheetFormatError(f"表格的文件索引超过 {MAX_CENTRAL_DIRECTORY_BYTES} 字节")
+        raise SheetResourceLimitError(f"表格的文件索引超过 {MAX_CENTRAL_DIRECTORY_BYTES} 字节")
 
 
 def _check_archive(path: Path) -> None:
@@ -139,7 +143,9 @@ def _check_archive(path: Path) -> None:
     with zipfile.ZipFile(path) as archive:
         total = sum(info.file_size for info in archive.infolist())
     if total > MAX_UNCOMPRESSED_BYTES:
-        raise SheetFormatError(f"表格解压后共 {total} 字节，超过上限 {MAX_UNCOMPRESSED_BYTES} 字节")
+        raise SheetResourceLimitError(
+            f"表格解压后共 {total} 字节，超过上限 {MAX_UNCOMPRESSED_BYTES} 字节"
+        )
 
 
 def read_sheet(path: Path) -> list[SheetRow]:
@@ -180,10 +186,10 @@ def _read_sheet(path: Path) -> list[SheetRow]:
         result: list[SheetRow] = []
         for index, values in enumerate(rows, start=2):
             if index > MAX_ROWS:
-                raise SheetFormatError(f"表格超过 {MAX_ROWS} 行")
+                raise SheetResourceLimitError(f"表格超过 {MAX_ROWS} 行")
             thread_id, seq, body = (*values, None, None, None)[:3]
             if body is not None and len(str(body)) > MAX_BODY_CHARS:
-                raise SheetFormatError(f"第 {index} 行的 本文 超过 {MAX_BODY_CHARS} 字符")
+                raise SheetResourceLimitError(f"第 {index} 行的 本文 超过 {MAX_BODY_CHARS} 字符")
             if thread_id is None and seq is None and body is None:
                 continue
             if thread_id is None or seq is None:

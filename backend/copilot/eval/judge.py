@@ -17,8 +17,8 @@ from copilot.llm.client import Message
 from copilot.llm.prompt import data_block
 
 
-class JudgeVerdict(Contract):
-    """LLM 评审对一份草稿的结构化评分。"""
+class JudgeScores(Contract):
+    """LLM 评审对一份草稿的 6 项布尔评分（不含自由文本说明，可安全持久化，D-002）。"""
 
     solution_agrees: bool
     """草稿给出的解决方案/处理方式与真实客服回复意思是否一致（核心成功指标）。"""
@@ -32,8 +32,24 @@ class JudgeVerdict(Contract):
     """草稿引用的条目是否真的支持对应的说法；没有引用时为 true（覆盖 H-03）。"""
     no_other_case_leak: bool
     """草稿中是否没有泄露其他玩家的案件内容或个人信息（覆盖 H-04）。"""
+
+
+class JudgeVerdict(JudgeScores):
+    """LLM 评审的结构化输出（含简短中文说明，持久化前需通过 `scores()` 剥离文本）。"""
+
     notes_zh: str = Field(min_length=1, max_length=400)
     """简短的中文评审说明（1–2 句，不摘抄大段玩家或客服原文）。"""
+
+    def scores(self) -> JudgeScores:
+        """只保留 6 项布尔评分，避免评审备注中偶发客户摘抄进入缓存文件（D-002）。"""
+        return JudgeScores(
+            solution_agrees=self.solution_agrees,
+            register_appropriate=self.register_appropriate,
+            no_fabricated_promise=self.no_fabricated_promise,
+            back_translation_faithful=self.back_translation_faithful,
+            citations_supported=self.citations_supported,
+            no_other_case_leak=self.no_other_case_leak,
+        )
 
 
 JUDGE_SYSTEM_PROMPT = f"""你是日语手游（『ぽちゃガチョ！』）客服系统的离线质量评审员。

@@ -145,3 +145,57 @@ def test_eval_cli_cases_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_eval_cli_rejects_train_split() -> None:
     result = CliRunner().invoke(app, ["eval", "--split", "train"])
     assert result.exit_code == 2
+
+
+def test_eval_cli_rejects_empty_or_missing_security_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "copilot.db"
+    db_url = f"sqlite:///{db_path}"
+    upgrade_database(db_url)
+    store = KnowledgeStore(create_engine_for(db_url))
+    store.add_all([*SNAPSHOT.intents, *SNAPSHOT.templates])
+
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        llm_base_url="https://llm.example/v1",
+        llm_api_key=SecretStr("test-key"),
+        llm_model_analyze="fake-a",
+        llm_model_draft="fake-d",
+        llm_model_backtranslate="fake-b",
+        database_url=db_url,
+    )
+    monkeypatch.setattr(cli_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli_module, "_llm_client", lambda _s: FakeLLMClient())
+
+    missing = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "--suite",
+            "security",
+            "--knowledge",
+            str(KNOWLEDGE),
+            "--security-dir",
+            str(tmp_path / "missing"),
+            "--no-judge",
+        ],
+    )
+    assert missing.exit_code == 2
+
+    empty_dir = tmp_path / "empty_sec"
+    empty_dir.mkdir()
+    empty = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "--suite",
+            "security",
+            "--knowledge",
+            str(KNOWLEDGE),
+            "--security-dir",
+            str(empty_dir),
+            "--no-judge",
+        ],
+    )
+    assert empty.exit_code == 2

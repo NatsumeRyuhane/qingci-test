@@ -92,3 +92,83 @@ async def test_security_replay_smoke_with_fake_llm() -> None:
     md = render_security_markdown(results)
     assert "安全攻击目录端到端重放报告" in md
     assert "ATK-20" in md
+
+
+async def test_security_separates_errors_and_unchecked_judge_from_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import copilot.eval.security as sec_mod
+    from copilot.eval.security import AttackFixture
+    from copilot.ingest.sheet import SheetFormatError
+
+    knowledge = load_knowledge(KNOWLEDGE)
+    fixtures = load_attack_fixtures(DEFAULT_SECURITY_DIR)
+    atk20 = next(f for f in fixtures if f.attack_id == "ATK-20")
+    atk40 = next(f for f in fixtures if f.attack_id == "ATK-40")
+
+    # 1. drafting 异常记为 error，不计入成功评估分母
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("敏感错误正文不应泄露")
+
+    monkeypatch.setattr(sec_mod, "draft_case", _boom)
+    err_results = await run_security_replay(
+        [atk20],
+        snapshot=SNAPSHOT,
+        knowledge=knowledge,
+        llm=FakeLLMClient(),
+        params=DraftParams(analyze_model="fake", draft_model="fake"),
+        run_judge=False,
+    )
+    assert err_results[0].error == "RuntimeError"
+    assert err_results[0].first_blocking_layer == "error"
+    assert "敏感错误正文不应泄露" not in err_results[0].detail_zh
+    err_md = render_security_markdown(err_results)
+    assert "运行异常 1" in err_md
+    assert "0/0 (—)" in err_md
+    assert "| 异常 |" in err_md
+
+    # 2. judge 异常记为未核查，不计为已拦截
+    monkeypatch.undo()
+    fake = FakeLLMClient()
+    fake.queue(LLMTask.ANALYZE, analysis_reply(injection_suspected=False))
+    fake.queue(LLMTask.DRAFT, draft_reply(confidence=0.70))
+    fake.queue(LLMTask.BACKTRANSLATE, "【合成】回译")
+    # 未排入 JUDGE 回复使 judge_draft 抛出 AssertionError
+    unchecked_results = await run_security_replay(
+        [atk40],
+        snapshot=SNAPSHOT,
+        knowledge=knowledge,
+        llm=fake,
+        params=DraftParams(analyze_model="fake", draft_model="fake"),
+        run_judge=True,
+    )
+    assert unchecked_results[0].judge_error == "AssertionError"
+    assert unchecked_results[0].succeeded is False
+    unchecked_md = render_security_markdown(unchecked_results)
+    assert "评审未完成 1" in unchecked_md
+    assert "0/0 (—)" in unchecked_md
+    assert "| 未核查 |" in unchecked_md
+
+    # 3. xlsx_bomb 遇非资源上限的格式异常时不伪装为 L1 拦截
+    def _parse_err(*_args: object, **_kwargs: object) -> object:
+        raise SheetFormatError("普通格式错误")
+
+    monkeypatch.setattr(sec_mod, "read_sheet", _parse_err)
+    bomb_fix = AttackFixture(
+        notice="SYNTHETIC",
+        attack_id="ATK-61",
+        title_zh="【合成】压缩炸弹",
+        expected_layers=["L1"],
+        kind="resource",
+        scenario="xlsx_bomb",
+    )
+    bomb_res = await run_security_replay(
+        [bomb_fix],
+        snapshot=SNAPSHOT,
+        knowledge=knowledge,
+        llm=FakeLLMClient(),
+        params=DraftParams(analyze_model="fake", draft_model="fake"),
+        run_judge=False,
+    )
+    assert bomb_res[0].error == "SheetFormatError"
+    assert bomb_res[0].first_blocking_layer == "error"

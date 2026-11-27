@@ -36,7 +36,7 @@ from copilot.contracts.base import Contract
 from copilot.draft.agent import DEFAULT_MAX_STEPS, compose_with_tools
 from copilot.draft.analyze import analyze
 from copilot.draft.checks import CheckContext, run_checks
-from copilot.draft.compose import back_translate, compose, provided_entries
+from copilot.draft.compose import MAX_CANDIDATES, back_translate, compose, provided_entries
 from copilot.draft.retrieval import KnowledgeSnapshot, KnowledgeView, build_view
 from copilot.draft.route import RouteInput, decide_no_reply, route
 from copilot.draft.similar import (
@@ -159,10 +159,16 @@ async def draft_case(
     )
 
     # 相似案件检索不依赖分析结果，与分析并行以降低延迟（#7）。
-    async def _retrieve_similar() -> list[SimilarCaseRef]:
-        return await retriever.similar_to(case) if retriever is not None else []
+    # 隔离检索异常，避免阻塞自动“不回复”分流；仅在确实需要起草时才向上抛出检索错误。
+    async def _retrieve_similar() -> list[SimilarCaseRef] | Exception:
+        if retriever is None:
+            return []
+        try:
+            return await retriever.similar_to(case)
+        except Exception as exc:
+            return exc
 
-    analysis, similar_refs = await asyncio.gather(
+    analysis, similar_res = await asyncio.gather(
         analyze(case, view, llm, model=params.analyze_model, created_at=created_at),
         _retrieve_similar(),
     )
@@ -177,6 +183,9 @@ async def draft_case(
             proposed_status=CaseStatus.NO_REPLY_NEEDED,
             created_at=created_at,
         )
+    if isinstance(similar_res, Exception):
+        raise similar_res
+    similar_refs = similar_res
 
     draft_view = (
         await _filter_static_templates(view, case, retriever, params.template_top_k)
@@ -286,6 +295,6 @@ async def draft_case(
         no_reply=decision.proposal if decision else None,
         no_reply_reason_zh=decision.reason_zh if decision else None,
         proposed_status=status,
-        candidate_template_ids=[c.template.id for c in candidates],
+        candidate_template_ids=[c.template.id for c in candidates[:MAX_CANDIDATES]],
         created_at=created_at,
     )

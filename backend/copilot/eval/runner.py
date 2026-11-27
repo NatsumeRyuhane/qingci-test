@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from copilot.contracts import (
     Case,
@@ -29,6 +30,7 @@ from copilot.draft.timectx import build_time_context, known_at_for
 from copilot.eval.judge import judge_draft
 from copilot.eval.metrics import CaseEvalRecord, append_record, read_records
 from copilot.eval.replay import NoReplyEvalItem, ReplyEvalItem, replay_corpus, replay_history
+from copilot.ingest.pipeline import thread_order
 from copilot.ingest.timestamps import JST
 from copilot.kb.knowledge import StyleGuide
 from copilot.llm import LLMClient, OpenAICompatibleClient
@@ -48,12 +50,18 @@ class EvalRunConfig:
     run_judge: bool = True
     cache_path: Path | None = None
     """JSONL 缓存文件。存在时只复用同配置指纹的已完成样本，每完成一条立即追加写入。"""
+    service_tier: str | None = None
+    backtranslate_model: str | None = None
+    judge_model: str | None = None
 
     def fingerprint(self) -> str:
         payload = json.dumps(
             {
                 "analyze_model": self.params.analyze_model,
                 "draft_model": self.params.draft_model,
+                "backtranslate_model": self.backtranslate_model,
+                "judge_model": self.judge_model if self.run_judge else None,
+                "service_tier": self.service_tier,
                 "min_confidence": self.params.min_confidence,
                 "lookback_days": self.params.lookback_days,
                 "tools": self.params.tools,
@@ -67,10 +75,86 @@ class EvalRunConfig:
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def _scoped_client(llm: LLMClient) -> LLMClient:
+def _snapshot_digest(snapshot: KnowledgeSnapshot) -> str:
+    h = hashlib.sha256()
+    for name, entries in (
+        ("templates", snapshot.templates),
+        ("intents", snapshot.intents),
+        ("policies", snapshot.policies),
+        ("notices", snapshot.notices),
+        ("facts", snapshot.facts),
+        ("glossary", snapshot.glossary),
+    ):
+        h.update(name.encode())
+        for item in sorted(entries, key=lambda e: (e.id, e.version)):
+            h.update(item.model_dump_json().encode())
+    return h.hexdigest()
+
+
+def _cases_digest(cases: Sequence[Case]) -> str:
+    h = hashlib.sha256()
+    for c in sorted(cases, key=lambda c: thread_order(c.id)):
+        h.update(c.model_dump_json().encode())
+    return h.hexdigest()
+
+
+def _run_fingerprint(
+    config: EvalRunConfig,
+    *,
+    snapshot: KnowledgeSnapshot,
+    guide: StyleGuide,
+    train_cases: Sequence[Case],
+    all_cases: Sequence[Case],
+    embedder: EmbeddingClient | None,
+) -> str:
+    payload = json.dumps(
+        {
+            "config": config.fingerprint(),
+            "embedding_namespace": embedder.cache_namespace if embedder is not None else None,
+            "snapshot": _snapshot_digest(snapshot),
+            "guide": hashlib.sha256(guide.model_dump_json().encode()).hexdigest(),
+            "train_cases": _cases_digest(train_cases),
+            "all_cases": _cases_digest(all_cases),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def _item_fingerprint(item: ReplyEvalItem | NoReplyEvalItem) -> str:
+    if isinstance(item, ReplyEvalItem):
+        payload = json.dumps(
+            {
+                "kind": "reply",
+                "label": item.label.model_dump(mode="json"),
+                "case": item.case.model_dump(mode="json"),
+                "actual_reply": item.actual_reply.model_dump(mode="json"),
+                "before_seq": item.before_seq,
+                "now": item.now.model_dump(mode="json"),
+            },
+            sort_keys=True,
+        )
+    else:
+        payload = json.dumps(
+            {
+                "kind": "no_reply",
+                "label": item.label.model_dump(mode="json"),
+                "case": item.case.model_dump(mode="json"),
+                "now": item.now.model_dump(mode="json"),
+            },
+            sort_keys=True,
+        )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def _scoped_client(llm: LLMClient) -> tuple[LLMClient, bool]:
+    """返回（隔离了 UsageMeter 的客户端, 是否实际隔离）。"""
     if isinstance(llm, OpenAICompatibleClient):
-        return llm.with_usage()
-    return llm
+        return llm.with_usage(), True
+    with_usage = getattr(llm, "with_usage", None)
+    if callable(with_usage):
+        return cast(LLMClient, with_usage()), True
+    return llm, False
 
 
 def _template_lookup(
@@ -93,8 +177,10 @@ def summarize_citations(citations: Sequence[Citation], snapshot: KnowledgeSnapsh
         return []
     index: dict[tuple[EntryType, str, int], str] = {}
     for t in snapshot.templates:
+        avoid = f"；不要使用：{t.avoid_when_zh}" if t.avoid_when_zh else ""
         index[(EntryType.TEMPLATE, t.id, t.version)] = (
-            f"模板《{t.title_zh}》（意图 {t.intent}）：{t.use_when_zh}"
+            f"模板《{t.title_zh}》（意图 {t.intent}）：适用条件：{t.use_when_zh}{avoid}；"
+            f"正文：\n{t.body_ja}"
         )
     for i in snapshot.intents:
         req = f"；需要索要：{'、'.join(i.required_info_zh)}" if i.required_info_zh else ""
@@ -143,9 +229,11 @@ async def evaluate_reply_item(
     template_by_ver: dict[tuple[str, int], tuple[str, RiskLevel]],
     template_latest: dict[str, tuple[str, RiskLevel]],
     fingerprint: str,
+    item_fingerprint: str | None = None,
 ) -> CaseEvalRecord:
     """评测单个历史回复样本。"""
-    case_llm = _scoped_client(llm)
+    case_llm, usage_isolated = _scoped_client(llm)
+    item_fp = item_fingerprint or _item_fingerprint(item)
     time_ctx = build_time_context(
         item.case, now=item.now, lookback_days=config.params.lookback_days
     )
@@ -153,7 +241,14 @@ async def evaluate_reply_item(
     view = build_view(snapshot, time_ctx, form=item.case.form, known_at=known_at)
 
     expected_tid = item.label.template_id
-    expected_visible = view.template(expected_tid) is not None if expected_tid is not None else None
+    if expected_tid is not None:
+        visible_tpl = view.template(expected_tid)
+        expected_visible: bool | None = visible_tpl is not None and (
+            item.label.template_version is None
+            or visible_tpl.version == item.label.template_version
+        )
+    else:
+        expected_visible = None
     if expected_tid is not None and item.label.template_version is not None:
         expected_intent, expected_risk = template_by_ver.get(
             (expected_tid, item.label.template_version),
@@ -200,8 +295,9 @@ async def evaluate_reply_item(
             expected_template_visible=expected_visible,
             expected_template_risk=expected_risk,
             config_fingerprint=fingerprint,
+            item_fingerprint=item_fp,
             wall_seconds=round(time.perf_counter() - started, 3),
-            error=f"{type(exc).__name__}: {str(exc)[:200]}",
+            error=type(exc).__name__,
         )
     wall = time.perf_counter() - started
 
@@ -243,13 +339,20 @@ async def evaluate_reply_item(
         or bool(escalation_reasons(item.case, analysis, view.escalation_triggers))
     )
 
-    step_seconds = {task.value: round(u.seconds, 3) for task, u in case_llm.usage.tasks.items()}
-    draft_total = case_llm.usage.total()
+    if usage_isolated:
+        step_seconds = {task.value: round(u.seconds, 3) for task, u in case_llm.usage.tasks.items()}
+        draft_total = case_llm.usage.total()
+        prompt_tokens = draft_total.prompt_tokens
+        completion_tokens = draft_total.completion_tokens
+    else:
+        step_seconds = {}
+        prompt_tokens = None
+        completion_tokens = None
 
     verdict = None
     judge_error: str | None = None
     if config.run_judge and draft is not None:
-        judge_llm = _scoped_client(llm)
+        judge_llm, _ = _scoped_client(llm)
         try:
             verdict = await judge_draft(
                 item.case,
@@ -259,7 +362,7 @@ async def evaluate_reply_item(
                 cited_summaries=summarize_citations(draft.citations, snapshot),
             )
         except Exception as exc:
-            judge_error = f"{type(exc).__name__}: {str(exc)[:200]}"
+            judge_error = type(exc).__name__
 
     return CaseEvalRecord(
         kind="reply",
@@ -293,13 +396,14 @@ async def evaluate_reply_item(
         high_risk=high_risk,
         fallback_reason=draft.fallback_reason if draft else None,
         tool_calls=len(draft.trace) if draft else 0,
-        judge=verdict,
+        judge=verdict.scores() if verdict is not None else None,
         judge_error=judge_error,
         config_fingerprint=fingerprint,
+        item_fingerprint=item_fp,
         wall_seconds=round(wall, 3),
         step_seconds=step_seconds,
-        prompt_tokens=draft_total.prompt_tokens,
-        completion_tokens=draft_total.completion_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
     )
 
 
@@ -315,9 +419,11 @@ async def evaluate_no_reply_item(
     embedding_cache: EmbeddingCache | None,
     config: EvalRunConfig,
     fingerprint: str,
+    item_fingerprint: str | None = None,
 ) -> CaseEvalRecord:
     """评测单个“不回复”样本。"""
-    case_llm = _scoped_client(llm)
+    case_llm, usage_isolated = _scoped_client(llm)
+    item_fp = item_fingerprint or _item_fingerprint(item)
     time_ctx = build_time_context(
         item.case, now=item.now, lookback_days=config.params.lookback_days
     )
@@ -348,12 +454,20 @@ async def evaluate_no_reply_item(
             problem_time_status=time_ctx.problem_time.status,
             expected_no_reply_reason=item.label.reason,
             config_fingerprint=fingerprint,
+            item_fingerprint=item_fp,
             wall_seconds=round(time.perf_counter() - started, 3),
-            error=f"{type(exc).__name__}: {str(exc)[:200]}",
+            error=type(exc).__name__,
         )
     wall = time.perf_counter() - started
-    step_seconds = {task.value: round(u.seconds, 3) for task, u in case_llm.usage.tasks.items()}
-    draft_total = case_llm.usage.total()
+    if usage_isolated:
+        step_seconds = {task.value: round(u.seconds, 3) for task, u in case_llm.usage.tasks.items()}
+        draft_total = case_llm.usage.total()
+        prompt_tokens = draft_total.prompt_tokens
+        completion_tokens = draft_total.completion_tokens
+    else:
+        step_seconds = {}
+        prompt_tokens = None
+        completion_tokens = None
     draft = outcome.draft
     return CaseEvalRecord(
         kind="no_reply",
@@ -369,10 +483,11 @@ async def evaluate_no_reply_item(
         expected_no_reply_reason=item.label.reason,
         predicted_no_reply_reason=outcome.no_reply.reason if outcome.no_reply else None,
         config_fingerprint=fingerprint,
+        item_fingerprint=item_fp,
         wall_seconds=round(wall, 3),
         step_seconds=step_seconds,
-        prompt_tokens=draft_total.prompt_tokens,
-        completion_tokens=draft_total.completion_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
     )
 
 
@@ -389,24 +504,33 @@ async def run_eval(
     embedding_cache: EmbeddingCache | None = None,
     config: EvalRunConfig,
 ) -> list[CaseEvalRecord]:
-    """并发运行所有待评测样本，支持同配置指纹的 JSONL 缓存续跑。"""
-    fingerprint = config.fingerprint()
-    existing: dict[tuple[str, str, str | None], CaseEvalRecord] = {}
+    """并发运行所有待评测样本，支持同配置与同输入指纹的 JSONL 缓存续跑。"""
+    fingerprint = _run_fingerprint(
+        config,
+        snapshot=snapshot,
+        guide=guide,
+        train_cases=train_cases,
+        all_cases=all_cases,
+        embedder=embedder,
+    )
+    existing: dict[tuple[str, str, str | None, str], CaseEvalRecord] = {}
     if config.cache_path is not None and config.cache_path.is_file():
         for rec in read_records(config.cache_path):
             if (
                 rec.error is None
                 and rec.judge_error is None
                 and rec.config_fingerprint == fingerprint
+                and rec.item_fingerprint is not None
             ):
-                existing[(rec.kind, rec.case_id, rec.message_id)] = rec
+                existing[(rec.kind, rec.case_id, rec.message_id, rec.item_fingerprint)] = rec
 
     template_by_ver, template_latest = _template_lookup(snapshot)
     sem = asyncio.Semaphore(max(1, config.concurrency))
     write_lock = asyncio.Lock()
 
     async def _run_reply(item: ReplyEvalItem) -> CaseEvalRecord:
-        key = ("reply", item.case.id, item.label.message_id)
+        item_fp = _item_fingerprint(item)
+        key = ("reply", item.case.id, item.label.message_id, item_fp)
         if key in existing:
             return existing[key]
         async with sem:
@@ -423,6 +547,7 @@ async def run_eval(
                 template_by_ver=template_by_ver,
                 template_latest=template_latest,
                 fingerprint=fingerprint,
+                item_fingerprint=item_fp,
             )
         if config.cache_path is not None:
             async with write_lock:
@@ -430,7 +555,8 @@ async def run_eval(
         return rec
 
     async def _run_no_reply(item: NoReplyEvalItem) -> CaseEvalRecord:
-        key = ("no_reply", item.case.id, None)
+        item_fp = _item_fingerprint(item)
+        key = ("no_reply", item.case.id, None, item_fp)
         if key in existing:
             return existing[key]
         async with sem:
@@ -445,14 +571,22 @@ async def run_eval(
                 embedding_cache=embedding_cache,
                 config=config,
                 fingerprint=fingerprint,
+                item_fingerprint=item_fp,
             )
         if config.cache_path is not None:
             async with write_lock:
                 append_record(rec, config.cache_path)
         return rec
 
-    tasks = [
-        *(_run_reply(item) for item in reply_items),
-        *(_run_no_reply(item) for item in no_reply_items),
+    task_objs = [
+        *(asyncio.create_task(_run_reply(item)) for item in reply_items),
+        *(asyncio.create_task(_run_no_reply(item)) for item in no_reply_items),
     ]
-    return list(await asyncio.gather(*tasks))
+    try:
+        return list(await asyncio.gather(*task_objs))
+    except BaseException:
+        for task in task_objs:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*task_objs, return_exceptions=True)
+        raise

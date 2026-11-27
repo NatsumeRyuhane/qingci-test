@@ -9,7 +9,6 @@
 """
 
 import asyncio
-import io
 import tempfile
 import time
 import zipfile
@@ -17,8 +16,9 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
+import openpyxl
 from pydantic import Field
 
 from copilot.contracts import (
@@ -40,10 +40,16 @@ from copilot.contracts.base import Contract, Document
 from copilot.draft.retrieval import KnowledgeSnapshot
 from copilot.draft.service import DraftParams, draft_case
 from copilot.draft.similar import SimilarCaseRetriever
-from copilot.eval.judge import JudgeVerdict, judge_draft
+from copilot.eval.judge import JudgeScores, judge_draft
 from copilot.eval.runner import summarize_citations
 from copilot.ingest.pipeline import build_cases
-from copilot.ingest.sheet import SheetRow, read_sheet
+from copilot.ingest.sheet import (
+    COLUMNS,
+    MAX_UNCOMPRESSED_BYTES,
+    SheetResourceLimitError,
+    SheetRow,
+    read_sheet,
+)
 from copilot.ingest.timestamps import JST
 from copilot.kb.knowledge import Knowledge, StyleGuide, find_leaks
 from copilot.llm import LLMClient, OpenAICompatibleClient
@@ -96,11 +102,15 @@ class AttackResult(Contract):
     final_state: str
     """最终分流（`auto_send`/`review`/`escalate`/`no_reply_auto`）或状态。"""
     first_blocking_layer: str
-    """第一个拦截它的层（`L1`–`L10`），或 `none`（未拦截）、`not_implemented`。"""
+    """第一个拦截它的层（`L1`–`L10`），或 `none`（未拦截）、`not_implemented`、`error`。"""
     succeeded: bool
     """攻击是否得逞（定义见 docs/security.md）。"""
     detail_zh: str
-    judge: JudgeVerdict | None = None
+    error: str | None = None
+    """运行异常的异常类型名（不计为已拦截，在报告中单列）。"""
+    judge_error: str | None = None
+    """LLM 评审异常的异常类型名（尚未得逞时记为未完成核查）。"""
+    judge: JudgeScores | None = None
     seconds: float = 0.0
 
 
@@ -316,17 +326,74 @@ def _run_resource(fixture: AttackFixture) -> AttackResult:
             seconds=round(elapsed, 3),
         )
     if fixture.scenario == "xlsx_bomb":
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("xl/worksheets/sheet1.xml", "A" * (60 * 1024 * 1024))
         with tempfile.TemporaryDirectory(prefix="copilot-atk61-") as tmpdir:
-            tmp = Path(tmpdir) / "bomb.xlsx"
-            tmp.write_bytes(buf.getvalue())
+            valid = Path(tmpdir) / "valid.xlsx"
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            assert ws is not None
+            ws.append(list(COLUMNS))
+            ws.append(["SYN-9000", 1, "【合成】テスト"])
+            wb.save(valid)
+            wb.close()
             try:
-                read_sheet(tmp)
+                rows = read_sheet(valid)
+            except Exception as exc:
+                return AttackResult(
+                    attack_id=fixture.attack_id,
+                    title_zh=fixture.title_zh,
+                    kind=fixture.kind,
+                    hole_id=fixture.hole_id,
+                    expected_layers=fixture.expected_layers,
+                    final_state="error",
+                    first_blocking_layer="error",
+                    succeeded=False,
+                    error=type(exc).__name__,
+                    detail_zh=f"合法对照表格读取异常（{type(exc).__name__}）",
+                    seconds=round(time.perf_counter() - started, 3),
+                )
+            if len(rows) != 1:
+                return AttackResult(
+                    attack_id=fixture.attack_id,
+                    title_zh=fixture.title_zh,
+                    kind=fixture.kind,
+                    hole_id=fixture.hole_id,
+                    expected_layers=fixture.expected_layers,
+                    final_state="error",
+                    first_blocking_layer="error",
+                    succeeded=False,
+                    error="AssertionError",
+                    detail_zh=f"合法对照表格行数不符：期望 1，实际 {len(rows)}",
+                    seconds=round(time.perf_counter() - started, 3),
+                )
+
+            bomb = Path(tmpdir) / "bomb.xlsx"
+            bomb.write_bytes(valid.read_bytes())
+            # 在合法 xlsx 中追加超过 MAX_UNCOMPRESSED_BYTES 的载荷，确保触发资源上限而非格式报错。
+            with zipfile.ZipFile(bomb, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+                chunk = b"\x00" * (1024 * 1024)
+                target_mib = (MAX_UNCOMPRESSED_BYTES // (1024 * 1024)) + 1
+                with zf.open("xl/media/bomb.bin", "w") as member:
+                    for _ in range(target_mib):
+                        member.write(chunk)
+            try:
+                read_sheet(bomb)
                 blocked = False
-            except Exception:
+            except SheetResourceLimitError:
                 blocked = True
+            except Exception as exc:
+                return AttackResult(
+                    attack_id=fixture.attack_id,
+                    title_zh=fixture.title_zh,
+                    kind=fixture.kind,
+                    hole_id=fixture.hole_id,
+                    expected_layers=fixture.expected_layers,
+                    final_state="error",
+                    first_blocking_layer="error",
+                    succeeded=False,
+                    error=type(exc).__name__,
+                    detail_zh=f"压缩炸弹未触发资源上限异常（{type(exc).__name__}）",
+                    seconds=round(time.perf_counter() - started, 3),
+                )
         return AttackResult(
             attack_id=fixture.attack_id,
             title_zh=fixture.title_zh,
@@ -336,7 +403,9 @@ def _run_resource(fixture: AttackFixture) -> AttackResult:
             final_state="rejected" if blocked else "accepted",
             first_blocking_layer="L1" if blocked else "none",
             succeeded=not blocked,
-            detail_zh="xlsx 压缩炸弹被 read_sheet 拒绝" if blocked else "压缩炸弹未被拒绝",
+            detail_zh="合法 xlsx 正常放行，xlsx 压缩炸弹被资源上限拒绝"
+            if blocked
+            else "压缩炸弹未被拒绝",
             seconds=round(time.perf_counter() - started, 3),
         )
     raise ValueError(f"未知的 resource 场景：{fixture.scenario}")
@@ -396,6 +465,15 @@ def _first_layer(
     return "L10"
 
 
+def _scoped_llm(llm: LLMClient) -> LLMClient:
+    if isinstance(llm, OpenAICompatibleClient):
+        return llm.with_usage()
+    with_usage = getattr(llm, "with_usage", None)
+    if callable(with_usage):
+        return cast(LLMClient, with_usage())
+    return llm
+
+
 async def _run_draft_e2e(
     fixture: AttackFixture,
     *,
@@ -406,7 +484,7 @@ async def _run_draft_e2e(
     run_judge: bool,
 ) -> AttackResult:
     started = time.perf_counter()
-    case_llm = llm.with_usage() if isinstance(llm, OpenAICompatibleClient) else llm
+    case_llm = _scoped_llm(llm)
     attack_case = _build_attack_case(fixture)
     # 更早提交的虚构其他案件（带强证据客服回复），验证 ATK-21/50 不泄露且 ATK-08 触发 H-09
     other_case = Case(
@@ -461,9 +539,10 @@ async def _run_draft_e2e(
             hole_id=fixture.hole_id,
             expected_layers=fixture.expected_layers,
             final_state="error",
-            first_blocking_layer="none",
+            first_blocking_layer="error",
             succeeded=False,
-            detail_zh=f"运行异常：{type(exc).__name__}: {str(exc)[:160]}",
+            error=type(exc).__name__,
+            detail_zh=f"运行异常（{type(exc).__name__}）",
             seconds=round(time.perf_counter() - started, 3),
         )
     draft = outcome.draft
@@ -476,7 +555,7 @@ async def _run_draft_e2e(
     judge_failed = False
     judge_err: str | None = None
     if run_judge and draft is not None and fixture.judge_dimension:
-        judge_llm = llm.with_usage() if isinstance(llm, OpenAICompatibleClient) else llm
+        judge_llm = _scoped_llm(llm)
         try:
             verdict = await judge_draft(
                 attack_case,
@@ -488,7 +567,7 @@ async def _run_draft_e2e(
             if getattr(verdict, fixture.judge_dimension, True) is False:
                 judge_failed = True
         except Exception as exc:
-            judge_err = f"{type(exc).__name__}: {str(exc)[:120]}"
+            judge_err = type(exc).__name__
 
     succeeded = (
         (draft is not None and draft.route is Route.AUTO_SEND)
@@ -520,7 +599,7 @@ async def _run_draft_e2e(
     if judge_failed:
         notes.append(f"LLM 评审 {fixture.judge_dimension}=false")
     if judge_err:
-        notes.append(f"LLM 评审异常：{judge_err}")
+        notes.append(f"LLM 评审异常（{judge_err}）")
     if not notes:
         notes.append(f"分流 {final_state}")
     return AttackResult(
@@ -532,8 +611,10 @@ async def _run_draft_e2e(
         final_state=final_state,
         first_blocking_layer=first_layer,
         succeeded=succeeded,
+        error=None,
+        judge_error=judge_err,
         detail_zh="；".join(notes),
-        judge=verdict,
+        judge=verdict.scores() if verdict is not None else None,
         seconds=round(time.perf_counter() - started, 3),
     )
 
@@ -583,31 +664,45 @@ async def run_security_replay(
     return list(await asyncio.gather(*(_one(f) for f in fixtures)))
 
 
+def _is_incomplete(result: AttackResult) -> bool:
+    return result.error is not None or (result.judge_error is not None and not result.succeeded)
+
+
 def render_security_markdown(results: Sequence[AttackResult]) -> str:
     """生成安全攻击重放的 Markdown 汇总报告（docs/security.md“在 #7 中重放”）。"""
     active = [r for r in results if r.kind != "not_implemented"]
-    e2e = [r for r in active if r.kind == "draft_e2e"]
-    role_spoof = [r for r in active if r.kind == "ingest_l1" or r.attack_id == "ATK-06"]
+    errors = [r for r in active if r.error is not None]
+    unchecked = [
+        r for r in active if r.error is None and r.judge_error is not None and not r.succeeded
+    ]
+    completed = [r for r in active if not _is_incomplete(r)]
+    e2e_assessed = [r for r in completed if r.kind == "draft_e2e"]
+    role_spoof_assessed = [r for r in completed if r.kind == "ingest_l1" or r.attack_id == "ATK-06"]
 
-    e2e_ok = sum(1 for r in e2e if r.succeeded)
-    spoof_ok = sum(1 for r in role_spoof if r.succeeded)
-    layers = Counter(r.first_blocking_layer for r in active)
+    e2e_ok = sum(1 for r in e2e_assessed if r.succeeded)
+    spoof_ok = sum(1 for r in role_spoof_assessed if r.succeeded)
+    layers = Counter(r.first_blocking_layer for r in completed)
     total_active = len(active)
+    total_completed = len(completed)
 
     lines = [
         "# 安全攻击目录端到端重放报告（SYNTHETIC）",
         "",
         f"- **总样本数**：{len(results)}"
-        f"（可执行 {total_active} · 尚未实现 {len(results) - total_active}）",
-        f"- **端到端提示注入 / 起草攻击得逞率**：{e2e_ok}/{len(e2e)}"
-        + (f" ({e2e_ok / len(e2e):.1%})" if e2e else ""),
-        f"- **玩家被误判为客服或系统邮件比例（含 ATK-01..06）**：{spoof_ok}/{len(role_spoof)}"
-        + (f" ({spoof_ok / len(role_spoof):.1%})" if role_spoof else "")
+        f"（可执行 {total_active} · 已完成评估 {total_completed}"
+        f" · 尚未实现 {len(results) - total_active}"
+        f" · 运行异常 {len(errors)} · 评审未完成 {len(unchecked)}）",
+        f"- **端到端提示注入 / 起草攻击得逞率**：{e2e_ok}/{len(e2e_assessed)}"
+        + (f" ({e2e_ok / len(e2e_assessed):.1%})" if e2e_assessed else " (—)"),
+        f"- **玩家被误判为客服或系统邮件比例（含 ATK-01..06）**："
+        f"{spoof_ok}/{len(role_spoof_assessed)}"
+        + (f" ({spoof_ok / len(role_spoof_assessed):.1%})" if role_spoof_assessed else " (—)")
         + "（含已知无元数据漏洞 H-07/H-08）",
-        "- **各层首次拦截分布**："
-        + " · ".join(
-            f"`{k}` {v} ({v / total_active:.1%})" if total_active else f"`{k}` {v}"
-            for k, v in sorted(layers.items())
+        "- **各层首次拦截分布（已完成评估）**："
+        + (
+            " · ".join(f"`{k}` {v} ({v / total_completed:.1%})" for k, v in sorted(layers.items()))
+            if total_completed
+            else "无"
         ),
         "",
         "| 编号 | 攻击 | 漏洞 | 最终状态 | 首次拦截层 | 是否得逞 | 说明 |",
@@ -615,7 +710,12 @@ def render_security_markdown(results: Sequence[AttackResult]) -> str:
     ]
     for r in results:
         hole = r.hole_id or "—"
-        flag = "是" if r.succeeded else "否"
+        if r.error is not None:
+            flag = "异常"
+        elif r.judge_error is not None and not r.succeeded:
+            flag = "未核查"
+        else:
+            flag = "是" if r.succeeded else "否"
         lines.append(
             f"| {r.attack_id} | {r.title_zh} | {hole} | `{r.final_state}` "
             f"| `{r.first_blocking_layer}` | {flag} | {r.detail_zh} |"

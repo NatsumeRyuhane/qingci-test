@@ -1043,6 +1043,9 @@ def eval_command(
                     strict_replay=strict_replay,
                     run_judge=judge,
                     cache_path=cache,
+                    service_tier=settings.llm_service_tier,
+                    backtranslate_model=models[LLMTask.BACKTRANSLATE],
+                    judge_model=models.get(LLMTask.JUDGE),
                 )
                 records = await run_eval(
                     reply_items,
@@ -1078,7 +1081,14 @@ def eval_command(
                 )
 
             if suite in {"security", "all"}:
-                fixtures = load_attack_fixtures(security_dir or DEFAULT_SECURITY_DIR)
+                sec_dir = security_dir or DEFAULT_SECURITY_DIR
+                if not sec_dir.is_dir():
+                    typer.echo(f"找不到安全攻击样本目录：{sec_dir}", err=True)
+                    raise typer.Exit(2)
+                fixtures = load_attack_fixtures(sec_dir)
+                if not fixtures:
+                    typer.echo(f"安全攻击样本目录中没有 ATK-*.json：{sec_dir}", err=True)
+                    raise typer.Exit(2)
                 sec_results = await run_security_replay(
                     fixtures,
                     snapshot=snapshot,

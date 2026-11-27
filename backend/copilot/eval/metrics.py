@@ -7,13 +7,15 @@
   可以直接贴进 PR 描述或整理进 `docs/eval.md`。
 """
 
+import os
+import tempfile
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from copilot.contracts import (
     DraftCheckKind,
@@ -27,7 +29,7 @@ from copilot.contracts import (
 )
 from copilot.contracts.base import Document
 from copilot.draft.route import AutoSendGate
-from copilot.eval.judge import JudgeVerdict
+from copilot.eval.judge import JudgeScores, JudgeVerdict
 from copilot.eval.split import Split
 
 
@@ -69,11 +71,13 @@ class CaseEvalRecord(Document):
     high_risk: bool = False
     fallback_reason: str | None = None
     tool_calls: int = 0
-    judge: JudgeVerdict | None = None
+    judge: JudgeScores | None = None
     judge_error: str | None = None
-    """LLM 评审调用失败时的错误摘要（不静默吞掉异常）。"""
+    """LLM 评审调用失败时的错误摘要（只含异常类型，不静默吞掉异常）。"""
     config_fingerprint: str | None = None
     """本次评测运行配置的指纹，用于缓存续跑时防止混入旧配置的结果。"""
+    item_fingerprint: str | None = None
+    """单条评测样本重放输入与标注的指纹，防止输入或标准答案变化后命中旧缓存。"""
 
     wall_seconds: float = 0.0
     step_seconds: dict[str, float] = Field(default_factory=dict)
@@ -81,34 +85,84 @@ class CaseEvalRecord(Document):
     completion_tokens: int | None = None
     error: str | None = None
 
+    @field_validator("judge", mode="before")
+    @classmethod
+    def _strip_judge_notes(cls, value: object) -> object:
+        if isinstance(value, JudgeVerdict):
+            return value.scores()
+        return value
+
 
 def write_records(records: Iterable[CaseEvalRecord], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with tmp.open("w", encoding="utf-8", newline="\n") as f:
-        for record in records:
-            f.write(record.model_dump_json() + "\n")
-    tmp.replace(path)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            for record in records:
+                f.write(record.model_dump_json() + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _repair_incomplete_tail(path: Path) -> None:
+    """在字节边界检查并修复尾部：仅保留完整有效尾行并补换行，否则截断至最后一个换行符。"""
+    if not path.is_file():
+        return
+    size = path.stat().st_size
+    if size == 0:
+        return
+    with path.open("r+b") as f:
+        f.seek(size - 1)
+        if f.read(1) == b"\n":
+            return
+        chunk_size = 8192
+        pos = size
+        tail_start = 0
+        while pos > 0:
+            read_from = max(0, pos - chunk_size)
+            f.seek(read_from)
+            chunk = f.read(pos - read_from)
+            nl = chunk.rfind(b"\n")
+            if nl >= 0:
+                tail_start = read_from + nl + 1
+                break
+            pos = read_from
+        f.seek(tail_start)
+        tail = f.read()
+        if not tail.strip():
+            f.truncate(tail_start)
+            return
+        try:
+            CaseEvalRecord.model_validate_json(tail.decode("utf-8"))
+        except Exception:
+            f.truncate(tail_start)
+        else:
+            f.seek(0, os.SEEK_END)
+            f.write(b"\n")
 
 
 def append_record(record: CaseEvalRecord, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as f:
-        f.write(record.model_dump_json() + "\n")
+    _repair_incomplete_tail(path)
+    with path.open("ab") as f:
+        f.write((record.model_dump_json() + "\n").encode("utf-8"))
 
 
 def read_records(path: Path) -> list[CaseEvalRecord]:
     if not path.is_file():
         return []
     records: list[CaseEvalRecord] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
+    with path.open("rb") as f:
+        for raw_line in f:
+            if not raw_line.strip():
                 continue
             try:
-                records.append(CaseEvalRecord.model_validate_json(line))
+                records.append(CaseEvalRecord.model_validate_json(raw_line.decode("utf-8")))
             except Exception:
-                # 容忍中断写入留下的残缺尾行，避免续跑直接崩溃
+                # 容忍中断写入留下的残缺 UTF-8 或半行 JSON，避免续跑直接崩溃
                 continue
     return records
 
@@ -162,6 +216,7 @@ class SliceMetrics:
     promise_fn: int = 0
     combined_success_hits: int = 0
     combined_success_total: int = 0
+    combined_success_unknown: int = 0
     routes: Counter[str] = field(default_factory=Counter)
     high_risk_total: int = 0
     high_risk_auto_send: int = 0
@@ -212,6 +267,15 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
                     m.visible_template_top1_hits += 1
                 if in_top3:
                     m.visible_template_top3_hits += 1
+            if r.no_reply_auto:
+                # 应回复案件被误抑制为自动“不回复”属于已知失败，计入主成功指标分母。
+                m.combined_success_total += 1
+            elif r.judge is not None:
+                m.combined_success_total += 1
+                if r.expected_template_id in r.top3_template_ids and r.judge.solution_agrees:
+                    m.combined_success_hits += 1
+            else:
+                m.combined_success_unknown += 1
         if r.judge_error is not None:
             m.judge_errors += 1
         if r.judge is not None:
@@ -232,14 +296,6 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
                 m.promise_fp += 1
             elif (not prom_failed) and (not r.judge.no_fabricated_promise):
                 m.promise_fn += 1
-            if r.expected_template_id is not None:
-                m.combined_success_total += 1
-                if (
-                    (not r.no_reply_auto)
-                    and r.expected_template_id in r.top3_template_ids
-                    and r.judge.solution_agrees
-                ):
-                    m.combined_success_hits += 1
         for check in r.failed_checks:
             m.check_failures[check.value] += 1
         for gate in r.failed_gates:
@@ -327,8 +383,8 @@ def _calibration_rows(records: Sequence[CaseEvalRecord]) -> list[str]:
     buckets = [
         ("< 0.70", 0.0, 0.70),
         ("0.70–0.85", 0.70, 0.85),
-        ("0.85–0.95", 0.85, 0.95),
-        (">= 0.95", 0.95, 1.01),
+        ("0.85–0.92", 0.85, 0.92),
+        (">= 0.92", 0.92, 1.01),
     ]
     rows = []
     for label, lo, hi in buckets:
@@ -372,17 +428,16 @@ def render_markdown(
     def _section(heading: str, subset: Sequence[CaseEvalRecord]) -> None:
         m = compute_slice(subset)
         ok = m.total - m.errors
+        combined_val = _rate(m.combined_success_hits, m.combined_success_total)
+        if m.combined_success_total > 0 and m.combined_success_unknown > 0:
+            combined_val += f"（另有 {m.combined_success_unknown} 条无评审结果）"
         lines.extend(
             [
                 f"## {heading}（样本 {m.total}，成功运行 {ok}，错误 {m.errors}）",
                 "",
                 "| 指标 | 结果 |",
                 "|---|---|",
-                _row(
-                    "**成功指标（模板 Top-3 且草稿意思一致）**",
-                    m.combined_success_hits,
-                    m.combined_success_total,
-                ),
+                f"| **成功指标（模板 Top-3 且草稿意思一致）** | {combined_val} |",
                 _row("模板 Top-1 准确率（全部有标准答案）", m.template_top1_hits, m.template_total),
                 _row("模板 Top-3 准确率（全部有标准答案）", m.template_top3_hits, m.template_total),
                 _row(
@@ -452,8 +507,9 @@ def render_markdown(
                 "## 按时间状态分切片（强证据）",
                 "",
                 "| `now` 状态 | `problem_time` 状态 | 样本数 | 模板 Top-3"
-                " | 解决方案一致 | `review` / `escalate` |",
-                "|---|---|---:|---|---|---|",
+                " | 解决方案一致 | `review` / `escalate` | `draft_case` p50"
+                " | 平均 Token（输入/输出） |",
+                "|---|---|---:|---|---|---|---:|---|",
             ]
         )
         groups: dict[tuple[str, str], list[CaseEvalRecord]] = {}
@@ -461,11 +517,18 @@ def render_markdown(
             groups.setdefault((r.now_status.value, r.problem_time_status.value), []).append(r)
         for (ns, ps), grp in sorted(groups.items()):
             gm = compute_slice(grp)
+            glat = compute_latency(grp)
+            tok_col = (
+                f"{glat.prompt_tokens_avg:.0f} / {glat.completion_tokens_avg:.0f}"
+                if glat.prompt_tokens_avg is not None and glat.completion_tokens_avg is not None
+                else "未知"
+            )
             lines.append(
                 f"| `{ns}` | `{ps}` | {gm.total} "
                 f"| {_rate(gm.template_top3_hits, gm.template_total)} "
                 f"| {_rate(gm.solution_agrees, gm.judge_total)} "
-                f"| {gm.routes.get('review', 0)} / {gm.routes.get('escalate', 0)} |"
+                f"| {gm.routes.get('review', 0)} / {gm.routes.get('escalate', 0)} "
+                f"| {glat.wall_p50:.1f}s | {tok_col} |"
             )
         lines.append("")
 
@@ -500,12 +563,14 @@ def render_markdown(
             lines.append(f"| `{reason}` | {_rate(auto_h, tot)} | {_rate(prop_h, tot)} |")
         lines.append("")
 
-    # 延迟与成本（按模式分开）
-    modes = sorted({r.mode.value for r in records if r.error is None})
-    if modes:
-        lines.extend(["## 延迟与成本（邮件到达到草稿可用）", ""])
+    # 延迟与成本（按模式分开，自动“不回复”决策与生成草稿分列）
+    drafted_ok = [r for r in records if r.error is None and not r.no_reply_auto]
+    auto_nr_ok = [r for r in records if r.error is None and r.no_reply_auto]
+    modes = sorted({r.mode.value for r in drafted_ok})
+    if modes or auto_nr_ok:
+        lines.extend(["## 延迟与成本（`draft_case` 耗时，不含重放与检索初始化）", ""])
         for mode_name in modes:
-            sub = [r for r in records if r.error is None and r.mode.value == mode_name]
+            sub = [r for r in drafted_ok if r.mode.value == mode_name]
             lat = compute_latency(sub)
             tok_in = (
                 f"{lat.prompt_tokens_avg:.0f}（总 {lat.prompt_tokens_total}）"
@@ -519,9 +584,9 @@ def render_markdown(
             )
             lines.extend(
                 [
-                    f"### 模式：`{mode_name}`（{lat.count} 个案件）",
+                    f"### 模式：`{mode_name}`（{lat.count} 个起草案件）",
                     "",
-                    f"- 端到端延迟（邮件到达到草稿可用）：p50 **{lat.wall_p50:.1f}s** · "
+                    f"- `draft_case` 延迟（草稿可用）：p50 **{lat.wall_p50:.1f}s** · "
                     f"p95 **{lat.wall_p95:.1f}s** · 均值 {lat.wall_mean:.1f}s",
                     f"- 单案件平均 token：输入 {tok_in} · 输出 {tok_out}",
                     "",
@@ -539,5 +604,13 @@ def render_markdown(
                         f"| `{step}` | {lat.step_p50[step]:.1f} | {lat.step_p95[step]:.1f} |"
                     )
                 lines.append("")
+        if auto_nr_ok:
+            nr_lat = compute_latency(auto_nr_ok)
+            lines.append(
+                f"- 自动“不回复”决策延迟（`no_reply_auto`，{nr_lat.count} 个案件）："
+                f"p50 **{nr_lat.wall_p50:.1f}s** · p95 **{nr_lat.wall_p95:.1f}s** · "
+                f"均值 {nr_lat.wall_mean:.1f}s"
+            )
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
