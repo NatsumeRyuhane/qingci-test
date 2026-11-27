@@ -23,7 +23,7 @@ describe("Inbox", () => {
 
     expect(await screen.findByText("【合成】购买后未到账")).toBeInTheDocument();
     expect(screen.getByText("升级处理", { selector: ".badge" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /SIM-1/ })).toHaveAttribute("href", "#/cases/SIM-1");
+    expect(screen.getByRole("link", { name: /SIM-1/ })).toHaveAttribute("href", "#case-SIM-1");
 
     fireEvent.change(screen.getByLabelText("分流"), { target: { value: "escalate" } });
     fireEvent.change(screen.getByLabelText("类别"), { target: { value: "purchase" } });

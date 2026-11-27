@@ -21,7 +21,7 @@ describe("Mailbox", () => {
 
     expect(await screen.findByRole("link", { name: "SIM-NEW" })).toHaveAttribute(
       "href",
-      "#/cases/SIM-NEW",
+      "#case-SIM-NEW",
     );
     const first = calls.find((c) => c.method === "POST");
     expect(first?.body).toEqual({

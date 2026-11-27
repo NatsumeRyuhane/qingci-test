@@ -1,4 +1,6 @@
-// 基于 location.hash 的简单路由：静态托管（预览）和开发服务器都不需要额外配置。
+// 基于 location.hash 的简单路由：静态托管（演示模式）和开发服务器都不需要额外配置。
+// hash 只用 ASCII 字母、数字和连字符（`#inbox`、`#case-<id>`、`#metrics`、`#sim`），嵌入其他页面
+// 时也能保留；案件 ID 本身只含 `[A-Za-z0-9_-]`（契约限制）。旧的 `#/cases/<id>` 形式仍然可用。
 import { useEffect, useState } from "react";
 
 export type Route =
@@ -7,8 +9,13 @@ export type Route =
   | { page: "metrics" }
   | { page: "sim" };
 
+const CASE_PREFIX = "case-";
+
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, "");
+  if (path.startsWith(CASE_PREFIX) && path.length > CASE_PREFIX.length) {
+    return { page: "case", caseId: decodeURIComponent(path.slice(CASE_PREFIX.length)) };
+  }
   const [first, second] = path.split("/");
   if (first === "cases" && second) return { page: "case", caseId: decodeURIComponent(second) };
   if (first === "metrics") return { page: "metrics" };
@@ -17,7 +24,7 @@ export function parseHash(hash: string): Route {
 }
 
 export function caseHref(caseId: string): string {
-  return `#/cases/${encodeURIComponent(caseId)}`;
+  return `#${CASE_PREFIX}${encodeURIComponent(caseId)}`;
 }
 
 export function useRoute(): Route {

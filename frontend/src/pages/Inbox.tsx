@@ -106,7 +106,7 @@ export function Inbox() {
       <ErrorNotice message={error} />
       {list && list.items.length === 0 && (
         <p className="empty">
-          没有符合条件的案件。可以在 <a href="#/sim">模拟邮箱</a> 中投递一封来信，或运行{" "}
+          没有符合条件的案件。可以在 <a href="#sim">模拟邮箱</a> 中投递一封来信，或运行{" "}
           <code>copilot seed</code>。
         </p>
       )}

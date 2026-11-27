@@ -51,7 +51,7 @@ describe("App", () => {
         return { total: row, by_template: [], by_route: [] };
       },
     });
-    window.location.hash = "#/metrics";
+    window.location.hash = "#metrics";
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "指标" })).toBeInTheDocument();

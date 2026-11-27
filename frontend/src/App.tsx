@@ -29,9 +29,9 @@ function useHealth(): HealthState {
 }
 
 const NAV: { page: Route["page"]; href: string; text: string }[] = [
-  { page: "inbox", href: "#/inbox", text: "收件箱" },
-  { page: "metrics", href: "#/metrics", text: "指标" },
-  { page: "sim", href: "#/sim", text: "模拟邮箱" },
+  { page: "inbox", href: "#inbox", text: "收件箱" },
+  { page: "metrics", href: "#metrics", text: "指标" },
+  { page: "sim", href: "#sim", text: "模拟邮箱" },
 ];
 
 export function App() {

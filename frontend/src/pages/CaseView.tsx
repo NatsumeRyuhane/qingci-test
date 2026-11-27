@@ -161,7 +161,7 @@ export function CaseView({ caseId, actor }: { caseId: string; actor: string }) {
   if (!detail) {
     return (
       <section>
-        <a href="#/inbox">← 返回收件箱</a>
+        <a href="#inbox">← 返回收件箱</a>
         <ErrorNotice message={error} />
         {!error && <p>正在加载…</p>}
       </section>
@@ -172,7 +172,7 @@ export function CaseView({ caseId, actor }: { caseId: string; actor: string }) {
   return (
     <section>
       <div className="toolbar">
-        <a href="#/inbox">← 返回收件箱</a>
+        <a href="#inbox">← 返回收件箱</a>
         <h2>案件 {thread.id}</h2>
         <StatusBadge status={thread.status ?? "open"} />
         <span className="meta">{label(CATEGORY_LABELS, thread.category)}</span>
