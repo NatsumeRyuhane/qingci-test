@@ -150,6 +150,9 @@ jobs:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
       LLM_MODEL_ANALYZE: ${{ vars.LLM_MODEL_ANALYZE }}
+      # 可选：起草流水线的 live 测试（#6）还需要这两个，没有配置时那部分测试跳过。
+      LLM_MODEL_DRAFT: ${{ vars.LLM_MODEL_DRAFT }}
+      LLM_MODEL_BACKTRANSLATE: ${{ vars.LLM_MODEL_BACKTRANSLATE }}
       LLM_JSON_MODE: ${{ vars.LLM_JSON_MODE || 'json_object' }}
     steps:
       - name: 检查是否已配置

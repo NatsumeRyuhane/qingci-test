@@ -9,7 +9,14 @@ from copilot import __version__
 from copilot.config import get_settings
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
+    from copilot.config import Settings
+    from copilot.contracts import Case
+    from copilot.draft.service import DraftOutcome
     from copilot.kb.knowledge import Knowledge
+    from copilot.llm import LLMClient
+    from copilot.llm.embedding import EmbeddingClient
 
 app = typer.Typer(help="面向中文客服的日语客服坐席助手。", no_args_is_help=True)
 db_app = typer.Typer(help="数据库管理。", no_args_is_help=True)
@@ -574,3 +581,233 @@ def kb_publish(kb_dir: KbDirOption = None, knowledge_dir: KnowledgeOption = None
     report.knowledge = knowledge_counts
     for line in report.lines():
         typer.echo(line)
+
+
+def _llm_client(settings: "Settings") -> "LLMClient":
+    """起草使用的 LLM 客户端。测试中替换为 fake。"""
+    from copilot.llm import OpenAICompatibleClient
+
+    return OpenAICompatibleClient(settings)
+
+
+def _embedding_client(settings: "Settings") -> "EmbeddingClient | None":
+    """相似案件检索使用的 embedding 客户端；没有配置时返回 None（只用 BM25）。"""
+    from copilot.config import MissingConfigError
+    from copilot.llm import OpenAIEmbeddingClient
+
+    try:
+        settings.embedding_endpoint()
+    except MissingConfigError:
+        return None
+    return OpenAIEmbeddingClient(settings)
+
+
+EMBEDDING_CACHE = Path("data/processed/embeddings.jsonl")
+"""相似案件检索的 embedding 缓存（含客户文本的哈希和向量，被 git 忽略）。"""
+
+
+def _truncate(case: "Case", before_seq: int) -> "Case":
+    """只保留 seq 小于 `before_seq` 的邮件，状态按最后一封邮件重新判断（玩家 → open）。"""
+    from copilot.contracts import CaseStatus, MessageRole
+
+    messages = [m for m in case.messages if m.seq < before_seq]
+    if not messages:
+        typer.echo(f"--before-seq {before_seq} 之前没有邮件", err=True)
+        raise typer.Exit(2)
+    status = CaseStatus.OPEN if messages[-1].role is MessageRole.PLAYER else case.status
+    return case.model_copy(update={"messages": messages, "status": status})
+
+
+def _parse_now(value: str | None) -> "datetime | None":
+    from datetime import datetime
+
+    from copilot.ingest.timestamps import JST
+
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        typer.echo(f"--now 不是 ISO 8601 时间：{value}", err=True)
+        raise typer.Exit(2) from None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=JST)
+
+
+@app.command("draft")
+def draft_command(
+    case_id: Annotated[str, typer.Argument(help="案件 ID（线程 ID）。")],
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--split",
+            help="切分结果。存在时相似案件只从 train 中检索（D-012）。"
+            "默认 data/processed/split.json。",
+        ),
+    ] = None,
+    knowledge_dir: KnowledgeOption = None,
+    now: Annotated[
+        str | None,
+        typer.Option(
+            "--now",
+            help="模拟的“现在”（ISO 8601，不带时区时按 JST）。指定时为历史重放：知识库只看当时"
+            "已知的版本。默认取系统时间。",
+        ),
+    ] = None,
+    before_seq: Annotated[
+        int | None,
+        typer.Option(
+            "--before-seq",
+            min=2,
+            help="历史重放：只保留 seq 小于它的邮件，例如在真实的第一封客服回复之前起草。",
+        ),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="输出完整结果的 JSON。")] = False,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="把完整结果的 JSON 写到这个文件。")
+    ] = None,
+) -> None:
+    """为一个案件生成分析、草稿和分流结果（#6）。不会发送任何邮件。"""
+    import asyncio
+    import time
+    from datetime import datetime
+
+    from copilot.config import LLMTask, MissingConfigError
+    from copilot.draft.retrieval import load_snapshot
+    from copilot.draft.service import DraftParams, draft_case
+    from copilot.draft.similar import EmbeddingCache, SimilarCaseRetriever, corpus_before
+    from copilot.eval import DEFAULT_MANIFEST, Split, StaleSplitError, read_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.ingest.timestamps import JST
+    from copilot.kb.knowledge import KNOWLEDGE_DIR, KnowledgeError, load_knowledge
+    from copilot.kb.store import KnowledgeStore
+    from copilot.storage import create_engine_for, upgrade_database
+
+    settings = get_settings()
+    try:
+        models = {task: settings.llm_endpoint(task).model for task in (
+            LLMTask.ANALYZE, LLMTask.DRAFT, LLMTask.BACKTRANSLATE
+        )}  # fmt: skip
+    except MissingConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    source = cases_path or DEFAULT_OUTPUT
+    if not source.is_file():
+        typer.echo(f"找不到导入结果：{source}（先运行 copilot ingest）", err=True)
+        raise typer.Exit(1)
+    cases = read_cases(source)
+    target = next((c for c in cases if c.id == case_id), None)
+    if target is None:
+        typer.echo(f"找不到案件 {case_id!r}", err=True)
+        raise typer.Exit(1)
+    if before_seq is not None:
+        target = _truncate(target, before_seq)
+    try:
+        guide = load_knowledge(knowledge_dir or KNOWLEDGE_DIR).style_guide
+    except KnowledgeError as exc:
+        typer.echo(f"knowledge/ 校验失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
+    upgrade_database(settings.database_url)
+    snapshot = load_snapshot(KnowledgeStore(create_engine_for(settings.database_url)))
+    if not snapshot.templates:
+        typer.echo("数据库中还没有模板（先运行 copilot kb publish）", err=True)
+        raise typer.Exit(1)
+
+    manifest_path = split_path or DEFAULT_MANIFEST
+    corpus = cases
+    if manifest_path.is_file():
+        try:
+            corpus = read_manifest(manifest_path).select(cases, Split.TRAIN)
+        except StaleSplitError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    embedder = _embedding_client(settings)
+    cache = EmbeddingCache(EMBEDDING_CACHE) if embedder is not None else None
+    retriever = SimilarCaseRetriever(corpus_before(corpus, target), embedder=embedder, cache=cache)
+    llm = _llm_client(settings)
+    simulated = _parse_now(now)
+    params = DraftParams(
+        analyze_model=models[LLMTask.ANALYZE],
+        draft_model=models[LLMTask.DRAFT],
+        min_confidence=settings.draft_auto_send_min_confidence,
+        lookback_days=settings.draft_problem_time_lookback_days,
+    )
+    started = time.perf_counter()
+    outcome = asyncio.run(
+        draft_case(
+            target,
+            snapshot=snapshot,
+            guide=guide,
+            llm=llm,
+            params=params,
+            history=cases,
+            retriever=retriever,
+            now=simulated,
+            replay=simulated is not None,
+            created_at=datetime.now(JST).replace(microsecond=0),
+        )
+    )
+    elapsed = time.perf_counter() - started
+    if cache is not None:
+        cache.save()
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(outcome.model_dump_json(indent=2), encoding="utf-8")
+    if as_json:
+        typer.echo(outcome.model_dump_json(indent=2))
+        return
+    for line in _outcome_lines(outcome):
+        typer.echo(line)
+    typer.echo("")
+    typer.echo(
+        f"用时 {elapsed:.1f} 秒（相似案件：{'BM25 + embedding' if embedder else '只用 BM25'}）"
+    )
+    for line in llm.usage.lines():
+        typer.echo(f"  {line}")
+
+
+def _outcome_lines(outcome: "DraftOutcome") -> list[str]:
+    """给客服看的摘要（中文）。"""
+    a, ctx = outcome.analysis, outcome.time_context
+    lines = [
+        f"案件 {a.case_id} · 分析 seq {a.message_seq}",
+        f"现在：{ctx.now.status.value} · 问题发生时间：{ctx.problem_time.status.value}"
+        f"（{ctx.problem_time.basis_zh or '无'}）",
+        f"意图：{a.intent}（置信度 {'无' if a.intent_confidence is None else a.intent_confidence}）"
+        f" · 情绪：{a.sentiment.value} · 紧急程度：{a.urgency.value}",
+        f"摘要：{a.summary_zh}",
+    ]
+    if a.injection_signals:
+        lines.append(f"疑似提示注入：{'；'.join(a.injection_signals)}")
+    if a.thread_judgement:
+        lines.append(f"线程判断：{a.thread_judgement.value}（{a.thread_judgement_reason_zh}）")
+    if outcome.no_reply is not None:
+        state = "自动生效" if outcome.no_reply_auto else "需要人工确认"
+        lines.append(f"不回复（{state}）：{outcome.no_reply_reason_zh}")
+    draft = outcome.draft
+    if draft is None:
+        lines.append(
+            f"建议状态：{outcome.proposed_status.value if outcome.proposed_status else '无'}"
+        )
+        return lines
+    lines += ["", f"分流：{draft.route.value}"]
+    lines += [f"  - {reason}" for reason in draft.route_reasons]
+    template = draft.template_refs[0] if draft.template_refs else None
+    lines.append(
+        f"模板：{template.template_id} v{template.template_version}（{template.reason_zh}）"
+        if template
+        else "模板：无"
+    )
+    lines.append("检查：")
+    lines += [
+        f"  {'通过' if c.passed else '不通过'} {c.kind.value}"
+        + (f"：{c.detail_zh}" if c.detail_zh else "")
+        for c in draft.checks
+    ]
+    if draft.similar_case_refs:
+        lines.append("相似案件：" + "、".join(r.case_id for r in draft.similar_case_refs))
+    lines += ["", "草稿：", draft.body_ja, "", "回译：", draft.back_translation_zh]
+    return lines

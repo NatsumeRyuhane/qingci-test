@@ -94,6 +94,7 @@ docs/              需求、数据概况、决策记录、设计提案
    uv run copilot kb annotate         # 用 LLM 标注模板候选（有缓存，重复运行不重复调用）
    uv run copilot kb label            # 生成评测（#7）用的标准答案
    uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库
+   uv run copilot draft <案件 ID>     # 为一个案件生成分析、草稿和分流（不发送邮件）
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
    (cd frontend && pnpm dev)          # 前端 http://localhost:5173
    ```
