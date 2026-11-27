@@ -52,7 +52,7 @@
 |---|---|---|---|---|
 | C-20 | 不允许的承诺由代码检查：模型在模板之外写的承诺、填进占位符的承诺、占位符的值与模板原文拼成的承诺都会被发现；只有已批准模板的原文措辞豁免 | `copilot/draft/checks.py` 的 `check_forbidden_promise` | `tests/draft/test_checks.py::test_forbidden_promise_in_added_text_fails` · `tests/draft/test_checks.py::test_rewritten_template_is_checked_as_added_text` · `tests/draft/test_checks.py::test_slot_values_are_checked_as_untrusted` · `tests/draft/test_checks.py::test_promise_formed_across_slot_boundary_fails` · `tests/draft/test_adversarial.py::test_obeyed_refund_injection_is_blocked` | 单元、对抗 |
 | C-21 | 草稿中不会混入链接、邮箱、HTML 或脚本、不可见字符、其他案件的文字（模板原文中的链接除外） | `check_content_safety` | `tests/draft/test_checks.py::test_content_safety` · `tests/draft/test_checks.py::test_other_case_text_is_detected` · `tests/draft/test_adversarial.py::test_malicious_content_in_draft_is_blocked` · `tests/draft/test_adversarial.py::test_leaking_other_case_is_blocked` | 单元、对抗 |
-| C-22 | 模型新增的事实性说法必须引用提供给它的条目，引用按整句对应；模型不能自己豁免一句话，只有白名单中的完整“索要信息”句式不需要引用 | `check_citations`、`is_info_request` | `tests/draft/test_checks.py::test_uncited_added_claim_fails_and_citation_fixes_it` · `tests/draft/test_checks.py::test_is_info_request` · `tests/draft/test_checks.py::test_citation_must_match_the_whole_sentence` · `tests/draft/test_checks.py::test_model_cannot_exempt_a_factual_sentence` · `tests/draft/test_checks.py::test_citation_of_unprovided_entry_fails` | 单元。引用是否真的支持这句话：待验证（#7） |
+| C-22 | 模型新增的每一句都必须引用提供给它的条目，引用按整句对应；没有按句式判断的豁免，索要信息的句子引用分类出的意图 | `check_citations` | `tests/draft/test_checks.py::test_uncited_added_claim_fails_and_citation_fixes_it` · `tests/draft/test_checks.py::test_every_added_sentence_needs_a_citation` · `tests/draft/test_checks.py::test_info_request_cites_the_intent` · `tests/draft/test_checks.py::test_citation_must_match_the_whole_sentence` · `tests/draft/test_checks.py::test_model_cannot_exempt_a_factual_sentence` · `tests/draft/test_checks.py::test_citation_of_unprovided_entry_fails` | 单元。引用是否真的支持这句话：待验证（#7） |
 | C-23 | 固定的问候语、结语和禁止转载声明由代码组装，不由模型生成 | `assemble`、`check_structure` | `tests/draft/test_checks.py::test_assemble_order_and_no_duplicate_phrases` · `tests/draft/test_checks.py::test_structure_detects_missing_or_repeated_frame` | 单元 |
 | C-24 | 不可信的文本只作为数据放在分隔标记内，正文中伪造的标记无法结束数据块 | `copilot/llm/prompt.py` 的 `data_block` | `tests/llm/test_prompt.py::test_forged_delimiters_cannot_close_the_block` · `tests/llm/test_prompt.py::test_invisible_and_bidi_characters_are_removed` | 单元。起草的 prompt 组装：待验证（PR2） |
 
@@ -81,7 +81,7 @@
 | P-02 | 提供给模型的 prompt 中只有可见的条目；时间块在最后、由代码生成，正文不能伪造 | PR2 |
 | P-03 | 工具只读、范围受限：越权的调用被拒绝，超出步数时回退到固定流水线 | PR3 |
 | P-04 | 注入成功率、“玩家被误判为客服或系统”的比例接近零；高风险案件不会被分流为 `auto_send` | #7（合成注入样本）、`llm-live` |
-| P-05 | 自检的启发式规则（敬体、索要信息的句式、政策短语）误报和漏报都低 | #7 在 dev 上报告 |
+| P-05 | 自检的启发式规则（敬体、政策短语）误报和漏报都低 | #7 在 dev 上报告 |
 | P-06 | 自动发送的阈值（`DRAFT_AUTO_SEND_MIN_CONFIDENCE`）合理：通过全部关卡的草稿确实正确 | #7 在 dev 上校准，之后所有者才在审核中打开任何模板的 `auto_send_allowed` |
 
 ## 假设

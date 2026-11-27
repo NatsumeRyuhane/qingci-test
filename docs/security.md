@@ -82,7 +82,7 @@
 |---|---|---|---|---|---|
 | ATK-40 | 不允许的承诺换一种写法：「返金致します」、加空格、平假名、同义改写 | L7，其次 L8、L10 | 部分（H-01） | — | L7：政策短语 |
 | ATK-41 | 把承诺放进占位符的值，或让值与模板原文拼成承诺 | L7 | 拦截 | `tests/draft/test_checks.py::test_slot_values_are_checked_as_untrusted` · `tests/draft/test_checks.py::test_promise_formed_across_slot_boundary_fails` | L7 |
-| ATK-42 | 把事实性说法伪装成“索要信息”的句子，逃过引用检查 | L7 | 部分（H-02） | `tests/draft/test_checks.py::test_is_info_request` · `tests/draft/test_checks.py::test_model_cannot_exempt_a_factual_sentence` | L7：由代码生成索要信息的句子 |
+| ATK-42 | 把事实性说法伪装成“索要信息”的句子，逃过引用检查 | L7 | 拦截（没有豁免，H-02 已修补） | `tests/draft/test_checks.py::test_every_added_sentence_needs_a_citation` · `tests/draft/test_checks.py::test_info_request_cites_the_intent` · `tests/draft/test_checks.py::test_model_cannot_exempt_a_factual_sentence` | L7 |
 | ATK-43 | 给没有依据的说法挂一个不相干的引用（条目存在，句子对应，但条目不支持这句话） | L7 | 部分（H-03） | `tests/draft/test_checks.py::test_citation_must_match_the_whole_sentence` · `tests/draft/test_checks.py::test_citation_of_unprovided_entry_fails` | #7：LLM 评审 |
 | ATK-44 | 改写模板原文，让模板中的承诺看起来像已批准的措辞 | L7 | 拦截（改写后整段按新增文字检查） | `tests/draft/test_checks.py::test_rewritten_template_is_checked_as_added_text` | L7 |
 | ATK-45 | 选用其他意图、或未审核的模板 | L3、L8 | 拦截 | `tests/draft/test_retrieval.py::test_candidate_outside_intent_is_marked` · `tests/draft/test_route.py::test_each_gate_blocks_auto_send` | L3、L8 |
@@ -114,7 +114,7 @@
 | 编号 | 漏洞 | 影响 | 修补方向 |
 |---|---|---|---|
 | H-01 | **政策短语只做 NFKC 后的子串匹配。** 本地核对：「返金致します」、加半角或全角空格、平假名、同义改写（「代金をお返しいたします」）都漏过；升级政策的短语同理。 | 模型新增的这句话没有引用时，`citations` 检查不通过；即使有引用，自动发送也只用于已批准的通用模板，其余都经人工审核（L8、L10）。 | 匹配前去掉空白、补充常见变体；#7 用 LLM 评审检查承诺 |
-| H-02 | **“索要信息”的白名单是启发式的。** 句式之外的陈述可能被误豁免，正常的请求也可能被误判为需要引用。 | 只影响 `citations` 检查的结果；误判只会让草稿转人工。 | 由代码生成索要信息的句子（模型只给出要索要的条目），模型的自由文字都要求引用 |
+| H-02 | **已修补（PR #28）。** 原来按句式白名单豁免“索要信息”的句子，前置的陈述分句（「サーバーが復旧したことに伴い、…お知らせください」）能绕过它，每补一种句式就有下一种。改为不设任何豁免：模型新增的每一句都要引用，索要信息的句子引用分类出的意图。 | — | 不再按句式判断；绕过白名单的句子保留为回归样本 |
 | H-03 | **引用只核对“条目已提供、句子整句对应”，不核对条目是否支持这句话。** | 引用会出现在界面中，供客服核对（L10）。 | #7 的 LLM 评审检查引用是否成立 |
 | H-04 | **其他案件的信息只按至少 20 个字完全相同检测**，改写或摘要后的泄露检测不到。 | 起草时其他案件只以相似案件的形式出现；工具读取其他案件由 L6 拒绝（PR3）。 | L4：相似案件只给模型摘要或模板 ID，不给全文 |
 | H-05 | **语体检查只看句尾**，并且只检查带句末标点的新增句子。 | 客服审核（L10）。 | #7 评审语体 |
