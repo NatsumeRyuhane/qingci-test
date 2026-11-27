@@ -20,7 +20,7 @@ from copilot.eval import (
 )
 from copilot.eval.split import RATIOS, STRATUM_SIZE
 from copilot.ingest import write_cases
-from tests.cases import case
+from tests.cases import case, player
 
 DUPLICATE = "【合成データ】ログインボーナスが受け取れません。何度試しても同じです。"
 
@@ -94,6 +94,24 @@ def test_select_rejects_a_stale_split() -> None:
         manifest.select([*cases, case("999")], Split.TRAIN)
     with pytest.raises(StaleSplitError):
         manifest.select(cases[1:], Split.TEST)
+
+
+def test_select_rejects_changed_duplicate_groups() -> None:
+    cases = _cases(10)
+    manifest = split_cases(cases, method=SplitMethod.CHRONOLOGICAL)
+    # 重新导入后 1 和 10 成了重复提交，但切分中它们分别在 train 和 test。
+    changed = [case(c.id, content=DUPLICATE) if c.id in {"1", "10"} else c for c in cases]
+    with pytest.raises(StaleSplitError, match="重复提交"):
+        manifest.select(changed, Split.TRAIN)
+
+
+def test_select_accepts_changes_that_do_not_affect_the_split() -> None:
+    cases = _cases(10)
+    manifest = split_cases(cases)
+    edited = [case(c.id, player(c.id, 1, "【合成データ】清洗规则改动后的正文")) for c in cases]
+    assert [c.id for c in manifest.select(edited, Split.TRAIN)] == [
+        c.id for c in manifest.select(cases, Split.TRAIN)
+    ]
 
 
 def test_ratios_are_validated() -> None:

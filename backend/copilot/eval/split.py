@@ -22,6 +22,7 @@
 """
 
 import hashlib
+import json
 import os
 import tempfile
 from collections import Counter
@@ -87,6 +88,9 @@ class SplitManifest(Document):
     """各侧的线程比例。"""
     assignments: dict[CaseId, Split]
     """每个案件分到哪一侧。"""
+    inputs_fingerprint: str
+    """影响切分的输入（案件 ID 和重复提交的分组）的指纹，见 `split_fingerprint`。
+    `select` 用它发现过期的切分。"""
 
     @model_validator(mode="after")
     def _check_ratios(self) -> Self:
@@ -100,8 +104,10 @@ class SplitManifest(Document):
     def select(self, cases: Iterable[Case], split: Split) -> list[Case]:
         """`cases` 中分到 `split` 的案件，顺序不变。
 
-        `cases` 必须正好是切分时的那些案件，否则报 `StaleSplitError`：用过期的切分构建知识库，
-        评测集的案件可能会混进训练部分。
+        `cases` 必须正好是切分时的那些案件，并且重复提交的分组没有变，否则报
+        `StaleSplitError`：用过期的切分构建知识库，评测集的案件可能会混进训练部分（例如重新
+        导入后两个线程成了重复提交，却分别在 train 和 test 中）。只改变了不影响切分的内容
+        （例如清洗规则改动了正文）时，切分仍然有效。
         """
         cases = list(cases)
         given = {case.id for case in cases}
@@ -111,6 +117,10 @@ class SplitManifest(Document):
             raise StaleSplitError(
                 f"切分与案件不一致：{missing} 个案件不在切分中，切分中有 {extra} 个案件不存在。"
                 "请重新运行 copilot split"
+            )
+        if split_fingerprint(cases) != self.inputs_fingerprint:
+            raise StaleSplitError(
+                "切分与案件不一致：重复提交的分组与切分时不同。请重新运行 copilot split"
             )
         return [case for case in cases if self.assignments[case.id] is split]
 
@@ -124,11 +134,26 @@ def _check_ratios(ratios: Mapping[Split, float]) -> None:
         raise ValueError("比例之和必须为 1")
 
 
-def _units(cases: list[Case]) -> list[list[str]]:
+def split_fingerprint(cases: Iterable[Case]) -> str:
+    """影响切分的输入的指纹：案件 ID 和重复提交的分组（`duplicate_groups`）。
+
+    两者都没有变时，切分结果不变（参数相同的前提下），所以只看它们，不看正文的其他部分。
+    """
+    cases = list(cases)
+    return _fingerprint(cases, duplicate_groups(cases))
+
+
+def _fingerprint(cases: list[Case], groups: list[list[str]]) -> str:
+    ids = sorted((case.id for case in cases), key=thread_order)
+    payload = json.dumps({"ids": ids, "duplicate_groups": groups}, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _units(cases: list[Case], groups: list[list[str]]) -> list[list[str]]:
     """切分的单位：一组重复提交，或一个单独的线程。按组内最早线程的顺序排列。"""
     ids = sorted({case.id for case in cases}, key=thread_order)
     grouped: dict[str, list[str]] = {}
-    for group in duplicate_groups(cases):
+    for group in groups:
         for case_id in group:
             grouped[case_id] = group
     units = []
@@ -171,7 +196,8 @@ def split_cases(
     """切分案件。参数的含义见模块说明。"""
     cases = list(cases)
     _check_ratios(ratios)
-    units = _units(cases)
+    groups = duplicate_groups(cases)
+    units = _units(cases, groups)
     position = {
         case_id: i for i, case_id in enumerate(sorted((c.id for c in cases), key=thread_order))
     }
@@ -200,6 +226,7 @@ def split_cases(
         stratum_size=stratum_size,
         ratios=dict(ratios),
         assignments=dict(sorted(assignments.items(), key=lambda kv: thread_order(kv[0]))),
+        inputs_fingerprint=_fingerprint(cases, groups),
     )
 
 
