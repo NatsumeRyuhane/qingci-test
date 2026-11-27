@@ -180,6 +180,7 @@ uv run copilot eval --split dev    # 离线评测与基线报告（#7）；--lim
 uv run copilot seed                # 从 dev 中挑选样本线程放进工作台（#8）；--ids 指定线程，已有的案件不覆盖
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs；WORKBENCH_DRAFTER=stub 时不调用 LLM
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
+scripts/demo.sh                    # 本地演示：每次启动把演示数据库重置为初始状态，再启动前后端（见 README）
 ```
 
 ### 检查（与 CI 一致）

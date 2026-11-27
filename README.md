@@ -110,9 +110,13 @@ docs/              需求、数据概况、决策记录、设计提案
    工作台并排摆放：在模拟邮箱投递来信（有 26 封合成示例，含格式异常和恶意来信），它会出现在
    工作台；批准后回复进入发件箱，不会真正发出任何邮件。`auto_send` 的草稿也需要客服点击发送。
 
-   不想配置 LLM 时：`.env` 中设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容。
-   演示时建议用单独的数据库，例如在命令前加 `DATABASE_URL=sqlite:///data/demo-workbench.db`，
-   对它运行 `db upgrade`、`kb publish`、`seed` 和 `serve`。
+   **演示**：运行 `scripts/demo.sh`。每次启动都会把演示专用的数据库（`data/processed/demo-workbench.db`，
+   不是 `.env` 中的 `DATABASE_URL`）重置为初始状态：已发布的知识库加 3 个样本案件，然后启动后端和
+   前端；Ctrl-C 同时停止两者。演示中的来信、草稿和发出的回复在下次启动时清空。演示配置按 D-017、
+   D-018（DeepSeek v4.1 Flash、来信后自动起草、自动发送），都可以用同名环境变量覆盖；
+   `scripts/demo.sh --reset` 只重置不启动。
+
+   不想配置 LLM 时：设 `WORKBENCH_DRAFTER=stub`，草稿是标为“【占位】”的占位内容。
 
    备用路线下去掉 `uv run`（先激活 venv），把 `pnpm` 换成 `npx pnpm@10.34.5`。
 
