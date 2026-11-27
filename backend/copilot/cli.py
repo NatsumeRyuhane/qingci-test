@@ -349,3 +349,62 @@ def kb_annotate(
         typer.echo(line)
     if report.failed:
         raise typer.Exit(1)
+
+
+@kb_app.command("label")
+def kb_label(
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option("--split", help="切分结果（copilot split）。默认 data/processed/split.json。"),
+    ] = None,
+    kb_dir: Annotated[
+        Path | None,
+        typer.Option("--kb-dir", help="知识库目录。默认 data/processed/kb。"),
+    ] = None,
+) -> None:
+    """为所有切分生成 #7 用的标准答案：每封客服回复对应的模板与解决信号，以及“不回复”（#5）。"""
+    from copilot.eval import DEFAULT_MANIFEST, StaleSplitError, read_manifest
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.kb.annotate import TEMPLATES_FILE, read_templates
+    from copilot.kb.build import DEFAULT_KB_DIR
+    from copilot.kb.labels import (
+        LABELS_DIR,
+        NO_REPLY_FILE,
+        REPLIES_FILE,
+        label_no_reply,
+        label_replies,
+        summarize,
+        write_jsonl,
+    )
+
+    directory = kb_dir or DEFAULT_KB_DIR
+    templates = read_templates(directory / TEMPLATES_FILE)
+    if not templates:
+        typer.echo(
+            f"找不到模板：{directory / TEMPLATES_FILE}（先运行 copilot kb annotate）", err=True
+        )
+        raise typer.Exit(1)
+    source = cases_path or DEFAULT_OUTPUT
+    manifest_path = split_path or DEFAULT_MANIFEST
+    for path, hint in ((source, "copilot ingest"), (manifest_path, "copilot split")):
+        if not path.is_file():
+            typer.echo(f"找不到 {path}（先运行 {hint}）", err=True)
+            raise typer.Exit(1)
+    cases = read_cases(source)
+    manifest = read_manifest(manifest_path)
+    try:
+        replies = label_replies(cases, manifest, sorted(templates, key=lambda t: t.rank))
+        no_reply = label_no_reply(cases, manifest)
+    except (StaleSplitError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    out = directory / LABELS_DIR
+    write_jsonl(replies, out / REPLIES_FILE)
+    write_jsonl(no_reply, out / NO_REPLY_FILE)
+    typer.echo(f"已写入 {out}：客服回复 {len(replies)} · 不回复 {len(no_reply)}")
+    for line in summarize(replies, no_reply).lines():
+        typer.echo(line)

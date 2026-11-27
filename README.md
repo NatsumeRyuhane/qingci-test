@@ -79,6 +79,7 @@ docs/              需求、数据概况、决策记录、设计提案
    uv run copilot split               # 切分为 train/dev/test，写出 data/processed/split.json
    uv run copilot kb build            # 只用 train 构建模板候选，写出 data/processed/kb/
    uv run copilot kb annotate         # 用 LLM 标注模板候选（有缓存，重复运行不重复调用）
+   uv run copilot kb label            # 生成评测（#7）用的标准答案
    uv run copilot serve --reload      # 后端 http://127.0.0.1:8000
    (cd frontend && pnpm dev)          # 前端 http://localhost:5173
    ```

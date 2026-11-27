@@ -17,7 +17,7 @@
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -210,30 +210,59 @@ def cluster_replies(
     )
 
 
+class MatchKind(StrEnum):
+    """一段回复正文是怎样对应到簇的。"""
+
+    EXACT = "exact"
+    """规范化后（`text_key`）与簇内的某种正文相同。"""
+    NEAR = "near"
+    """与簇内的某种正文近似（3-gram Jaccard 不低于阈值）。"""
+
+
 class ClusterIndex:
     """把任意一段回复正文对应到簇：先精确匹配簇内的某种正文，再按近似度匹配。
 
-    用于覆盖率，以及之后的标准答案标注（#5）。只读，不改变簇。
+    用于覆盖率和标准答案标注（#5）。只读，不改变簇。
     """
 
     def __init__(self, clusters: list[ReplyCluster], threshold: float = NEAR_DUP_THRESHOLD):
+        self._init([cluster.variants for cluster in clusters], threshold)
+
+    @classmethod
+    def from_variants(
+        cls, variants: Sequence[Sequence[str]], threshold: float = NEAR_DUP_THRESHOLD
+    ) -> "ClusterIndex":
+        """直接用每个簇的各种正文建立索引，例如从模板的来源回复重建。"""
+        index = cls.__new__(cls)
+        index._init(variants, threshold)
+        return index
+
+    def _init(self, variants: Sequence[Sequence[str]], threshold: float) -> None:
         self._threshold = threshold
         self._exact: dict[str, int] = {}
         self._grams: list[tuple[int, frozenset[str]]] = []
-        for i, cluster in enumerate(clusters):
-            for variant in cluster.variants:
+        for i, texts in enumerate(variants):
+            for variant in texts:
                 self._exact.setdefault(text_key(variant), i)
                 self._grams.append((i, ngrams(variant)))
 
-    def match(self, core: str) -> int | None:
-        """`core` 所属的簇的下标，没有时为 None。近似度相同时取下标小的（覆盖率高的）簇。"""
+    def lookup(self, core: str) -> tuple[int, MatchKind] | None:
+        """`core` 所属的簇的下标和对应方式，没有时为 None。
+
+        近似度相同时取下标小的（覆盖率高的）簇。
+        """
         exact = self._exact.get(text_key(core))
         if exact is not None:
-            return exact
+            return exact, MatchKind.EXACT
         grams = ngrams(core)
         best: tuple[float, int] | None = None
         for i, other in self._grams:
             score = jaccard(grams, other)
             if score >= self._threshold and (best is None or (-score, i) < (-best[0], best[1])):
                 best = (score, i)
-        return None if best is None else best[1]
+        return None if best is None else (best[1], MatchKind.NEAR)
+
+    def match(self, core: str) -> int | None:
+        """`core` 所属的簇的下标，没有时为 None。"""
+        found = self.lookup(core)
+        return None if found is None else found[0]

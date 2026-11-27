@@ -153,3 +153,20 @@ def test_cli(tmp_path: Path) -> None:
     assert runner.invoke(app, [*args, "--method", "random"]).exit_code == 2
     missing = runner.invoke(app, ["split", "--cases", str(tmp_path / "none.jsonl")])
     assert missing.exit_code == 1
+
+
+def test_multi_thread_units_are_not_biased_toward_train() -> None:
+    """重复提交（多个线程一组）在各侧的比例应当与单个线程相同，否则 dev/test 中的重复提交
+    （“不回复”的标准答案）会偏少。"""
+    cases = []
+    for i in range(1, 2001):
+        # 每 5 个线程中的前 2 个是一组重复提交（组内咨询内容相同，组与组之间不同）。
+        group = (i - 1) // 5
+        text = f"【合成データ】重複して送信された問い合わせです。番号{group:05d}の内容。"
+        content = text if i % 5 in (1, 2) else None
+        cases.append(case(str(i), content=content))
+    manifest = split_cases(cases)
+    grouped = [c.id for c in cases if c.form is not None]
+    share = Counter(manifest.assignments[i] for i in grouped)
+    for side, ratio in RATIOS.items():
+        assert abs(share[side] / len(grouped) - ratio) < 0.05, share

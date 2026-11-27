@@ -172,6 +172,7 @@ uv run copilot split --stats       # 切分为 train/dev/test（D-012），写�
 uv run copilot kb build            # 只用 train 构建模板候选（#5），写出 data/processed/kb/candidates.jsonl
 uv run copilot kb knowledge --check-leaks   # 校验 knowledge/，并检查是否混入样本原文
 uv run copilot kb annotate         # 用 LLM 标注模板候选（需要 LLM_MODEL_ANNOTATE），写出 data/processed/kb/templates.jsonl
+uv run copilot kb label            # 为所有切分生成 #7 的标准答案，写出 data/processed/kb/labels/
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
