@@ -135,10 +135,15 @@ class OpenAICompatibleClient:
         extra: dict[str, Any] = {}
         if response_format is not None:
             extra["response_format"] = response_format
-        if task is LLMTask.JUDGE:
-            # 评审输出仅含 6 个布尔值与 1–2 句中文说明；显式限制 max_tokens 避免 OpenRouter
-            # 按模型上限（如 65536）预扣额度导致 402。
-            extra["max_tokens"] = 2048
+        # 显式设置合理的 max_tokens，避免 OpenRouter 按模型上限（如 65536）预扣额度导致 402。
+        max_tokens = {
+            LLMTask.JUDGE: 2048,
+            LLMTask.ANALYZE: 4096,
+            LLMTask.BACKTRANSLATE: 4096,
+            LLMTask.DRAFT: 8192,
+        }.get(task)
+        if max_tokens is not None:
+            extra["max_tokens"] = max_tokens
         if self._settings.llm_service_tier is not None:
             # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
             extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}
