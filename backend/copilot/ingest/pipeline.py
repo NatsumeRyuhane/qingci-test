@@ -217,7 +217,7 @@ def build_case(thread_id: str, rows: list[SheetRow], stats: IngestStats) -> Case
     return case
 
 
-def _thread_order(thread_id: str) -> tuple[int, int, str, str]:
+def thread_order(thread_id: str) -> tuple[int, int, str, str]:
     """ASCII 数字 ID 按数值排在前面，其他 ID 按字符串排在后面。
 
     数值比较不调用 `int()`：先比去掉前导零后的位数，再比字符串，所以 `²` 这类 `int()`
@@ -242,7 +242,7 @@ def build_cases(
     for row in rows:
         groups[row.thread_id].append(row)
     stats = IngestStats()
-    cases = [build_case(tid, groups[tid], stats) for tid in sorted(groups, key=_thread_order)]
+    cases = [build_case(tid, groups[tid], stats) for tid in sorted(groups, key=thread_order)]
     cases = add_cross_thread_evidence(cases, min_threads=repeated_text_min_threads)
     finished = []
     for case in cases:
