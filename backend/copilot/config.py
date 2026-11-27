@@ -18,6 +18,8 @@ class LLMTask(StrEnum):
     DRAFT = "draft"
     BACKTRANSLATE = "backtranslate"
     JUDGE = "judge"
+    ANNOTATE = "annotate"
+    """知识库模板的标注（#5）：中文说明、意图、风险等。离线批处理，调用次数少，可以用较强的模型。"""
 
 
 JsonMode = Literal["json_schema", "json_object", "none"]
@@ -52,16 +54,19 @@ class Settings(BaseSettings):
     llm_model_draft: str | None = None
     llm_model_backtranslate: str | None = None
     llm_model_judge: str | None = None
+    llm_model_annotate: str | None = None
 
     llm_base_url_analyze: str | None = None
     llm_base_url_draft: str | None = None
     llm_base_url_backtranslate: str | None = None
     llm_base_url_judge: str | None = None
+    llm_base_url_annotate: str | None = None
 
     llm_api_key_analyze: SecretStr | None = None
     llm_api_key_draft: SecretStr | None = None
     llm_api_key_backtranslate: SecretStr | None = None
     llm_api_key_judge: SecretStr | None = None
+    llm_api_key_annotate: SecretStr | None = None
 
     # --- Embedding：OpenAI 兼容的 /v1/embeddings ---
     embedding_base_url: str | None = None
