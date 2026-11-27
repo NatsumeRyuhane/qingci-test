@@ -317,3 +317,21 @@ def test_other_reason_is_never_automatic() -> None:
     decision = decide_no_reply(case("404", content=FORM), analysis(no_reply=proposal), [])
     assert decision is not None and not decision.auto
     assert "永远不自动生效" in decision.reason_zh
+
+
+# --- 评审意见（PR #28）-------------------------------------------------------
+
+
+@pytest.mark.parametrize("checks", [[], PASSED[:-1]])
+def test_missing_checks_block_auto_send(checks: list[DraftCheck]) -> None:
+    decision, why = route(inputs(checks=checks))
+    assert decision is Route.REVIEW
+    assert any("缺少检查结果" in r for r in why)
+
+
+def test_duplicate_shortcut_ignores_threads_with_follow_up() -> None:
+    original = replied("400", RoleEvidenceKind.QUOTE_CORROBORATION)
+    follow_up = case(
+        "401", player("401", 1), player("401", 2, "【合成】別の質問です"), content=FORM
+    )
+    assert decide_no_reply(follow_up, None, [original]) is None

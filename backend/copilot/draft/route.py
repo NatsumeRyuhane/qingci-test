@@ -15,7 +15,9 @@ MVP 中不会真正发送任何邮件，`auto_send` 只是界面中显示的建�
 
 “不回复”（提案 0003 §8）只在两种可解释的情况下自动生效，其他提议都转人工审核：
 
-- 重复提交：由代码按 `duplicate_key` 确认（不依赖模型），并且对应的线程有可信的客服回复；
+- 重复提交：线程只有最初的那封咨询（之后没有追问），由代码按 `duplicate_key` 确认（不依赖
+  模型），并且对应的线程有可信的客服回复。表单属于第一封邮件，线程中有了追问就不能只按
+  表单判断，追问可能是另一个问题；
 - 只含系统邮件：每封都有强的系统证据，分析也认为其中没有玩家的问题（提议 `system_message`），
   并且没有疑似注入。
 """
@@ -55,6 +57,11 @@ CHECK_NAMES_ZH = {
     DraftCheckKind.CITATIONS: "引用",
     DraftCheckKind.CONTENT_SAFETY: "内容安全",
 }
+
+
+def done(checks: Iterable[DraftCheck]) -> set[DraftCheckKind]:
+    """有结果的检查项。自动发送要求每一项（`DraftCheckKind` 的全部取值）都有结果并且通过。"""
+    return {c.kind for c in checks}
 
 
 def player_text(case: Case) -> str:
@@ -156,6 +163,9 @@ def route(inp: RouteInput) -> tuple[Route, list[str]]:
         for c in inp.checks
         if not c.passed
     ]
+    missing = [CHECK_NAMES_ZH.get(k, k.value) for k in DraftCheckKind if k not in done(inp.checks)]
+    if missing:
+        failed.append(f"缺少检查结果：{'、'.join(missing)}")
     blockers = _auto_send_blockers(inp)
     if not failed and not blockers:
         return Route.AUTO_SEND, ["低风险的通用模板，自动发送的全部条件都满足（MVP 中只是建议）"]
@@ -206,7 +216,7 @@ def decide_no_reply(
     case: Case, analysis: CaseAnalysis | None, others: Iterable[Case]
 ) -> NoReplyDecision | None:
     """是否不回复，以及是否自动生效。返回 None 表示需要回复。"""
-    if not any(m.role is MessageRole.AGENT for m in case.messages):
+    if len(case.messages) == 1 and case.messages[0].role is MessageRole.PLAYER:
         duplicate = find_duplicate_of(case, others)
         if duplicate is not None:
             proposal = NoReplyProposal(
