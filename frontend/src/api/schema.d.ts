@@ -28,6 +28,25 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ErrorDetail */
+        ErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "validation_error" | "internal_error";
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+        };
+        /**
+         * ErrorResponse
+         * @description 所有错误响应的正文。
+         */
+        ErrorResponse: {
+            error: components["schemas"]["ErrorDetail"];
+        };
         /**
          * Health
          * @description `GET /v1/health` 的响应。
@@ -63,6 +82,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
