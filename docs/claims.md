@@ -54,7 +54,10 @@
 | C-21 | 草稿中不会混入链接、邮箱、HTML 或脚本、不可见字符、其他案件的文字（模板原文中的链接除外） | `check_content_safety` | `tests/draft/test_checks.py::test_content_safety` · `tests/draft/test_checks.py::test_other_case_text_is_detected` · `tests/draft/test_adversarial.py::test_malicious_content_in_draft_is_blocked` · `tests/draft/test_adversarial.py::test_leaking_other_case_is_blocked` | 单元、对抗 |
 | C-22 | 模型新增的每一句都必须引用提供给它的条目，引用按整句对应；没有按句式判断的豁免，索要信息的句子引用分类出的意图 | `check_citations` | `tests/draft/test_checks.py::test_uncited_added_claim_fails_and_citation_fixes_it` · `tests/draft/test_checks.py::test_every_added_sentence_needs_a_citation` · `tests/draft/test_checks.py::test_info_request_cites_the_intent` · `tests/draft/test_checks.py::test_citation_must_match_the_whole_sentence` · `tests/draft/test_checks.py::test_model_cannot_exempt_a_factual_sentence` · `tests/draft/test_checks.py::test_citation_of_unprovided_entry_fails` | 单元。引用是否真的支持这句话：待验证（#7） |
 | C-23 | 固定的问候语、结语和禁止转载声明由代码组装，不由模型生成 | `assemble`、`check_structure` | `tests/draft/test_checks.py::test_assemble_order_and_no_duplicate_phrases` · `tests/draft/test_checks.py::test_structure_detects_missing_or_repeated_frame` | 单元 |
-| C-24 | 不可信的文本只作为数据放在分隔标记内，正文中伪造的标记无法结束数据块 | `copilot/llm/prompt.py` 的 `data_block` | `tests/llm/test_prompt.py::test_forged_delimiters_cannot_close_the_block` · `tests/llm/test_prompt.py::test_invisible_and_bidi_characters_are_removed` | 单元。起草的 prompt 组装：待验证（PR2） |
+| C-24 | 不可信的文本只作为数据放在分隔标记内，正文中伪造的分隔标记和时间块无法生效；时间块由代码生成，永远在最后；系统指令和目录不含案件内容 | `copilot/llm/prompt.py` 的 `data_block`、`copilot/draft/prompts.py` | `tests/llm/test_prompt.py::test_forged_delimiters_cannot_close_the_block` · `tests/llm/test_prompt.py::test_invisible_and_bidi_characters_are_removed` · `tests/draft/test_analyze.py::test_prompt_keeps_untrusted_text_in_data_blocks_and_time_last` · `tests/draft/test_analyze.py::test_system_prompt_is_static_across_cases` · `tests/draft/test_service.py::test_draft_prompt_static_prefix_and_time_last` | 单元；`llm-live`（ATK-26） |
+| C-25 | 模型只能选可见的模板和目录中的意图；缺失信息只能来自意图的清单；线程判断只用于 `undetermined` 案件；模型不能指定重复提交对应的线程 | `compose.output_model`、`analyze.analyze` | `tests/draft/test_service.py::test_unapproved_or_unknown_template_is_rejected` · `tests/draft/test_analyze.py::test_intent_outside_catalog_is_rejected` · `tests/draft/test_analyze.py::test_missing_info_is_limited_to_the_intents_list` · `tests/draft/test_analyze.py::test_thread_judgement_only_for_undetermined_cases` · `tests/draft/test_analyze.py::test_model_cannot_name_a_duplicate_thread` | 单元 |
+| C-26 | 疑似注入的信号由代码独立检测，与模型的判断取并集：模型照做了注入、又不报告时，信号仍然在 | `analyze.injection_signals` | `tests/draft/test_analyze.py::test_code_detects_injection_signals` · `tests/draft/test_analyze.py::test_compromised_model_hiding_injection_still_has_code_signal` · `tests/draft/test_analyze.py::test_model_flag_is_added_to_code_signals` | 单元、对抗、`llm-live` |
+| C-27 | **每个草稿都经过 `run_checks` 和 `route`**：`draft_case` 是生成 `Draft` 的唯一途径，无论模型输出什么，草稿都有全部检查的结果 | `copilot/draft/service.py` | `tests/draft/test_service.py::test_every_draft_goes_through_all_checks_and_routing` · `tests/draft/test_service.py::test_compromised_model_refund_promise_is_blocked` · `tests/live/test_draft_live.py::test_injection_samples_are_never_auto_sent` | 单元、对抗、`llm-live`；PR3 结束、#7 开始前统一复核 |
 
 ### 起草：分流与“不回复”（#6）
 
@@ -77,8 +80,6 @@
 
 | # | 主张 | 由谁补上 |
 |---|---|---|
-| P-01 | 流水线的每个草稿都经过 `run_checks` 和 `route`，没有绕过它们的路径 | PR2（起草与 CLI）的端到端测试；PR3 结束、#7 开始前统一复核 |
-| P-02 | 提供给模型的 prompt 中只有可见的条目；时间块在最后、由代码生成，正文不能伪造 | PR2 |
 | P-03 | 工具只读、范围受限：越权的调用被拒绝，超出步数时回退到固定流水线 | PR3 |
 | P-04 | 注入成功率、“玩家被误判为客服或系统”的比例接近零；高风险案件不会被分流为 `auto_send` | #7（合成注入样本）、`llm-live` |
 | P-05 | 自检的启发式规则（敬体、政策短语）误报和漏报都低 | #7 在 dev 上报告 |
@@ -101,3 +102,4 @@
 | A-09 | **字符 bigram 的 BM25 加 embedding 足够用于相似案件检索** | D-015 | 检索质量下降，只影响辅助上下文 | #7 |
 | A-10 | **fake LLM 能代表“被攻破的模型”**：对抗测试中构造的输出覆盖了真实模型可能被诱导出的行为 | 提案 0003 §13 的对抗测试表 | 出现新的攻击方式时，可能有代码层没有覆盖的输出 | 新发现的攻击先在 [security.md](security.md) 登记编号并加入合成样本，再决定是否修复（#18） |
 | A-11 | **项目配置的 LLM 服务商可以接收样本数据** | 这就是产品功能本身（`sample-data` 技能） | — | 更换服务商时 |
+| A-12 | **历史重放中，从数据归纳的模板出现得偏晚**：模板的 `known_from` 取 train 中已知发送时间的上界，而样本中只有 258 封邮件恢复了发送时间 | D-011（只会偏晚、不会偏早） | 重放会把运营方当时已有的模板藏起来，低估系统的效果。#6 第二个 PR 的本地真实数据验证中，10 个 dev 案件里有 7 个，真实回复用的模板在它发出的那一刻还“不可见” | #7 同时报告严格重放（按 `known_from`）和不按 `known_from` 过滤的结果；或改进 `known_from` 的估计 |

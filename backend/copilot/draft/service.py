@@ -3,7 +3,7 @@
 
     时间上下文 → 可用知识 → 分析 → “不回复” → 候选模板 → 相似案件 → 起草 → 自检 → 回译 → 分流
 
-**每个草稿都经过 `run_checks` 和 `route`**（docs/claims.md P-01）：这是生成 `Draft` 的唯一
+**每个草稿都经过 `run_checks` 和 `route`**（docs/claims.md C-27）：这是生成 `Draft` 的唯一
 途径，`Draft` 的分流和理由只来自 `route`。“不回复”自动生效时不生成草稿。
 """
 

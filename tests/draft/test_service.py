@@ -1,6 +1,6 @@
 """起草流水线的端到端测试（#6）：fake LLM 模拟模型，包括完全听从注入的模型。
 
-docs/claims.md P-01：每个草稿都经过 `run_checks` 和 `route`。
+docs/claims.md C-27：每个草稿都经过 `run_checks` 和 `route`。
 
 SYNTHETIC：全部是合成数据，不来自客户样本（D-002）。
 """
@@ -143,7 +143,7 @@ async def test_eligible_generic_reply_is_suggested_for_auto_send(guide: StyleGui
 async def test_every_draft_goes_through_all_checks_and_routing(
     guide: StyleGuide, draft: str
 ) -> None:
-    """P-01：无论模型输出什么，草稿都有全部检查的结果，分流理由来自 route。"""
+    """C-27：无论模型输出什么，草稿都有全部检查的结果，分流理由来自 route。"""
     outcome, _ = await run(guide, THANKS_CASE, draft=draft)
     assert {c.kind for c in outcome.draft.checks} == set(DraftCheckKind)
     assert outcome.draft.route_reasons
