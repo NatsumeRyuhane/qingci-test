@@ -59,7 +59,7 @@ def seed(
     repo: Repository,
     cases: Sequence[Case],
     *,
-    count: int = 10,
+    count: int = 3,
     ids: Sequence[str] = (),
 ) -> SeedReport:
     """把线程写入工作台。给出 `ids` 时只写这些线程（不受切分限制），否则按 `pick` 挑选。"""

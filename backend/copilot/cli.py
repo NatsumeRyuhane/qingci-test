@@ -635,7 +635,7 @@ def _parse_now(value: str | None) -> "datetime | None":
 
 @app.command("seed")
 def seed_command(
-    count: Annotated[int, typer.Option("--count", min=1, max=500, help="挑选多少个线程。")] = 10,
+    count: Annotated[int, typer.Option("--count", min=1, max=500, help="挑选多少个线程。")] = 3,
     ids: Annotated[
         str | None,
         typer.Option("--ids", help="只写入这些线程（逗号分隔），不受切分限制。"),
