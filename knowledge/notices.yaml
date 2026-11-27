@@ -1,0 +1,49 @@
+# 公告与事件（提案 0003 §2、§9）：只收录 train 部分（D-012）中能观察到的事故。
+#
+# - 事件时间（event_start/event_end）与案件的问题发生时间匹配；有效期按“现在”判断，这里都不设
+#   上限：事故结束后来信的玩家仍然要能匹配上。
+# - known_from 是运营方从何时起知道这个事件，必须是上界（D-011）：取 train 中使用对应模板、
+#   并且恢复了发送时间的客服回复里最早的那一封。更早的回复没有发送时间，所以历史重放中这条
+#   公告可能比实际晚出现，但不会更早。
+# - template_ids 由之后的标注和审核填写（模板的 ID 来自 copilot kb build）。
+
+defaults:
+  version: 1
+  recorded_at: "2026-11-27T00:00:00+09:00"
+  origin: manual
+  review_status: approved
+
+entries:
+  - id: incident-20240302-app-store-purchase
+    kind: incident
+    title_zh: App Store 故障导致付费道具无法购买或未到账
+    description_zh: >-
+      2024 年 3 月 2 日 11:00–14:00 前后，App Store 的故障导致购买付费道具时显示错误、无法购买，
+      或购买后道具没有到账。故障已经解除，可以正常购买；没有到账的道具已经发放到玩家的账号中。
+      玩家填写的问题发生时间不可信，只决定候选，不决定补偿（提案 0003 §9）。
+    event_start: "2024-03-02T11:00:00+09:00"
+    event_end: "2024-03-02T14:00:00+09:00"
+    known_from: "2024-03-02T19:11:00+09:00"
+    platforms: [ios]
+    intents: [purchase_not_reflected]
+
+  - id: incident-20240315-ranking-reward-error
+    kind: incident
+    title_zh: 活动“運命のジュエリー”的排名奖励出现“構成エラー”，无法领取
+    description_zh: >-
+      2024 年 3 月 15 日 12:00–13:25，活动“運命のジュエリー”的小组排名奖励中，本来没有奖励的
+      第 6–10 名也显示为可以领取，领取时出现“構成エラー”的错误。
+    event_start: "2024-03-15T12:00:00+09:00"
+    event_end: "2024-03-15T13:25:00+09:00"
+    known_from: "2024-03-15T14:17:00+09:00"
+    intents: [event_reward_question]
+
+  - id: incident-ad-reward-not-received
+    kind: incident
+    title_zh: 观看广告后无法领取奖励（调查中）
+    description_zh: >-
+      播放广告后无法领取奖励。截至样本数据的时期仍在调查和确认中，没有结束时间；修复时会通过
+      官方 X 和游戏内公告告知。开始时间不明确，取 train 中相关咨询里最早的问题发生日期。
+    event_start: "2024-02-27T00:00:00+09:00"
+    known_from: "2024-03-28T17:54:00+09:00"
+    intents: [ad_reward_not_received]
