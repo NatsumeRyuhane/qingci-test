@@ -48,6 +48,7 @@ REDACTIONS = [
     "省略模型思考过程与系统提示",
     "隐去邮箱地址、本地用户名与目录、scratchpad 路径、SSH 密钥信息",
     "读取样本数据或其派生数据（data/interim/、.jsonl、threads.json）的命令输出整段省略",
+    "读取被持久化的长输出（tool-results/ 下的文件）的结果整段省略",
     "隐去 GitHub 风格的访问令牌（如 CodeRabbit 链接中的 ghh_…）",
     f"工具结果最多保留 {MAX_OUTPUT_LINES} 行，单个输入字段最多 {MAX_FIELD_CHARS} 字符",
     "Write 工具写入的文件内容省略（以仓库中的文件为准）",
@@ -152,7 +153,14 @@ def main() -> None:
                 if step is None:
                     continue
                 raw = redact(result_text(b.get("content")))
-                if step["tool"] == "Bash" and any(m in json.dumps(step["input"], ensure_ascii=False) for m in DATA_MARKERS):
+                reads_data = step["tool"] == "Bash" and any(
+                    m in json.dumps(step["input"], ensure_ascii=False) for m in DATA_MARKERS
+                )
+                # 被持久化的长输出（tool-results/ 下的文件）可能来自读取样本数据的命令，一律省略
+                reads_persisted = step["tool"] == "Read" and "tool-results/" in str(
+                    step["input"].get("file_path", "")
+                )
+                if reads_data or reads_persisted:
                     output, omitted = "[输出包含样本数据片段，按 data/README.md 的规则省略]", 0
                 else:
                     lines = raw.splitlines()
