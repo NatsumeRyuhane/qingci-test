@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from copilot.config import LLMTask
 from copilot.llm.client import LLMOutputError, Message
+from copilot.llm.usage import UsageMeter
 
 
 @dataclass
@@ -24,6 +25,8 @@ class FakeLLMClient:
     def __init__(self) -> None:
         self._replies: dict[LLMTask, deque[str]] = defaultdict(deque)
         self.calls: list[FakeCall] = []
+        self.usage = UsageMeter()
+        """与真实客户端相同的接口；只计次数，token 记为未知。"""
 
     def queue(self, task: LLMTask, *replies: str) -> None:
         """为某个任务按顺序排入回复。`complete_json` 收到 JSON 字符串。"""
@@ -31,6 +34,7 @@ class FakeLLMClient:
 
     def _next(self, task: LLMTask, messages: list[Message]) -> str:
         self.calls.append(FakeCall(task=task, messages=list(messages)))
+        self.usage.record(task, 0.0, None, None)
         if not self._replies[task]:
             raise AssertionError(f"FakeLLMClient：任务 {task.value} 没有预设的回复")
         return self._replies[task].popleft()

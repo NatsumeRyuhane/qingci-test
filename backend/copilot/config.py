@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 2
     llm_service_tier: ServiceTier | None = None
+    llm_log_dir: str | None = None
+    """每次 LLM 调用的消息和回复写成 JSONL 的目录（调试用，含客户数据）。为空时不写。"""
 
     llm_model_analyze: str | None = None
     llm_model_draft: str | None = None
@@ -81,9 +83,9 @@ class Settings(BaseSettings):
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"
     database_url: str = "sqlite:///data/copilot.db"
 
-    @field_validator("llm_service_tier", mode="before")
+    @field_validator("llm_service_tier", "llm_log_dir", mode="before")
     @classmethod
-    def _empty_tier_is_none(cls, value: object) -> object:
+    def _empty_is_none(cls, value: object) -> object:
         # 直接复制 .env.example 时值为空字符串，表示不指定。
         return None if value == "" else value
 

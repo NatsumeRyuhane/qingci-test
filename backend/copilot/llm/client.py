@@ -2,6 +2,9 @@
 
 import json
 import re
+import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict
 
 import httpx2
@@ -9,6 +12,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from copilot.config import Endpoint, LLMTask, Settings
+from copilot.llm.usage import CallLog, UsageMeter
 
 
 class Message(TypedDict):
@@ -22,6 +26,9 @@ class LLMOutputError(RuntimeError):
 
 class LLMClient(Protocol):
     """业务代码依赖的接口。"""
+
+    usage: UsageMeter
+    """按任务累计的调用次数、token 和耗时（`copilot.llm.usage`）。"""
 
     async def complete_text(self, task: LLMTask, messages: list[Message]) -> str:
         """返回纯文本回复（例如回译）。"""
@@ -69,9 +76,15 @@ class OpenAICompatibleClient:
         *,
         transport_retries: int = 2,
         http_client: httpx2.AsyncClient | None = None,
+        log_dir: Path | None = None,
     ) -> None:
-        """`http_client` 供测试注入（例如带 `httpx2.MockTransport` 的客户端）。"""
+        """`http_client` 供测试注入（例如带 `httpx2.MockTransport` 的客户端）。`log_dir` 为空时
+        取 `LLM_LOG_DIR`；两者都没有时不写调试日志。"""
         self._settings = settings
+        self.usage = UsageMeter()
+        """按任务累计的调用次数、token 和耗时。"""
+        directory = log_dir or (Path(settings.llm_log_dir) if settings.llm_log_dir else None)
+        self._log = CallLog(directory)
         self._transport_retries = transport_retries
         self._http_client = http_client
         self._clients: dict[tuple[str, str], AsyncOpenAI] = {}
@@ -99,12 +112,28 @@ class OpenAICompatibleClient:
         if self._settings.llm_service_tier is not None:
             # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
             extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}
+        started = time.perf_counter()
         response = await self._client_for(endpoint).chat.completions.create(
             model=endpoint.model,
             messages=list(messages),  # type: ignore[arg-type]
             **extra,
         )
+        seconds = time.perf_counter() - started
         content = response.choices[0].message.content if response.choices else None
+        usage = response.usage
+        prompt = usage.prompt_tokens if usage is not None else None
+        completion = usage.completion_tokens if usage is not None else None
+        self.usage.record(task, seconds, prompt, completion)
+        self._log.write(
+            task=task,
+            model=endpoint.model,
+            messages=messages,
+            response=content,
+            seconds=seconds,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            at=datetime.now(UTC),
+        )
         return content or None
 
     async def complete_text(self, task: LLMTask, messages: list[Message]) -> str:
