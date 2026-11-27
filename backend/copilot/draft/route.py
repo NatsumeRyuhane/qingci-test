@@ -122,9 +122,9 @@ class AutoSendGate(StrEnum):
     TEMPLATE_GENERIC = "template_generic"
     """模板是通用模板：不限时、没有占位符。"""
     TEMPLATE_IN_INTENT = "template_in_intent"
-    """模板属于分类出的意图。"""
+    """模板属于分类出的意图（由这里核对模板的意图，不只信任 `Candidate.in_intent`）。"""
     INTENT_ELIGIBLE = "intent_eligible"
-    """意图在自动发送允许清单中（`Intent.auto_send_eligible`）。"""
+    """传入的意图就是分析分类出的意图，并且在自动发送允许清单中（`Intent.auto_send_eligible`）。"""
     INTENT_CONFIDENCE = "intent_confidence"
     """意图分类置信度不低于阈值。"""
     DRAFT_CONFIDENCE = "draft_confidence"
@@ -177,17 +177,26 @@ def _template_generic(inp: RouteInput) -> list[str]:
 
 
 def _template_in_intent(inp: RouteInput) -> list[str]:
-    if inp.candidate is None:
+    """模板属于分类出的意图。不只信任调用方算好的 `Candidate.in_intent`：不限时的模板还要
+    由这里直接核对模板的意图（限时模板永远过不了 `template_generic`，不影响结果）。"""
+    candidate = inp.candidate
+    if candidate is None:
         return ["没有使用模板"]
-    if inp.candidate.in_intent:
+    template = candidate.template
+    if candidate.in_intent and (candidate.time_bound or template.intent == inp.analysis.intent):
         return []
-    return [f"所选模板属于意图 {inp.candidate.template.intent}，不是分类出的 {inp.analysis.intent}"]
+    return [f"所选模板属于意图 {template.intent}，不是分类出的 {inp.analysis.intent}"]
 
 
 def _intent_eligible(inp: RouteInput) -> list[str]:
-    if inp.intent is not None and inp.intent.auto_send_eligible:
-        return []
-    return [f"意图 {inp.analysis.intent} 不在自动发送允许清单中"]
+    """意图在自动发送允许清单中，并且就是分析分类出的那个意图。调用方传错意图时不通过。"""
+    if inp.intent is None:
+        return [f"意图 {inp.analysis.intent} 不在意图目录中"]
+    if inp.intent.id != inp.analysis.intent:
+        return [f"传入的意图 {inp.intent.id} 与分析分类出的 {inp.analysis.intent} 不一致"]
+    if not inp.intent.auto_send_eligible:
+        return [f"意图 {inp.analysis.intent} 不在自动发送允许清单中"]
+    return []
 
 
 def _intent_confidence(inp: RouteInput) -> list[str]:

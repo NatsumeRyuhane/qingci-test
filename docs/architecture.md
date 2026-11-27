@@ -93,8 +93,8 @@
    | `checks_passed` | 上表中每一项检查都有结果并且通过 |
    | `template_allowed` | 模板已批准、`risk` 为 `low`、`auto_send_allowed`（只有所有者在审核中能打开） |
    | `template_generic` | 通用模板：不限时、没有占位符 |
-   | `template_in_intent` | 模板属于分类出的意图 |
-   | `intent_eligible` | 意图在自动发送允许清单中（`Intent.auto_send_eligible`） |
+   | `template_in_intent` | 模板属于分类出的意图（关卡直接核对模板的意图，不只信任调用方算好的结果） |
+   | `intent_eligible` | 传入的意图就是分析分类出的意图，并且在自动发送允许清单中（`Intent.auto_send_eligible`）；不一致时不通过 |
    | `intent_confidence` | 意图分类置信度不低于 `DRAFT_AUTO_SEND_MIN_CONFIDENCE` |
    | `draft_confidence` | 草稿信心值不低于同一阈值 |
    | `no_sensitivity_tags` | 分析没有提议敏感标签 |

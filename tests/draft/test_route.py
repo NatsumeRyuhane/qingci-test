@@ -210,7 +210,25 @@ GATE_CASES: list[tuple[AutoSendGate, dict[str, Any], str]] = [
         {"intent": intent("syn_thanks", risk=RiskLevel.LOW)},
         "允许清单",
     ),
-    (AutoSendGate.INTENT_ELIGIBLE, {"intent": None}, "允许清单"),
+    (AutoSendGate.INTENT_ELIGIBLE, {"intent": None}, "不在意图目录中"),
+    # 评审意见（PR #28）：调用方传入的意图与分析分类出的意图不一致时不通过。
+    (
+        AutoSendGate.INTENT_ELIGIBLE,
+        {
+            "intent": intent("syn_thanks", risk=RiskLevel.LOW, auto_send=True),
+            "analysis": analysis(intent="syn_payment"),
+            "candidate": Candidate(
+                template=GENERIC.template, time_bound=False, window=WindowMatch.INSIDE
+            ),
+        },
+        "不一致",
+    ),
+    # 调用方算错 in_intent 时，模板意图仍由关卡直接核对。
+    (
+        AutoSendGate.TEMPLATE_IN_INTENT,
+        {"analysis": analysis(intent="syn_payment")},
+        "不是分类出的",
+    ),
     (AutoSendGate.INTENT_CONFIDENCE, {"analysis": analysis(intent_confidence=0.5)}, "置信度 0.50"),
     (AutoSendGate.INTENT_CONFIDENCE, {"analysis": analysis(intent_confidence=None)}, "置信度 无"),
     (AutoSendGate.DRAFT_CONFIDENCE, {"draft_confidence": 0.6}, "草稿信心值"),
