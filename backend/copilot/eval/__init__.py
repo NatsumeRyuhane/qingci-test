@@ -1,5 +1,31 @@
-"""评测（#7）。目前只有数据切分（`copilot split`），知识库构建（#5）也依赖它。"""
+"""评测（#7）：数据切分、历史重放、LLM 评审、指标汇总、批量评测与安全攻击重放。"""
 
+# split 必须在依赖 kb.labels 的模块之前导入，避免与 copilot.kb.labels 循环导入。
+from copilot.eval.judge import JudgeVerdict, build_judge_messages, judge_draft
+from copilot.eval.metrics import (
+    CaseEvalRecord,
+    LatencySummary,
+    NoReplyMetrics,
+    SliceMetrics,
+    compute_latency,
+    compute_no_reply,
+    compute_slice,
+    percentile,
+    read_records,
+    render_markdown,
+    write_records,
+)
+from copilot.eval.replay import (
+    DEFAULT_REPLAY_NOW,
+    NoReplyEvalItem,
+    ReplyEvalItem,
+    TimelineIndex,
+    build_no_reply_items,
+    build_reply_items,
+    replay_corpus,
+    truncate_case,
+)
+from copilot.eval.runner import EvalRunConfig, run_eval
 from copilot.eval.split import (
     DEFAULT_MANIFEST,
     Split,
@@ -14,12 +40,36 @@ from copilot.eval.split import (
 
 __all__ = [
     "DEFAULT_MANIFEST",
+    "DEFAULT_REPLAY_NOW",
+    "CaseEvalRecord",
+    "EvalRunConfig",
+    "JudgeVerdict",
+    "LatencySummary",
+    "NoReplyEvalItem",
+    "NoReplyMetrics",
+    "ReplyEvalItem",
+    "SliceMetrics",
     "Split",
     "SplitManifest",
     "SplitMethod",
     "StaleSplitError",
+    "TimelineIndex",
+    "build_judge_messages",
+    "build_no_reply_items",
+    "build_reply_items",
+    "compute_latency",
+    "compute_no_reply",
+    "compute_slice",
+    "judge_draft",
+    "percentile",
     "read_manifest",
+    "read_records",
+    "render_markdown",
+    "replay_corpus",
+    "run_eval",
     "split_cases",
     "split_stats",
+    "truncate_case",
     "write_manifest",
+    "write_records",
 ]
