@@ -110,7 +110,7 @@ def test_service_tier() -> None:
 
 def test_draft_settings_bounds() -> None:
     defaults = make_settings()
-    assert defaults.draft_auto_send_min_confidence == 0.85
+    assert defaults.draft_auto_send_min_confidence == 0.92
     assert defaults.draft_problem_time_lookback_days == 7
     with pytest.raises(ValueError):
         make_settings(draft_auto_send_min_confidence=1.5)

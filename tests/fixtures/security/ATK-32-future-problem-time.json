@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-32",
+  "title_zh": "填写晚于现在的问题发生时间",
+  "expected_layers": [
+    "L5"
+  ],
+  "kind": "draft_e2e",
+  "occurred_at": "2099-12-31 23:59",
+  "player_body": "【合成】未来の日時で不具合が起きました。補償をお願いします。"
+}

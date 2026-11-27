@@ -132,3 +132,16 @@
 - 决定：直接修正版本 1、2 的 `known_from`，作为**投入使用前的一次性例外**。理由：目前没有任何东西依赖“已发布的版本永不改写”这个前提。草稿还没有持久化，没有引用指向这两个版本；知识库数据库是本地的，可以从 `knowledge/` 和审核结果完整重建。修改通过 PR 进行，原来的值保留在 git 历史中。
 - 影响：D-011、D-014 的规则不变。一旦草稿、评测结果或其他记录开始持久化并引用知识库版本，已发布的版本就不再允许改写，发现的错误只能新建版本，并在报告中说明。已有知识库数据库的贡献者需要重建（`copilot kb publish` 遇到同一版本的不同内容会报错）。
 
+## D-017：#7 离线评测后的模型、服务等级与自动发送阈值决定
+- 日期：2026-11-27 · 状态：已采纳 · 来源：[#33](https://github.com/NatsumeRyuhane/qingci-test/pull/33)（仓库所有者的评审决定与细粒度校准数据）
+- 背景：#7 完成了留出集（`dev` / `test`）基线、模型对照、服务等级延迟对比与安全攻击目录端到端重放（见 [eval.md](eval.md)）。对比与校准数据显示：
+  - `deepseek/deepseek-v4.1-flash` 相比 Gemini 4 系列端到端延迟 p50 降低约 32%（35.9s vs 53.2s，`draft` p50 14.0s vs 27.9s），单案成本降逾 20×（~\$0.007），解决方案一致率达到 11/13（84.6%）且语体/安全/回译全项 100%；
+  - `flex` 与 `default` 服务等级的 p50 持平（51.6s），但 `flex` 的 p95 尾延迟高出约 40s（134.4s vs 94.2s）；
+  - 细粒度 `draft_confidence` 校准表明，Gemini 4 在 `0.85–0.90` 区间仍有方案不一致案例（`test` 3/5、`dev` 1/2），自 `>= 0.92` 起在 `test`（18/18）与 `dev`（9/9）上均为 100%；`deepseek/deepseek-v4.1-flash` 在 `>= 0.90` 区间为 6/6（100%）。
+- 决定：
+  - **全链路暂定模型**：起草流水线（`analyze`、`draft`、`backtranslate`）暂定全链路切换为 `deepseek/deepseek-v4.1-flash`（仍保留 D-010 的按任务配置端点与模型的灵活性）；`LLMTask.JUDGE` 继续使用不同服务商的强模型以避免自评偏差。
+  - **自动发送阈值与开关**：`DRAFT_AUTO_SEND_MIN_CONFIDENCE` 默认值由 `0.85` 上调至 **`0.92`**（跨模型兼顾安全边界与覆盖率）；在完成低风险意图专项校准前，全部模板继续保持 `auto_send_allowed = False`。
+  - **起草模式**：MVP 默认保持固定流水线 `pipeline`（不默认开启 `pipeline_with_tools`）。
+  - **服务等级**：批处理与异步任务（离线评测、知识库标注、后台预起草）优先使用 `flex` 降本；界面交互式重新生成使用 `default` 控制尾延迟。
+- 影响：已将 `backend/copilot/config.py`、`backend/copilot/draft/service.py` 与 `.env.example` 的默认阈值更新为 `0.92`，并同步更新 [eval.md](eval.md) 和 [claims.md](claims.md)（P-06）；两个留待改进项已拆出为独立 issue（[#34](https://github.com/NatsumeRyuhane/qingci-test/issues/34)、[#35](https://github.com/NatsumeRyuhane/qingci-test/issues/35)）。
+

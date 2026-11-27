@@ -218,3 +218,43 @@ async def test_service_tier_is_omitted_by_default() -> None:
     endpoint = FakeEndpoint(chat_reply("テキスト"))
     await make_client(endpoint).complete_text(LLMTask.ANALYZE, MESSAGES)
     assert "service_tier" not in endpoint.body()
+
+
+async def test_transient_region_403_is_retried() -> None:
+    endpoint = FakeEndpoint(
+        httpx2.Response(
+            403,
+            json={"error": {"message": "This model is not available in your region."}},
+        ),
+        chat_reply("翻訳結果"),
+    )
+    client = make_client(endpoint, transport_retries=1, retry_backoff_seconds=0.0)
+
+    assert await client.complete_text(LLMTask.ANALYZE, MESSAGES) == "翻訳結果"
+    assert len(endpoint.requests) == 2
+
+
+async def test_non_region_403_is_not_retried() -> None:
+    from openai import PermissionDeniedError
+
+    endpoint = FakeEndpoint(
+        httpx2.Response(403, json={"error": {"message": "Invalid API key permissions"}}),
+        chat_reply("翻訳結果"),
+    )
+    client = make_client(endpoint, transport_retries=2, retry_backoff_seconds=0.0)
+
+    with pytest.raises(PermissionDeniedError):
+        await client.complete_text(LLMTask.ANALYZE, MESSAGES)
+    assert len(endpoint.requests) == 1
+
+
+async def test_with_usage_isolates_meter() -> None:
+    endpoint = FakeEndpoint(chat_reply("ok1"), chat_reply("ok2"))
+    base = make_client(endpoint)
+    scoped = base.with_usage()
+
+    await base.complete_text(LLMTask.ANALYZE, MESSAGES)
+    await scoped.complete_text(LLMTask.ANALYZE, MESSAGES)
+
+    assert base.usage.total().calls == 1
+    assert scoped.usage.total().calls == 1

@@ -827,3 +827,289 @@ def _outcome_lines(outcome: "DraftOutcome") -> list[str]:
         lines.append("相似案件：" + "、".join(r.case_id for r in draft.similar_case_refs))
     lines += ["", "草稿：", draft.body_ja, "", "回译：", draft.back_translation_zh]
     return lines
+
+
+@app.command("eval")
+def eval_command(
+    split_name: Annotated[
+        str, typer.Option("--split", help="评测切分：dev（调参，默认）或 test（报告基线）。")
+    ] = "dev",
+    suite: Annotated[
+        str,
+        typer.Option(
+            "--suite", help="评测套件：cases（留出集，默认）、security（安全攻击目录）或 all。"
+        ),
+    ] = "cases",
+    cases_path: Annotated[
+        Path | None,
+        typer.Option("--cases", help="导入结果（copilot ingest）。默认 data/interim/cases.jsonl。"),
+    ] = None,
+    split_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--split-file", help="切分结果（copilot split）。默认 data/processed/split.json。"
+        ),
+    ] = None,
+    kb_dir: KbDirOption = None,
+    knowledge_dir: KnowledgeOption = None,
+    security_dir: Annotated[
+        Path | None,
+        typer.Option("--security-dir", help="安全攻击合成样本目录。默认 tests/fixtures/security。"),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", min=1, help="小规模运行模式：最多评测 N 条回复样本（均匀抽样）。"),
+    ] = None,
+    no_reply_limit: Annotated[
+        int | None,
+        typer.Option("--no-reply-limit", min=0, help="最多评测 M 条“不回复”样本。默认随 --limit。"),
+    ] = None,
+    concurrency: Annotated[int, typer.Option("--concurrency", min=1, help="并发评测数。")] = 4,
+    tools: Annotated[
+        bool, typer.Option("--tools", help="使用“流水线 + 工具”模式起草（默认固定流水线）。")
+    ] = False,
+    template_top_k: Annotated[
+        int | None,
+        typer.Option(
+            "--template-top-k",
+            min=1,
+            help="用 embedding 检索前 K 个静态模板放进 prompt（对比实验）。默认放进全部静态模板。",
+        ),
+    ] = None,
+    strict_replay: Annotated[
+        bool,
+        typer.Option(
+            "--strict-replay/--no-strict-replay",
+            help="历史重放是否按 known_from 过滤知识库版本"
+            "（默认开启，--no-strict-replay 用于 A-12 对比）。",
+        ),
+    ] = True,
+    judge: Annotated[
+        bool,
+        typer.Option(
+            "--judge/--no-judge", help="是否调用 LLMTask.JUDGE 评审草稿质量（默认开启）。"
+        ),
+    ] = True,
+    service_tier: Annotated[
+        str | None,
+        typer.Option(
+            "--service-tier",
+            help="临时覆盖 LLM_SERVICE_TIER（default | flex | priority），用于延迟与成本对比。",
+        ),
+    ] = None,
+    cache: Annotated[
+        Path | None,
+        typer.Option("--cache", help="评测结果 JSONL 缓存路径，支持断点续跑（放在 data/ 下）。"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="输出 Markdown 汇总报告的路径（不含客户原文）。"),
+    ] = None,
+) -> None:
+    """在留出集和/或安全攻击目录上运行离线评测，输出只含汇总数字的 Markdown 报告（#7）。"""
+    import asyncio
+    from typing import cast
+
+    from copilot.config import LLMTask, MissingConfigError, ServiceTier
+    from copilot.draft.retrieval import load_snapshot
+    from copilot.draft.service import DraftParams
+    from copilot.draft.similar import EmbeddingCache
+    from copilot.eval import (
+        DEFAULT_MANIFEST,
+        EvalRunConfig,
+        Split,
+        StaleSplitError,
+        build_no_reply_items,
+        build_reply_items,
+        read_manifest,
+        render_markdown,
+        run_eval,
+    )
+    from copilot.eval.security import (
+        DEFAULT_SECURITY_DIR,
+        load_attack_fixtures,
+        render_security_markdown,
+        run_security_replay,
+    )
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.kb.build import DEFAULT_KB_DIR
+    from copilot.kb.knowledge import KNOWLEDGE_DIR, KnowledgeError, load_knowledge
+    from copilot.kb.labels import (
+        LABELS_DIR,
+        NO_REPLY_FILE,
+        REPLIES_FILE,
+        read_no_reply_labels,
+        read_reply_labels,
+    )
+    from copilot.kb.store import KnowledgeStore
+    from copilot.storage import create_engine_for, upgrade_database
+
+    if suite not in {"cases", "security", "all"}:
+        typer.echo(f"不认识的 --suite：{suite}（可选 cases / security / all）", err=True)
+        raise typer.Exit(2)
+    try:
+        split = Split(split_name)
+    except ValueError:
+        typer.echo(f"不认识的 --split：{split_name}（可选 dev / test）", err=True)
+        raise typer.Exit(2) from None
+    if split is Split.TRAIN:
+        typer.echo("不能在 train 上评测（D-012），请选择 dev 或 test", err=True)
+        raise typer.Exit(2)
+
+    settings = get_settings()
+    if service_tier is not None:
+        if service_tier not in {"default", "flex", "priority"}:
+            typer.echo(
+                f"不认识的 --service-tier：{service_tier}（可选 default / flex / priority）",
+                err=True,
+            )
+            raise typer.Exit(2)
+        settings = settings.model_copy(update={"llm_service_tier": cast(ServiceTier, service_tier)})
+
+    required_tasks = [LLMTask.ANALYZE, LLMTask.DRAFT, LLMTask.BACKTRANSLATE]
+    if judge:
+        required_tasks.append(LLMTask.JUDGE)
+    try:
+        models = {task: settings.llm_endpoint(task).model for task in required_tasks}
+    except MissingConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    try:
+        knowledge = load_knowledge(knowledge_dir or KNOWLEDGE_DIR)
+    except KnowledgeError as exc:
+        typer.echo(f"knowledge/ 校验失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    upgrade_database(settings.database_url)
+    snapshot = load_snapshot(KnowledgeStore(create_engine_for(settings.database_url)))
+    if not snapshot.templates:
+        typer.echo("数据库中还没有模板（先运行 copilot kb publish）", err=True)
+        raise typer.Exit(1)
+
+    llm = _llm_client(settings)
+    params = DraftParams(
+        analyze_model=models[LLMTask.ANALYZE],
+        draft_model=models[LLMTask.DRAFT],
+        min_confidence=settings.draft_auto_send_min_confidence,
+        lookback_days=settings.draft_problem_time_lookback_days,
+        tools=tools,
+        max_tool_steps=settings.draft_max_tool_steps,
+        template_top_k=template_top_k,
+    )
+
+    async def _run_all() -> list[str]:
+        parts: list[str] = []
+        try:
+            if suite in {"cases", "all"}:
+                source = cases_path or DEFAULT_OUTPUT
+                manifest_path = split_path or DEFAULT_MANIFEST
+                labels_root = (kb_dir or DEFAULT_KB_DIR) / LABELS_DIR
+                replies_file = labels_root / REPLIES_FILE
+                no_reply_file = labels_root / NO_REPLY_FILE
+                for path, hint in (
+                    (source, "copilot ingest"),
+                    (manifest_path, "copilot split"),
+                    (replies_file, "copilot kb label"),
+                    (no_reply_file, "copilot kb label"),
+                ):
+                    if not path.is_file():
+                        typer.echo(f"找不到 {path}（先运行 {hint}）", err=True)
+                        raise typer.Exit(1)
+                cases = read_cases(source)
+                manifest = read_manifest(manifest_path)
+                try:
+                    train_cases = manifest.select(cases, Split.TRAIN)
+                except StaleSplitError as exc:
+                    typer.echo(str(exc), err=True)
+                    raise typer.Exit(1) from exc
+
+                reply_items = build_reply_items(
+                    cases, manifest, split, read_reply_labels(replies_file), limit=limit
+                )
+                nr_lim = no_reply_limit if no_reply_limit is not None else limit
+                no_reply_items = build_no_reply_items(
+                    cases, manifest, split, read_no_reply_labels(no_reply_file), limit=nr_lim
+                )
+
+                embedder = _embedding_client(settings)
+                if template_top_k is not None and embedder is None:
+                    typer.echo("--template-top-k 需要配置 EMBEDDING_MODEL", err=True)
+                    raise typer.Exit(2)
+                emb_cache = EmbeddingCache(EMBEDDING_CACHE) if embedder is not None else None
+                run_cfg = EvalRunConfig(
+                    params=params,
+                    concurrency=concurrency,
+                    strict_replay=strict_replay,
+                    run_judge=judge,
+                    cache_path=cache,
+                    service_tier=settings.llm_service_tier,
+                    backtranslate_model=models[LLMTask.BACKTRANSLATE],
+                    judge_model=models.get(LLMTask.JUDGE),
+                )
+                records = await run_eval(
+                    reply_items,
+                    no_reply_items,
+                    snapshot=snapshot,
+                    guide=knowledge.style_guide,
+                    llm=llm,
+                    train_cases=train_cases,
+                    all_cases=cases,
+                    embedder=embedder,
+                    embedding_cache=emb_cache,
+                    config=run_cfg,
+                )
+                if emb_cache is not None:
+                    emb_cache.save()
+                meta = {
+                    "切分": f"{split.value}（方法：{manifest.method.value}）",
+                    "模式": "pipeline_with_tools" if tools else "pipeline",
+                    "历史重放": "严格 known_from"
+                    if strict_replay
+                    else "不按 known_from 过滤（A-12）",
+                    "模板检索": f"embedding top-{template_top_k}"
+                    if template_top_k
+                    else "全量静态模板目录",
+                    "相似案件检索": "BM25 + embedding" if embedder else "只用 BM25",
+                    "服务等级": settings.llm_service_tier or "default",
+                    "模型": f"analyze={models[LLMTask.ANALYZE]} · draft={models[LLMTask.DRAFT]}"
+                    f" · backtranslate={models[LLMTask.BACKTRANSLATE]}"
+                    + (f" · judge={models[LLMTask.JUDGE]}" if judge else ""),
+                }
+                parts.append(
+                    render_markdown(records, title=f"离线评测报告（{split.value}）", meta=meta)
+                )
+
+            if suite in {"security", "all"}:
+                sec_dir = security_dir or DEFAULT_SECURITY_DIR
+                if not sec_dir.is_dir():
+                    typer.echo(f"找不到安全攻击样本目录：{sec_dir}", err=True)
+                    raise typer.Exit(2)
+                fixtures = load_attack_fixtures(sec_dir)
+                if not fixtures:
+                    typer.echo(f"安全攻击样本目录中没有 ATK-*.json：{sec_dir}", err=True)
+                    raise typer.Exit(2)
+                sec_results = await run_security_replay(
+                    fixtures,
+                    snapshot=snapshot,
+                    knowledge=knowledge,
+                    llm=llm,
+                    params=params,
+                    concurrency=concurrency,
+                    run_judge=judge,
+                )
+                parts.append(render_security_markdown(sec_results))
+        finally:
+            if hasattr(llm, "aclose"):
+                await llm.aclose()
+        return parts
+
+    sections = asyncio.run(_run_all())
+
+    report_md = "\n\n---\n\n".join(sections)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report_md, encoding="utf-8")
+        typer.echo(f"已写入报告：{out}")
+    else:
+        typer.echo(report_md)

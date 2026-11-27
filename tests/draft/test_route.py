@@ -43,7 +43,7 @@ from copilot.ingest.timestamps import JST
 from tests.cases import agent, case, player
 from tests.draft.factories import intent, template, trigger
 
-THRESHOLD = 0.85
+THRESHOLD = 0.92
 
 
 def analysis(**values: Any) -> CaseAnalysis:

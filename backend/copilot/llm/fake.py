@@ -32,6 +32,14 @@ class FakeLLMClient:
         """为某个任务按顺序排入回复。`complete_json` 收到 JSON 字符串。"""
         self._replies[task].extend(replies)
 
+    def with_usage(self, usage: UsageMeter | None = None) -> "FakeLLMClient":
+        """返回共享预设回复与调用记录、但使用独立 `UsageMeter` 的测试客户端。"""
+        clone = object.__new__(FakeLLMClient)
+        clone._replies = self._replies
+        clone.calls = self.calls
+        clone.usage = usage if usage is not None else UsageMeter()
+        return clone
+
     def _next(self, task: LLMTask, messages: list[Message]) -> str:
         self.calls.append(FakeCall(task=task, messages=list(messages)))
         self.usage.record(task, 0.0, None, None)

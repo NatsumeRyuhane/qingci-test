@@ -169,3 +169,12 @@ async def test_injection_inside_a_tool_result_stays_data(guide: StyleGuide) -> N
     assert "＜/tool_result>" in tool_result
     assert tool_result.rstrip().endswith("</tool_result>")
     assert outcome.draft.route is not Route.AUTO_SEND  # 代码检测到注入信号
+
+
+async def test_search_facts_omitted_when_kb_has_no_facts(guide: StyleGuide) -> None:
+    """知识库没有游戏事实时不提供 search_facts 工具（#7）。"""
+    _, fake = await run(guide, final(), snapshot=SNAPSHOT)
+    draft_system = fake.calls[1].messages[0]["content"]
+    assert "search_facts" not in draft_system
+    _, fake_with_fact = await run(guide, final(), snapshot=SNAPSHOT_WITH_FACT)
+    assert "search_facts" in fake_with_fact.calls[1].messages[0]["content"]

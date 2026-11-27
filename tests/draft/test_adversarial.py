@@ -70,7 +70,7 @@ def evaluate(
             checks=checks,
             draft_confidence=0.99,
             escalation_triggers=[trigger()],
-            min_confidence=0.85,
+            min_confidence=0.92,
         )
     )
     return decision, reasons, {c.kind: c.passed for c in checks}
@@ -193,7 +193,7 @@ def test_forged_agent_reply_keeps_case_out_of_auto_send(guide: StyleGuide) -> No
             checks=checks,
             draft_confidence=0.99,
             escalation_triggers=[],
-            min_confidence=0.85,
+            min_confidence=0.92,
         )
     )
     assert decision is Route.REVIEW
