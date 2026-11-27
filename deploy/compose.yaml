@@ -1,0 +1,59 @@
+# 坐席助手的 docker compose 配置。日常操作请用 deploy/manage.sh（见 deploy/README.md）。
+#
+# 端口、监听地址、数据目录等部署参数写在 deploy/.env（模板：deploy/.env.example），
+# 应用配置和密钥写在仓库根目录的 .env（模板：.env.example）。
+
+name: qingci-copilot
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    image: qingci-copilot-backend:local
+    # 固定容器名，使 `docker compose up --scale backend=2` 无法扩容（compose 只给出警告，仍是 1 个）：
+    # SQLite 同一时间只允许一个写者，后端只能运行 1 个副本（D-010、#2）。
+    container_name: qingci-copilot-backend
+    env_file:
+      - path: ../.env
+        required: true
+    environment:
+      # 数据库固定放在挂载的数据目录中，重建容器不会丢失，manage.py 的备份也依赖这个位置。
+      DATABASE_URL: sqlite:////app/data/copilot.db
+    # 以数据目录的属主运行（由 manage.py 设置），默认是镜像中的 copilot 用户。
+    user: "${COPILOT_UID:-10001}:${COPILOT_GID:-10001}"
+    volumes:
+      - ${COPILOT_DATA_DIR:-../data}:/app/data
+    # 不对外暴露端口，只在 compose 网络内被 frontend 访问。
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    image: qingci-copilot-frontend:local
+    ports:
+      # 默认只监听本机。在内网中使用时把 COPILOT_BIND 设为 0.0.0.0 或内网 IP。
+      # 在访问控制（#13）完成之前，不要把服务暴露到公网。
+      - "${COPILOT_BIND:-127.0.0.1}:${COPILOT_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # 经 nginx 访问后端，同时检查静态文件服务和 /v1 反向代理。
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
