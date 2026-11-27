@@ -47,7 +47,7 @@ describe("Workspace", () => {
     expect(screen.getByRole("region", { name: "回复" })).toBeInTheDocument();
     const bar = screen.getByRole("navigation", { name: "案件导航" });
     expect(within(bar).getByText("待处理 2 个")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: /中文（编辑这里）/ })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: "中文第 1 段" })).toHaveValue(
       DRAFT.back_translation_zh,
     );
   });
@@ -55,14 +55,14 @@ describe("Workspace", () => {
   it("编辑中文后翻译为日语，日语和自检随之更新", async () => {
     const calls = mockApi(routes());
     render(<Workspace caseId="SIM-1" actor="客服A" />);
-    const zh = await screen.findByRole("textbox", { name: /中文（编辑这里）/ });
+    const zh = await screen.findByRole("textbox", { name: "中文第 1 段" });
 
     fireEvent.change(zh, { target: { value: "【合成】我们正在调查。" } });
     expect(screen.getByText("未翻译")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "翻译为日语 →" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("textbox", { name: /日语（发送的正文）/ })).toHaveValue(
+      expect(screen.getByRole("textbox", { name: "日语第 1 段" })).toHaveValue(
         "【合成データ】訳文です。",
       ),
     );
@@ -73,7 +73,7 @@ describe("Workspace", () => {
   it("中文改了没有翻译时不能发送", async () => {
     const calls = mockApi(routes());
     render(<Workspace caseId="SIM-1" actor="客服A" />);
-    fireEvent.change(await screen.findByRole("textbox", { name: /中文（编辑这里）/ }), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "中文第 1 段" }), {
       target: { value: "改了" },
     });
     fireEvent.click(screen.getByRole("button", { name: "确认发送" }));
@@ -85,7 +85,7 @@ describe("Workspace", () => {
   it("直接改日语先提醒；保存时只做代码自检，不调用翻译；有未通过项要确认后才能发送", async () => {
     const calls = mockApi(routes());
     render(<Workspace caseId="SIM-1" actor="客服A" />);
-    const ja = await screen.findByRole("textbox", { name: /日语（发送的正文）/ });
+    const ja = await screen.findByRole("textbox", { name: "日语第 1 段" });
 
     expect(ja).toHaveAttribute("readonly");
     fireEvent.click(ja);
@@ -157,7 +157,7 @@ describe("Workspace", () => {
     await act(async () => {
       vi.advanceTimersByTime(3000);
     });
-    expect(await screen.findByRole("textbox", { name: /中文（编辑这里）/ })).toHaveValue(
+    expect(await screen.findByRole("textbox", { name: "中文第 1 段" })).toHaveValue(
       DRAFT.back_translation_zh,
     );
   });
@@ -173,5 +173,36 @@ describe("Workspace", () => {
 
     expect(await screen.findByText(/自动起草失败：起草服务调用失败/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
+  });
+
+  it("中日文逐段对照：每段一行，编辑一段后拼回全文（保留原来的分隔）", async () => {
+    const ja = "【合成データ】一段目。\n\n【合成データ】二段目。\n\n\n【合成データ】三段目。";
+    const zh = "【合成】第一段。\n\n【合成】第二段。\n\n【合成】第三段。";
+    const calls = mockApi(
+      routes({
+        "GET /v1/cases/:id": () =>
+          detail({ draft: { ...DRAFT, body_ja: ja, back_translation_zh: zh } }),
+      }),
+    );
+    render(<Workspace caseId="SIM-1" actor="客服A" />);
+
+    expect(await screen.findByRole("textbox", { name: "中文第 3 段" })).toHaveValue(
+      "【合成】第三段。",
+    );
+    expect(screen.getByRole("textbox", { name: "日语第 3 段" })).toHaveValue(
+      "【合成データ】三段目。",
+    );
+    expect(screen.queryByText(/逐段对照可能错位/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "中文第 2 段" }), {
+      target: { value: "【合成】改过的第二段。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "翻译为日语 →" }));
+    await waitFor(() => expect(posts(calls, "/translate")).toHaveLength(1));
+    expect(posts(calls, "/translate")[0].body).toEqual({
+      body_zh: "【合成】第一段。\n\n【合成】改过的第二段。\n\n【合成】第三段。",
+    });
+    // 译文只有一段：与中文段数不同时提示
+    expect(await screen.findByText(/逐段对照可能错位/)).toBeInTheDocument();
   });
 });

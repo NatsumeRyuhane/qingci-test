@@ -4,7 +4,7 @@
 // - 直接改日语会先弹出提醒：改过的日语以客服为准，不会发给 LLM，也不会被中文的翻译覆盖；
 //   保存时只运行代码自检。
 // - 发送前，日语正文有未通过的自检时，需要逐项确认后才能发送（后端同样会检查）。
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
 import {
   api,
   type CaseDetail,
@@ -16,9 +16,10 @@ import {
   type ReplyTemplate,
 } from "../api/client";
 import { ErrorNotice, RouteBadge } from "../components/Badges";
+import { ParagraphPairs } from "../components/ParagraphPairs";
 import { SafeText } from "../components/SafeText";
 import { ACTION_LABELS, CHECK_LABELS, CLOSED_STATUSES, formatTime, label } from "../lib/labels";
-import { useScrollSync } from "../lib/scrollSync";
+import { joinParagraphs, replaceParagraph, splitParagraphs } from "../lib/paragraphs";
 
 type SecondaryAction = Extract<FeedbackAction, "escalated" | "rejected" | "no_reply">;
 
@@ -239,8 +240,10 @@ export function Editor({
 }) {
   const draft = detail.draft as Draft;
   const closed = CLOSED_STATUSES.has(detail.case.status ?? "open");
-  const [zh, setZh] = useState(draft.back_translation_zh);
-  const [ja, setJa] = useState(draft.body_ja);
+  const [zhParts, setZhParts] = useState(() => splitParagraphs(draft.back_translation_zh));
+  const [jaParts, setJaParts] = useState(() => splitParagraphs(draft.body_ja));
+  const zh = joinParagraphs(zhParts);
+  const ja = joinParagraphs(jaParts);
   const [zhDirty, setZhDirty] = useState(false);
   const [jaUnlocked, setJaUnlocked] = useState(false);
   const [jaManual, setJaManual] = useState(false);
@@ -254,9 +257,6 @@ export function Editor({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const zhRef = useRef<HTMLTextAreaElement>(null);
-  const jaRef = useRef<HTMLTextAreaElement>(null);
-  const { onScrollA: onZhScroll, onScrollB: onJaScroll } = useScrollSync(zhRef, jaRef);
   const [justTranslated, setJustTranslated] = useState(0);
   useEffect(() => {
     if (!justTranslated) return;
@@ -291,7 +291,7 @@ export function Editor({
       ),
     );
     if (!result) return;
-    setJa(result.body_ja);
+    setJaParts(splitParagraphs(result.body_ja));
     setChecks(result.checks);
     setChecksStale(false);
     setZhDirty(false);
@@ -402,83 +402,72 @@ export function Editor({
       <Checks checks={checks} stale={checksStale} />
       <DraftSummary draft={draft} />
 
-      <div className="editor-panes">
-        <div className="pane">
-          <span className="pane-title" id="pane-zh">
+      <ParagraphPairs
+        zh={zhParts.blocks}
+        ja={jaParts.blocks}
+        onZhChange={(i, value) => {
+          setZhParts((p) => replaceParagraph(p, i, value));
+          setZhDirty(true);
+        }}
+        onZhBlur={() => setZhParts((p) => splitParagraphs(joinParagraphs(p)))}
+        onZhKeyDown={onZhKey}
+        onJaChange={(i, value) => {
+          setJaParts((p) => replaceParagraph(p, i, value));
+          setJaManual(true);
+          setChecksStale(true);
+          setConfirming(false);
+        }}
+        onJaBlur={() => {
+          setJaParts((p) => splitParagraphs(joinParagraphs(p)));
+          void recheck();
+        }}
+        jaLocked={!jaUnlocked}
+        onJaLockedAttempt={() => setDialog("unlock-ja")}
+        jaClassName={justTranslated ? "just-updated" : undefined}
+        zhHeader={
+          <>
             中文（编辑这里）
             {zhDirty && <span className="badge badge-warn">未翻译</span>}
-          </span>
-          <textarea
-            aria-labelledby="pane-zh"
-            ref={zhRef}
-            onScroll={onZhScroll}
-            value={zh}
-            onChange={(e) => {
-              setZh(e.target.value);
-              setZhDirty(true);
-            }}
-            onKeyDown={onZhKey}
-          />
-          <div className="actions">
-            <button
-              type="button"
-              className="primary"
-              disabled={!zhDirty || !zh.trim() || busy !== null}
-              onClick={requestTranslate}
-            >
-              翻译为日语 →
-            </button>
-            {zhDirty && (
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => {
-                  setZh(draft.back_translation_zh);
-                  setZhDirty(false);
-                }}
-              >
-                撤销中文修改
-              </button>
-            )}
-            <span className="meta">Ctrl / ⌘ + Enter</span>
-          </div>
-        </div>
-
-        <div className="pane">
-          <span className="pane-title" id="pane-ja">
+          </>
+        }
+        jaHeader={
+          <>
             日语（发送的正文）
             {jaManual && <span className="badge badge-warn">已直接修改</span>}
-          </span>
-          <textarea
-            aria-labelledby="pane-ja"
-            ref={jaRef}
-            onScroll={onJaScroll}
-            lang="ja"
-            value={ja}
-            readOnly={!jaUnlocked}
-            className={[jaUnlocked ? "" : "locked", justTranslated ? "just-updated" : ""]
-              .filter(Boolean)
-              .join(" ")}
-            onClick={() => !jaUnlocked && setDialog("unlock-ja")}
-            onKeyDown={(e) => {
-              if (!jaUnlocked && e.key.length === 1) setDialog("unlock-ja");
-            }}
-            onChange={(e) => {
-              setJa(e.target.value);
-              setJaManual(true);
-              setChecksStale(true);
-              setConfirming(false);
-            }}
-            onBlur={() => void recheck()}
-          />
-          <div className="actions">
-            {jaManual && (
-              <button type="button" disabled={busy !== null || !checksStale} onClick={recheck}>
-                保存日语修改并自检
-              </button>
-            )}
-            {!jaUnlocked && <span className="meta">日语由中文翻译生成；点击可直接修改</span>}
-          </div>
+          </>
+        }
+      />
+      <div className="pair-foot">
+        <div className="actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={!zhDirty || !zh.trim() || busy !== null}
+            onClick={requestTranslate}
+          >
+            翻译为日语 →
+          </button>
+          {zhDirty && (
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => {
+                setZhParts(splitParagraphs(draft.back_translation_zh));
+                setZhDirty(false);
+              }}
+            >
+              撤销中文修改
+            </button>
+          )}
+          <span className="meta">Ctrl / ⌘ + Enter</span>
+        </div>
+        <div className="actions">
+          {jaManual && (
+            <button type="button" disabled={busy !== null || !checksStale} onClick={recheck}>
+              保存日语修改并自检
+            </button>
+          )}
+          {!jaUnlocked && <span className="meta">日语由中文翻译生成；点击可直接修改</span>}
         </div>
       </div>
 

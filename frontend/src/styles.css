@@ -796,19 +796,20 @@ th:first-child {
   cursor: pointer;
 }
 
-.editor-panes {
+.pair-view {
   flex: 1;
-  min-height: 18rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.75rem;
-}
-
-.pane {
+  min-height: 12rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  min-height: 0;
+}
+
+.pair-head,
+.pair-row,
+.pair-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 0.75rem;
 }
 
 .pane-title {
@@ -818,11 +819,40 @@ th:first-child {
   align-items: center;
 }
 
-.pane textarea {
+/* 一个滚动区域：两栏一起滚动，逐段对齐 */
+.pair-grid {
   flex: 1;
-  min-height: 14rem;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-right: 0.25rem;
+}
+
+.pair-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 每段的输入框随内容增高；同一行两边等高（行高取较高的一边） */
+.pair-cell textarea {
+  flex: 1;
   resize: none;
+  overflow: hidden;
   line-height: 1.7;
+}
+
+.pair-empty {
+  flex: 1;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  min-height: 2.2rem;
+}
+
+.pair-mismatch {
+  margin: 0;
 }
 
 textarea.locked {
@@ -934,10 +964,6 @@ button.link {
     overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-  }
-
-  .editor-panes {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .case-bar {
