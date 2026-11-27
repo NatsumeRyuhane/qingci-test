@@ -118,3 +118,29 @@ def test_llm_failure_is_reported_without_details(
     with pytest.raises(DrafterFailedError) as excinfo:
         _drafter(url, tmp_path, fake).backtranslate("x")
     assert "邮件内容" not in str(excinfo.value)
+
+
+@pytest.mark.usefixtures("publish")
+def test_calls_share_one_event_loop(url: str, tmp_path: Path) -> None:
+    """LLM 客户端的连接池绑定在事件循环上：连续的调用必须在同一个循环中运行。
+
+    回归：曾经每次调用都用 asyncio.run，第二次调用真实的 LLM 端点时报“事件循环已关闭”。"""
+    import asyncio
+
+    loops: list[asyncio.AbstractEventLoop] = []  # 保留对象本身：id() 可能被回收后复用
+    fake = FakeLLMClient()
+    original = fake.complete_text
+
+    async def recording(task: LLMTask, messages: list) -> str:  # type: ignore[type-arg]
+        loops.append(asyncio.get_running_loop())
+        return await original(task, messages)
+
+    fake.complete_text = recording  # type: ignore[method-assign]
+    fake.queue(LLMTask.BACKTRANSLATE, "一", "二")
+    fake.queue(LLMTask.DRAFT, "三")
+    drafter = _drafter(url, tmp_path, fake)
+
+    drafter.backtranslate("x")
+    drafter.backtranslate("y")
+    drafter.translate("z")
+    assert len(loops) == 3 and all(loop is loops[0] for loop in loops)

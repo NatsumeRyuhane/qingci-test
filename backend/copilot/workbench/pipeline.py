@@ -65,8 +65,8 @@ def _embedding_client(settings: Settings) -> EmbeddingClient | None:
 
 
 class PipelineDrafter:
-    """调用 `draft_case` 的 `Drafter`。API 的端点是同步函数（运行在线程池中），这里用
-    `asyncio.run` 执行一次异步的流水线。"""
+    """调用 `draft_case` 的 `Drafter`。API 的端点是同步函数（运行在线程池中），异步的流水线
+    提交到一个共用的后台事件循环中执行（见 `_loop_for_calls`）。"""
 
     def __init__(
         self,
@@ -91,6 +91,7 @@ class PipelineDrafter:
         self._clock = clock
         self._now = now
         self._lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._guide: StyleGuide | None = None
         self._history: list[Case] | None = None
         self._corpus: list[Case] | None = None
@@ -149,9 +150,25 @@ class PipelineDrafter:
                 )
             return self._guide, self._history, self._corpus
 
+    def _loop_for_calls(self) -> asyncio.AbstractEventLoop:
+        """所有调用共用的事件循环，运行在一个后台线程中。
+
+        不能每次用 `asyncio.run`：LLM 客户端（OpenAI SDK）缓存的连接池绑定在创建它的事件循环上，
+        第一次调用结束、事件循环关闭后，第二次调用会复用已关闭循环上的连接而失败。
+        """
+        with self._lock:
+            if self._loop is None:
+                loop = asyncio.new_event_loop()
+                threading.Thread(
+                    target=loop.run_forever, name="pipeline-drafter", daemon=True
+                ).start()
+                self._loop = loop
+            return self._loop
+
     def _run[T](self, coroutine: Coroutine[Any, Any, T]) -> T:
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop_for_calls())
         try:
-            return asyncio.run(coroutine)
+            return future.result()
         except _LLM_ERRORS as exc:
             # 只记录异常类型：LLM 的报错中可能带有邮件内容
             logger.warning("起草服务调用失败：%s", type(exc).__name__)
