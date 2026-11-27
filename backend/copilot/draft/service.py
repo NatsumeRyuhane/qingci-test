@@ -7,7 +7,6 @@
 途径，`Draft` 的分流和理由只来自 `route`。“不回复”自动生效时不生成草稿。
 """
 
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,6 +35,7 @@ from copilot.draft.retrieval import KnowledgeSnapshot, KnowledgeView, build_view
 from copilot.draft.route import RouteInput, decide_no_reply, route
 from copilot.draft.similar import SimilarCaseRetriever, case_text, corpus_before
 from copilot.draft.timectx import DEFAULT_LOOKBACK_DAYS, build_time_context, known_at_for
+from copilot.kb.cluster import ClusterIndex
 from copilot.kb.knowledge import StyleGuide
 from copilot.llm import LLMClient
 
@@ -68,24 +68,25 @@ class DraftParams:
     lookback_days: int = DEFAULT_LOOKBACK_DAYS
 
 
-def _norm(text: str) -> str:
-    return "".join(unicodedata.normalize("NFKC", text).split())
+class TemplateMatcher:
+    """把一封客服回复的答复部分对应到可见的模板：先精确匹配，再按近似度匹配（与 #5 的标准答案
+    使用同一个索引，`copilot.kb.cluster.ClusterIndex`）。"""
 
+    def __init__(self, view: KnowledgeView) -> None:
+        templates = [*view.static_templates.values(), *view.time_bound_templates.values()]
+        self._ids = [t.id for t in templates]
+        self._index = ClusterIndex.from_variants([[t.body_ja] for t in templates])
 
-def templates_used(case: Case, view: KnowledgeView) -> list[str]:
-    """案件中的客服回复用过的模板：答复部分与模板正文（没有占位符的）完全相同。"""
-    bodies = {
-        _norm(t.body_ja): t.id
-        for t in (*view.static_templates.values(), *view.time_bound_templates.values())
-        if not t.slots
-    }
-    found = []
-    for message in case.messages:
-        if message.role is MessageRole.AGENT:
-            template_id = bodies.get(_norm(message.core))
-            if template_id and template_id not in found:
-                found.append(template_id)
-    return found
+    def templates_used(self, case: Case) -> list[str]:
+        """案件中的客服回复用过的模板，按出现顺序。"""
+        found: list[str] = []
+        for message in case.messages:
+            if message.role is not MessageRole.AGENT or not message.core:
+                continue
+            match = self._index.lookup(message.core)
+            if match is not None and self._ids[match[0]] not in found:
+                found.append(self._ids[match[0]])
+        return found
 
 
 async def draft_case(
@@ -129,9 +130,10 @@ async def draft_case(
     foreign: list[str] = []
     if retriever is not None:
         corpus = {c.id: c for c in retriever.corpus}
+        matcher = TemplateMatcher(view)
         for ref in await retriever.similar_to(case):
             other = corpus[ref.case_id]
-            similar.append((ref, templates_used(other, view)))
+            similar.append((ref, matcher.templates_used(other)))
             foreign.append(case_text(other))
 
     composition = await compose(
