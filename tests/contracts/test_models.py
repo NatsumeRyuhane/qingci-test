@@ -22,6 +22,7 @@ from copilot.contracts import (
     Intent,
     Message,
     Notice,
+    OutboundMail,
     Policy,
     ReplyTemplate,
     is_valid_case_id,
@@ -41,6 +42,7 @@ FIXTURES: list[tuple[type[Contract], str]] = [
     (CaseAnalysis, "case_analysis"),
     (Draft, "draft"),
     (Feedback, "feedback"),
+    (OutboundMail, "outbound_mail"),
 ]
 
 
@@ -109,6 +111,7 @@ def test_persisted_models_are_documents() -> None:
         CaseAnalysis,
         Draft,
         Feedback,
+        OutboundMail,
     }
 
 
@@ -298,6 +301,9 @@ def test_fixture_cross_references() -> None:
 
     for feedback in load_models(Feedback, "feedback"):
         assert feedback.draft_id in drafts
+    for mail in load_models(OutboundMail, "outbound_mail"):
+        assert drafts[mail.draft_id].case_id == mail.case_id
+        assert mail.message_seq > drafts[mail.draft_id].message_seq
     for draft in drafts.values():
         for ref in draft.template_refs:
             assert (ref.template_id, ref.template_version) in templates

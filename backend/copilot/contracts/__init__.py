@@ -48,6 +48,7 @@ from copilot.contracts.enums import (
 )
 from copilot.contracts.feedback import Feedback
 from copilot.contracts.knowledge import EntryId, KnowledgeEntry, current_version, select_valid
+from copilot.contracts.mail import OutboundMail
 from copilot.contracts.template import PLACEHOLDER_PATTERN, ReplyTemplate, TemplateSlot
 from copilot.contracts.timepoint import TimeContext, TimePoint
 
@@ -64,6 +65,7 @@ EXPORTED_MODELS: tuple[type[Contract], ...] = (
     CaseAnalysis,
     Draft,
     Feedback,
+    OutboundMail,
 )
 """对外发布 JSON Schema 的模型（`copilot contracts export`）。嵌套模型包含在各自的 `$defs` 中。"""
 
@@ -101,6 +103,7 @@ __all__ = [
     "NoReplyReason",
     "Notice",
     "NoticeKind",
+    "OutboundMail",
     "Platform",
     "Policy",
     "PolicyKind",
