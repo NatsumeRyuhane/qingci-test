@@ -10,8 +10,9 @@
 途径，`Draft` 的分流和理由只来自 `route`。“不回复”自动生效时不生成草稿。
 """
 
+import asyncio
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from pydantic import AwareDatetime
@@ -29,6 +30,7 @@ from copilot.contracts import (
     SimilarCaseRef,
     TemplateRef,
     TimeContext,
+    TimePoint,
 )
 from copilot.contracts.base import Contract
 from copilot.draft.agent import DEFAULT_MAX_STEPS, compose_with_tools
@@ -37,7 +39,13 @@ from copilot.draft.checks import CheckContext, run_checks
 from copilot.draft.compose import back_translate, compose, provided_entries
 from copilot.draft.retrieval import KnowledgeSnapshot, KnowledgeView, build_view
 from copilot.draft.route import RouteInput, decide_no_reply, route
-from copilot.draft.similar import SimilarCaseRetriever, case_text, corpus_before
+from copilot.draft.similar import (
+    SimilarCaseRetriever,
+    _cosine,
+    case_text,
+    corpus_before,
+    embed_cached,
+)
 from copilot.draft.timectx import DEFAULT_LOOKBACK_DAYS, build_time_context, known_at_for
 from copilot.draft.tools import ToolBox
 from copilot.kb.cluster import ClusterIndex
@@ -74,6 +82,9 @@ class DraftParams:
     tools: bool = False
     """为真时是“流水线 + 工具”（`DraftMode.PIPELINE_WITH_TOOLS`），否则是固定流水线。"""
     max_tool_steps: int = DEFAULT_MAX_STEPS
+    template_top_k: int | None = None
+    """非空时，用 embedding 从静态模板目录中检索前 K 个模板放进 prompt（#7 对比实验）；
+    为空时把全部静态模板放进 prompt（默认）。限时模板不受影响。"""
 
 
 class TemplateMatcher:
@@ -97,6 +108,30 @@ class TemplateMatcher:
         return found
 
 
+async def _filter_static_templates(
+    view: KnowledgeView, case: Case, retriever: SimilarCaseRetriever, top_k: int
+) -> KnowledgeView:
+    """用 embedding 从静态模板目录中筛选与本案件最相关的前 `top_k` 个模板（#7 对比实验）。"""
+    embedder = retriever.embedder
+    if embedder is None or top_k >= len(view.static_templates) or not view.static_templates:
+        return view
+    query = case_text(case)
+    if not query:
+        return view
+    ids = list(view.static_templates)
+    texts = [f"{t.title_zh}\n{t.use_when_zh}\n{t.body_ja}" for t in view.static_templates.values()]
+    vectors = await embed_cached(embedder, retriever._cache, [query, *texts])
+    ranked = sorted(
+        ((tid, _cosine(vectors[0], vec)) for tid, vec in zip(ids, vectors[1:], strict=True)),
+        key=lambda item: (-item[1], item[0]),
+    )
+    keep = {tid for tid, _ in ranked[:top_k]}
+    return replace(
+        view,
+        static_templates={tid: t for tid, t in view.static_templates.items() if tid in keep},
+    )
+
+
 async def draft_case(
     case: Case,
     *,
@@ -106,7 +141,7 @@ async def draft_case(
     params: DraftParams,
     history: Sequence[Case] = (),
     retriever: SimilarCaseRetriever | None = None,
-    now: datetime | None = None,
+    now: TimePoint | datetime | None = None,
     replay: bool = False,
     created_at: datetime,
 ) -> DraftOutcome:
@@ -120,7 +155,15 @@ async def draft_case(
     view = build_view(
         snapshot, time_ctx, form=case.form, known_at=known_at_for(time_ctx.now, replay=replay)
     )
-    analysis = await analyze(case, view, llm, model=params.analyze_model, created_at=created_at)
+
+    # 相似案件检索不依赖分析结果，与分析并行以降低延迟（#7）。
+    async def _retrieve_similar() -> list[SimilarCaseRef]:
+        return await retriever.similar_to(case) if retriever is not None else []
+
+    analysis, similar_refs = await asyncio.gather(
+        analyze(case, view, llm, model=params.analyze_model, created_at=created_at),
+        _retrieve_similar(),
+    )
     decision = decide_no_reply(case, analysis, corpus_before(history, case))
     if decision is not None and decision.auto:
         return DraftOutcome(
@@ -133,25 +176,30 @@ async def draft_case(
             created_at=created_at,
         )
 
-    candidates = view.candidates(analysis.intent)
+    draft_view = (
+        await _filter_static_templates(view, case, retriever, params.template_top_k)
+        if params.template_top_k is not None and retriever is not None
+        else view
+    )
+    candidates = draft_view.candidates(analysis.intent)
     similar: list[tuple[SimilarCaseRef, list[str]]] = []
     foreign: list[str] = []
     matcher = TemplateMatcher(view)
     if retriever is not None:
         corpus = {c.id: c for c in retriever.corpus}
-        for ref in await retriever.similar_to(case):
+        for ref in similar_refs:
             other = corpus[ref.case_id]
             similar.append((ref, matcher.templates_used(other)))
             foreign.append(case_text(other))
 
     if params.tools:
         toolbox = ToolBox(
-            case=case, view=view, retriever=retriever, templates_used=matcher.templates_used
+            case=case, view=draft_view, retriever=retriever, templates_used=matcher.templates_used
         )
         composition = await compose_with_tools(
             case,
             analysis,
-            view,
+            draft_view,
             guide,
             llm,
             toolbox=toolbox,
@@ -161,9 +209,9 @@ async def draft_case(
         )
     else:
         composition = await compose(
-            case, analysis, view, guide, llm, candidates=candidates, similar=similar
+            case, analysis, draft_view, guide, llm, candidates=candidates, similar=similar
         )
-    provided = provided_entries(view) | composition.tool_entries
+    provided = provided_entries(draft_view) | composition.tool_entries
     checks = run_checks(
         composition.draft,
         CheckContext(

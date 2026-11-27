@@ -1,5 +1,6 @@
 """OpenAI 兼容端点的 LLM 客户端。"""
 
+import asyncio
 import json
 import re
 import time
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, TypedDict
 
 import httpx2
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, PermissionDeniedError
 from pydantic import BaseModel, ValidationError
 
 from copilot.config import Endpoint, LLMTask, Settings
@@ -75,6 +76,7 @@ class OpenAICompatibleClient:
         settings: Settings,
         *,
         transport_retries: int = 2,
+        retry_backoff_seconds: float = 0.5,
         http_client: httpx2.AsyncClient | None = None,
         log_dir: Path | None = None,
     ) -> None:
@@ -86,8 +88,21 @@ class OpenAICompatibleClient:
         directory = log_dir or (Path(settings.llm_log_dir) if settings.llm_log_dir else None)
         self._log = CallLog(directory)
         self._transport_retries = transport_retries
+        self._retry_backoff_seconds = retry_backoff_seconds
         self._http_client = http_client
         self._clients: dict[tuple[str, str], AsyncOpenAI] = {}
+
+    def with_usage(self, usage: UsageMeter | None = None) -> "OpenAICompatibleClient":
+        """返回共享底层连接池和日志、但使用独立 `UsageMeter` 的客户端（供并发评测按案件统计）。"""
+        clone = object.__new__(OpenAICompatibleClient)
+        clone._settings = self._settings
+        clone.usage = usage if usage is not None else UsageMeter()
+        clone._log = self._log
+        clone._transport_retries = self._transport_retries
+        clone._retry_backoff_seconds = self._retry_backoff_seconds
+        clone._http_client = self._http_client
+        clone._clients = self._clients
+        return clone
 
     def _client_for(self, endpoint: Endpoint) -> AsyncOpenAI:
         key = (endpoint.base_url, endpoint.api_key.get_secret_value())
@@ -101,6 +116,11 @@ class OpenAICompatibleClient:
             )
         return self._clients[key]
 
+    @staticmethod
+    def _is_transient_region_403(error: PermissionDeniedError) -> bool:
+        """服务商（例如 OpenRouter）间歇性的地区 403，重试通常可以成功（#7）。"""
+        return "not available in your region" in str(error).lower()
+
     async def _chat(
         self, task: LLMTask, messages: list[Message], response_format: dict[str, Any] | None
     ) -> str | None:
@@ -113,11 +133,22 @@ class OpenAICompatibleClient:
             # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
             extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}
         started = time.perf_counter()
-        response = await self._client_for(endpoint).chat.completions.create(
-            model=endpoint.model,
-            messages=list(messages),  # type: ignore[arg-type]
-            **extra,
-        )
+        client = self._client_for(endpoint)
+        response = None
+        for attempt in range(self._transport_retries + 1):
+            try:
+                response = await client.chat.completions.create(
+                    model=endpoint.model,
+                    messages=list(messages),  # type: ignore[arg-type]
+                    **extra,
+                )
+                break
+            except PermissionDeniedError as exc:
+                if not self._is_transient_region_403(exc) or attempt >= self._transport_retries:
+                    raise
+                if self._retry_backoff_seconds > 0:
+                    await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
+        assert response is not None
         seconds = time.perf_counter() - started
         content = response.choices[0].message.content if response.choices else None
         usage = response.usage
