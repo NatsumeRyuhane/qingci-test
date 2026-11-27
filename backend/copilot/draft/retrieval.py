@@ -71,7 +71,8 @@ class NoticeMatch:
 
     notice: Notice
     match: WindowMatch
-    """`inside` 或 `uncertain`；`outside` 的公告不出现在 `KnowledgeView.notices` 中。"""
+    """公告在“现在”的有效期与事件和问题发生时间的匹配中较差的一个：`inside` 或 `uncertain`。
+    `outside` 的公告不出现在 `KnowledgeView.notices` 中。"""
 
 
 @dataclass(frozen=True)
@@ -210,11 +211,19 @@ def build_view(
     notices = _visible(snapshot.notices, time_ctx, known_at)
     # 被任何公告的任何版本链接过的模板都是限时模板（包括已下线或过期的公告）：事故模板
     # 不会因为公告下线而变成通用模板进入静态目录。
-    time_bound_ids = {tid for n in snapshot.notices for tid in n.template_ids}
+    # 历史重放时只看当时已知的版本：之后才加入的链接不能影响当时的分类。
+    time_bound_ids = {
+        tid
+        for n in snapshot.notices
+        if known_at is None or n.known_from <= known_at
+        for tid in n.template_ids
+    }
 
     matched: list[NoticeMatch] = []
-    for notice, _validity in notices.values():
-        match = match_notice(notice, time_ctx, form=form)
+    for notice, validity in notices.values():
+        # 公告在“现在”是否有效也可能无法确定（“现在”是估计值）：与事件的匹配取较差的一个，
+        # 否则不限有效期的模板会把它变成 inside，template_window 检查就会误判为通过。
+        match = _worse(validity, match_notice(notice, time_ctx, form=form))
         if match is not WindowMatch.OUTSIDE:
             matched.append(NoticeMatch(notice=notice, match=match))
     linked: dict[str, list[NoticeMatch]] = defaultdict(list)

@@ -2,11 +2,27 @@
 
 from datetime import timedelta
 
-from copilot.contracts import InquiryForm, Platform, ReviewStatus, TimePoint, TimeStatus
+from copilot.contracts import (
+    InquiryForm,
+    Platform,
+    ReviewStatus,
+    TimeContext,
+    TimePoint,
+    TimeStatus,
+)
 from copilot.draft.retrieval import KnowledgeSnapshot, build_view, load_snapshot
 from copilot.draft.timectx import WindowMatch
 from copilot.ingest.timestamps import JST
-from tests.draft.factories import context, dt, forbidden, intent, notice, template, trigger
+from tests.draft.factories import (
+    context,
+    dt,
+    forbidden,
+    intent,
+    known,
+    notice,
+    template,
+    trigger,
+)
 
 NOW = dt(3, 5, 12)
 INCIDENT = notice(start=dt(3, 2, 11), end=dt(3, 2, 14), template_ids=["tpl-syn-incident"])
@@ -159,3 +175,33 @@ def test_load_snapshot_reads_every_type() -> None:
 
     snap = load_snapshot(Store())  # type: ignore[arg-type]
     assert len(snap.templates) == 1 and len(snap.intents) == 1 and snap.notices == []
+
+
+# --- 评审意见（PR #28）-------------------------------------------------------
+
+
+def test_replay_ignores_notice_links_added_later() -> None:
+    early = {"known_from": dt(1, 1), "recorded_at": dt(1, 1)}
+    v1 = notice(start=dt(3, 2, 11), end=dt(3, 2, 14), **early)
+    v2 = notice(
+        start=dt(3, 2, 11), end=dt(3, 2, 14), template_ids=["tpl-syn-incident"], version=2,
+        known_from=dt(3, 10), recorded_at=dt(3, 10),
+    )  # fmt: skip
+    snap = snapshot(notices=[v1, v2], templates=[template("tpl-syn-incident", **early)])
+    replay = build_view(snap, context(NOW, dt(3, 2, 12)), known_at=NOW)
+    assert list(replay.static_templates) == ["tpl-syn-incident"]
+    # 不重放时 v2 已知：模板是限时模板。
+    assert "tpl-syn-incident" not in build_view(snap, context(NOW, dt(3, 2, 12))).static_templates
+
+
+def test_uncertain_notice_validity_keeps_candidate_uncertain() -> None:
+    # “现在”估计在 13:00–15:00 之间，公告在 14:00 失效；问题发生时间确定在事件窗口内。
+    expiring = notice(
+        start=dt(3, 5, 11), end=dt(3, 5, 12), template_ids=["tpl-syn-incident"],
+        valid_to=dt(3, 5, 14),
+    )  # fmt: skip
+    now = TimePoint(status=TimeStatus.ESTIMATED, earliest=dt(3, 5, 13), latest=dt(3, 5, 15))
+    ctx = TimeContext(now=now, problem_time=known(dt(3, 5, 11, 30)))
+    view = build_view(snapshot(notices=[expiring]), ctx)
+    assert view.notices[0].match is WindowMatch.UNCERTAIN
+    assert view.candidates("syn_bug")[0].window is WindowMatch.UNCERTAIN
