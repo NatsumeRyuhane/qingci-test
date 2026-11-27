@@ -47,6 +47,8 @@
 
 模型本身的质量（翻译、注入成功率）不是 CI 能证明的，由离线评测（#7）衡量。
 
+安全按“瑞士奶酪”模型设计：每一层都有洞，一次攻击要同时穿过所有层才能造成损害。[docs/security.md](docs/security.md) 列出各层防线、带编号的攻击目录和已知漏洞，#7 按编号重放每一种攻击，结果需要改进时据此找到修补的位置。
+
 ## 仓库结构
 
 ```
@@ -109,5 +111,6 @@ docs/              需求、数据概况、决策记录、设计提案
 | [docs/data.md](docs/data.md) | 样本数据的结构与发现 |
 | [docs/architecture.md](docs/architecture.md) | 数据契约：各实体的作用、关系与约定；起草的检查与分流规则 |
 | [docs/claims.md](docs/claims.md) | 设计主张与假设：每条主张由哪个测试守护 |
+| [docs/security.md](docs/security.md) | 安全模型：各层防线、攻击目录、已知漏洞和修补位置 |
 | [docs/decisions.md](docs/decisions.md) | 决策记录：选了什么、为什么 |
 | [docs/proposals/](docs/proposals/) | MVP 之后工作的设计提案 |
