@@ -8,7 +8,9 @@
 
 - 没有审核：机器草稿，`draft`。
 - 有审核：快照的内容和审核状态。已批准的模板如果在重新构建后**正文变了**（簇的代表正文变化），
-  改为 `needs_rereview`：所有者批准的是旧正文，不能默认新正文也被批准。
+  改为 `needs_rereview`：所有者批准的是旧正文，不能默认新正文也被批准。正文**只在空白（换行）上
+  不同**时（例如 `kb build` 接回了历史邮件的硬换行，`copilot.kb.cleanup`），内容就是批准过的内容：
+  采用新的排版，审核状态不变。
 - 类别取意图的类别；风险不低于意图的默认风险；只有已批准、风险为 `low` 的模板才能允许自动发送。
 - 与存储中最新的版本相比内容没有变化时不新建版本，重复发布不会产生新行。变化时版本号加 1，
   `known_from` 沿用上一版本（审核只改措辞和状态，提案 0003 §3）。
@@ -261,6 +263,8 @@ class PublishReport:
     unchanged: int = 0
     body_changed: list[str] = field(default_factory=list)
     """已批准、但重新构建后正文变了的模板（改为 needs_rereview）。"""
+    layout_updated: list[str] = field(default_factory=list)
+    """审核过、重新构建后正文只在空白（换行）上不同的模板：采用新的排版，审核状态不变。"""
     risk_raised: list[str] = field(default_factory=list)
     auto_send_dropped: list[str] = field(default_factory=list)
     """审核要求允许自动发送，但不满足条件（未批准或风险不是 low）。"""
@@ -280,6 +284,8 @@ class PublishReport:
             f"发布后的状态：{dict(sorted(self.statuses.items()))}",
             f"已批准但正文变了、改为 needs_rereview：{len(self.body_changed)}"
             f"{ids(self.body_changed)}",
+            f"正文只有排版（换行）变化、沿用审核状态：{len(self.layout_updated)}"
+            f"{ids(self.layout_updated)}",
             f"风险调到意图默认风险：{len(self.risk_raised)}{ids(self.risk_raised)}"
             f" · 不满足条件而取消自动发送：{len(self.auto_send_dropped)}"
             f"{ids(self.auto_send_dropped)}",
@@ -319,13 +325,14 @@ def merge(
             recorded_at = base.recorded_at
         else:
             content, status, recorded_at = review.content, review.review_status, review.reviewed_at
-            if (
-                status is ReviewStatus.APPROVED
-                and draft is not None
-                and _norm(draft.body_ja) != _norm(content.body_ja)
-            ):
-                status = ReviewStatus.NEEDS_REREVIEW
-                report.body_changed.append(template_id)
+            if draft is not None and _norm(draft.body_ja) != _norm(content.body_ja):
+                if status is ReviewStatus.APPROVED:
+                    status = ReviewStatus.NEEDS_REREVIEW
+                    report.body_changed.append(template_id)
+            elif draft is not None and draft.body_ja != content.body_ja:
+                # 只有空白（换行）不同：内容就是审核过的内容，采用新的排版，审核状态不变
+                content = content.model_copy(update={"body_ja": draft.body_ja})
+                report.layout_updated.append(template_id)
         intent = intents.get(content.intent)
         if intent is None:
             raise ReviewError(f"{template_id}：意图 {content.intent!r} 不在意图目录中")

@@ -34,6 +34,7 @@ from copilot.contracts.base import Contract, Document
 from copilot.contracts.knowledge import EntryId
 from copilot.eval import Split, SplitManifest
 from copilot.ingest.evidence import text_key
+from copilot.kb.cleanup import drop_trailing_closing, unwrap_lines
 from copilot.kb.cluster import ClusterEvidence, ClusterIndex, ReplyCluster, cluster_replies
 from copilot.kb.evidence import recompute_cross_thread_evidence
 from copilot.kb.ids import IdentityInput, PreviousIdentity, assign_ids
@@ -108,6 +109,8 @@ class BuildReport:
     ids_new: int = 0
     ids_ambiguous: int = 0
     ids_disappeared: int = 0
+    unwrapped_bodies: int = 0
+    closings_dropped: int = 0
 
     def lines(self) -> list[str]:
         share = (lambda n: f"{n / self.agent_replies:.1%}") if self.agent_replies else str
@@ -129,10 +132,21 @@ class BuildReport:
             f"ID：沿用（正文相同）{self.ids_reused_by_text}"
             f" · 沿用（来源重合）{self.ids_reused_by_members} · 新 {self.ids_new}"
             f" · 有歧义 {self.ids_ambiguous} · 消失 {self.ids_disappeared}",
+            f"正文清理：接回硬换行 {self.unwrapped_bodies}"
+            f" · 去掉末尾自带的结语 {self.closings_dropped}",
         ]
 
 
 TOP_NS = (10, 25, 50, 100)
+
+
+def _cleaned(body: str, report: "BuildReport") -> str:
+    """去掉历史邮件的硬换行和末尾自带的结语（`copilot.kb.cleanup`），并计数。"""
+    unwrapped = unwrap_lines(body)
+    cleaned = drop_trailing_closing(unwrapped)
+    report.unwrapped_bodies += unwrapped != body
+    report.closings_dropped += cleaned != unwrapped.rstrip()
+    return cleaned
 
 
 def _categories(cluster: ReplyCluster, cases: dict[str, Case]) -> dict[str, int]:
@@ -210,7 +224,7 @@ def build_candidates(
                 evidence=cluster.evidence,
                 representative_message_id=cluster.representative.message_id,
                 representative_key=cluster.representative.key,
-                body_ja=detection.body_ja,
+                body_ja=_cleaned(detection.body_ja, report),
                 slots=detection.slots,
                 specific_spans=[SpecificSpan(kind=s.kind, text=s.text) for s in detection.specific],
                 source_message_ids=[r.message_id for r in cluster.replies],
