@@ -154,3 +154,10 @@
   - **自动发送开关**：`WORKBENCH_AUTO_SEND`（默认关闭）开启时，后台起草得到的、被 #6 分流为 `auto_send` 的草稿由系统直接发送，`Feedback.actor` 和发件人记为“系统（自动发送）”。是否 `auto_send` 仍完全由 #6 的分流决定（意图在允许清单中、模板已批准且低风险并允许自动发送、置信度不低于 `DRAFT_AUTO_SEND_MIN_CONFIDENCE`、没有敏感标签、情绪不负面、是第一封客服回复、全部自检通过、没有疑似注入）。MVP 中发件箱是模拟的，不会真正发出邮件。
   - **允许自动发送的模板**：`knowledge/intents.yaml` 中已经列入允许清单的 `thanks_reply`、`feedback_acknowledgement` 两个意图下，**已批准、风险为 low、证据为 strong**（不是 `repeated_only`）的模板，在审核覆盖层中设 `auto_send_allowed: true`（`copilot kb review import` 后 `copilot kb publish`）。其他意图保持 D-017 的规定，等待低风险意图的专项校准。
 - 影响：D-017 的阈值（0.92）和服务等级决定不变。审核覆盖层不在 git 中（`data/` 被忽略），具体开启了哪些模板在 PR 中列出。自动发送的效果在指标页的“按分流结果”中按 `auto_send` 统计；发现问题时关闭 `WORKBENCH_AUTO_SEND` 即可回到人工发送。
+
+## D-019：翻译类任务（中译日、回译）关闭推理
+- 日期：2026-11-27 · 状态：已采纳（细化 D-017 的模型设置） · 来源：[#8](https://github.com/NatsumeRyuhane/qingci-test/issues/8)（仓库所有者的决定）
+- 背景：D-017 的 `deepseek/deepseek-v4.1-flash` 是推理模型。#8 的本地演示中，同一个案件的一次起草约 60 秒：分析 11.5 秒、起草 31.8 秒、回译 16.8 秒，输出 token 大部分是推理而不是正文（回译的正文约 200 token，输出 2674 token）。工作台的中译日曾因推理用完 `max_tokens`（8192）而返回空内容（60 秒后失败）；关闭推理后 6 秒完成。三项都关闭推理时同一案件 14.8 秒，选中的模板和分流相同，但只有一个样本。
+- 决定：新增按任务的推理强度设置 `LLM_REASONING_<TASK>`（`default` | `off` | `low` | `medium` | `high`，作为 OpenRouter 的 `reasoning` 参数发送）。**纯翻译的任务默认关闭推理**：工作台的中译日（`translate`）和回译（`backtranslate`）。分析和起草保持 `default`，与 #7 评测和自动发送阈值 0.92 的校准一致。
+- 影响：一次起草约快 15 秒。回译的质量在 #7 中由评审模型检查；如果评测发现回译质量下降，可以把 `LLM_REASONING_BACKTRANSLATE` 改回 `default`。分析和起草是否关闭推理（约 60 秒 → 15 秒）需要先用 #7 的评测验证意图置信度和自动发送门槛，再决定。
+

@@ -80,7 +80,8 @@ class Settings(BaseSettings):
 
     llm_reasoning_analyze: ReasoningMode = "default"
     llm_reasoning_draft: ReasoningMode = "default"
-    llm_reasoning_backtranslate: ReasoningMode = "default"
+    llm_reasoning_backtranslate: ReasoningMode = "off"
+    """回译同样是纯翻译，默认关闭推理（D-019）。"""
     llm_reasoning_judge: ReasoningMode = "default"
     llm_reasoning_annotate: ReasoningMode = "default"
     llm_reasoning_translate: ReasoningMode = "off"

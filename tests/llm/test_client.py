@@ -275,6 +275,14 @@ async def test_reasoning_is_omitted_by_default_and_off_for_translation() -> None
     assert "reasoning" not in draft
 
 
+async def test_backtranslation_reasoning_is_off_by_default() -> None:
+    """D-019：回译是纯翻译，默认关闭推理。"""
+    endpoint = FakeEndpoint(chat_reply("回译"))
+    client = make_client(endpoint, make_settings(llm_model_backtranslate="b"))
+    await client.complete_text(LLMTask.BACKTRANSLATE, [{"role": "user", "content": "x"}])
+    assert endpoint.body()["reasoning"] == {"enabled": False}
+
+
 async def test_reasoning_effort_is_sent_when_configured() -> None:
     endpoint = FakeEndpoint(chat_reply("x"))
     client = make_client(endpoint, make_settings(llm_model_draft="d", llm_reasoning_draft="low"))
