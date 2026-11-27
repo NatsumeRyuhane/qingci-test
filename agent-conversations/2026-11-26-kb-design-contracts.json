@@ -32,11 +32,13 @@
       "timestamp": "2026-11-26T14:03:18.750Z",
       "kind": "message",
       "user": "<pasted_content id=\"6ec9\">\nWe're preparing for #5 (knowledge-base build). #4 is merged (PR #17). This session does **prep only, no #5 implementation**:\n\n1. Write a design proposal under `docs/proposals/`, plus a decision record in `docs/decisions.md`.\n2. Open a follow-up issue to #3 for the contract changes listed below.\n3. Update the bodies of #5, #6, #7 and #12, and link #18.\n\nBefore starting, read `AGENTS.md`, the skills `project-docs`, `github-workflow` and `sample-data`, and `docs/data.md`, `docs/architecture.md`, `docs/decisions.md`, `docs/proposals/README.md`. Then read issues #1, #3, #5, #6, #7, #12, #18 with `gh issue view <n> --comments`. Everything written to the repo or GitHub is in Simplified Chinese (D-008).\n\n## Current state (from #4)\n- `uv run copilot ingest` writes cleaned `Case`s to `data/interim/cases.jsonl` (git-ignored). Counts are in `docs/data.md`.\n- Contract additions already merged:\n  - `Message.greeting` / `closing` / `core` (`core` = reply body without the fixed greeting and closing)\n  - `MessageRole.SYSTEM`\n  - `CaseStatus.UNDETERMINED`\n- Case status rule (implemented): last message agent → `replied`; player → `open`; system or unknown → `undetermined`, which needs semantic analysis. The proposal must say who resolves `undetermined` (the #5 build or #6 analysis).\n- #18 tracks security. **Prompt injection is the top priority.**\n\n## Decisions already agreed with the owner (write them down; don't relitigate)\n\n**Knowledge base goal:** it stores the operator's past answers plus *when each applies*. It is not a FAQ. Its consumers:\n- #6 drafting needs answers it can retrieve and fill in;\n- Chinese agents need a Chinese explanation of each answer;\n- #7 needs a gold label for every historical reply.\n\nProposed success metric: the template the agent actually used is in the top 3 retrieved, and the filled draft says the same thing as the real reply.\n\n**Three stores:**\n1. Cleaned email threads (raw and cleaned).\n2. Consistent knowledge, kept in *separate types*:\n   - templates: whole answer = `Message.core`; paragraph-level blocks are deferred;\n   - game facts;\n   - policies (forbidden promises, escalation triggers), checked by code, not left to the model;\n   - JA↔ZH glossary.\n3. Time-sensitive announcements and events (\"Notice\"): incidents, maintenance, fixes, policy changes.\n\nRules across the stores:\n- **Every** entry has a validity window. \"Consistent\" means valid until replaced.\n- The stores differ by use: store 2 is looked up \"as of now\"; store 3 is also matched against the **case's problem time**.\n- Incident templates link to their event.\n- Threads are time-filtered too: no data from after \"now\" in benchmarks.\n- Style parts are versioned components with validity windows: greeting, apology variants, \"contact us again\", closing, no-repost notice.\n\n**Provenance and review:**\n- Every entry records its source message IDs, whether it was reconstructed from data or entered by hand, and its review status: draft / approved / retired / needs re-review after a policy change.\n- Unreviewed entries can be references but are never auto-sent.\n- The owner reviews templates in order of coverage until they reach 80% (about 100–150); the rest stay draft.\n\n**Versioning:** (`id`, `version`) is edit history; the validity window is real-world applicability. Selection means \"the version valid now\". The contract currently assumes \"latest version wins\", so this needs a contract change.\n\n**General templates** (no case-specific content; 14 of the top 60 cover about a third of replies) can be auto-send candidates. The gate is on the *case*:\n- the intent is on an allowlist where the template is the complete answer;\n- classification confidence is high;\n- no sensitivity tags, and sentiment isn't negative;\n- it is the first reply.\n\nA general template must never beat an active specific one.\n\n**Intents:** a closed list. Each has a category, a Chinese description, a checklist of info to request from the player, and a default risk. Each template belongs to one intent.\n\n**Labels for #7:**\n- historical reply → template;\n- a per-reply resolution signal: was this agent reply followed by a player follow-up? In `P>A1>P>A2`, A1 didn't resolve and A2 did.\n\n**Time context:**\n- The benchmark simulates \"now\" to the minute, and the block is **appended at the end** of the LLM query, so the static prefix stays cacheable.\n- Two times: \"now\" (drafting time) and the problem time (`InquiryForm.occurred_at`).\n- Each time has a status: known / estimated / unavailable. **Unavailable stays unavailable.** Estimates are labelled with their uncertainty. A thread-ID-neighbour estimate measured 1.2 h median error, 12 h at p80, 64 h at p95, so estimates can't decide short incident windows; such drafts go to review.\n- Time-bound templates are *not* in the static catalog. They're injected in the time block only while active, and code enforces the windows (`template_window` check).\n\n**ReAct (hybrid):**\n- Code always injects the safety-critical context: time context, active events, candidate templates for the classified intent, applicable policies.\n- The model may call optional tools: search facts, search similar cases, read the thread, look up events at another time, glossary.\n- Bounded at about 4 steps, falling back to the fixed pipeline.\n- Actions are JSON validated by Pydantic via the existing `complete_json` (no native tool calling, per D-010).\n- The trace is stored on the `Draft`, and draft claims cite knowledge-base entries.\n- This moves part of #12 into the MVP. #7 compares \"pipeline\" with \"pipeline + tools\".\n\n**Role evidence:**\n- Ranking: metadata > corroboration from other messages (quote headers) > whole-template match > content keywords.\n- Weak evidence alone → `unknown`.\n- Add `Message.role_evidence`. #5 learns only from agent replies with strong evidence (prevents knowledge-base poisoning, #18).\n\n**Storage and format:**\n- SQLite at runtime (D-010), with immutable (`id`, `version`) rows.\n- Review through a YAML export/import, one file per template, in `data/processed/kb/review/`.\n- LLM-generated labels cached by a hash of their content; human edits as an overlay keyed by a stable template ID.\n- Anything derived from customer data never goes in git. Hand-written content with no customer text (policies, intents, notices, a public-term glossary) may be committed. Reviewed templates are backed up outside the repo.\n\n**#7 split:** about 90% of problem times fall in 2024-03, so split *within March* by date (falling back to thread ID), not by month. Report results by time status, include injection samples, and add a \"player misread as agent or system\" metric.\n\n## Deliverables\n- **Proposal:** follow the `docs/proposals/README.md` format and numbering; check existing numbers, including the #13 worktree's draft. **Show me the draft in chat before opening a PR.**\n- **Contract follow-up issue** (to #3):\n  - time-with-status object;\n  - Notice/Event; Fact; Policy; Glossary entry; Intent;\n  - validity windows on all of them;\n  - `ReplyTemplate.intent` and `review_status`, plus \"valid version at time T\" selection;\n  - `Message.role_evidence`;\n  - `Draft` citations and tool-call trace;\n  - allowed characters for `Case.id`.\n- **Issue updates:** say what changed and why in each issue body or a comment, and link the proposal and #18.\n\n## Rules\n- The root checkout is on `docs/agent-conversations` with unpushed commits, so work in a new worktree off `origin/main`.\n- Signed commits; Conventional Commits.\n- Ask before any push or PR.\n- No real sample text in docs, issues or PRs; aggregates only.\n</pasted_content id=\"6ec9\">",
+      "translation_chs": "<pasted_content id=\"6ec9\">\n我们正在为 #5（知识库构建）做准备。#4 已合并（PR #17）。本次会话**只做准备，不实现 #5**：\n\n1. 在 `docs/proposals/` 下写一份设计提案，并在 `docs/decisions.md` 中写决策记录。\n2. 为下面列出的契约改动，开一个针对 #3 的后续 issue。\n3. 更新 #5、#6、#7 和 #12 的正文，并链接 #18。\n\n开始之前，先读 `AGENTS.md`，技能 `project-docs`、`github-workflow` 和 `sample-data`，以及 `docs/data.md`、`docs/architecture.md`、`docs/decisions.md`、`docs/proposals/README.md`。然后用 `gh issue view <n> --comments` 读 issue #1、#3、#5、#6、#7、#12、#18。写进仓库或 GitHub 的一切内容都用简体中文（D-008）。\n\n## 现状（来自 #4）\n- `uv run copilot ingest` 把清洗后的 `Case` 写入 `data/interim/cases.jsonl`（被 git 忽略）。数量统计在 `docs/data.md`。\n- 已合并的契约新增：\n  - `Message.greeting` / `closing` / `core`（`core` = 去掉固定问候语和结尾后的回复正文）\n  - `MessageRole.SYSTEM`\n  - `CaseStatus.UNDETERMINED`\n- 案件状态规则（已实现）：最后一条消息来自客服 → `replied`；来自玩家 → `open`；系统或无法判断 → `undetermined`，这需要语义分析。提案必须说明由谁处理 `undetermined`（#5 的构建还是 #6 的分析）。\n- #18 跟踪安全。**提示注入是最高优先级。**\n\n## 已与所有者商定的决定（写下来，不要再争）\n\n**知识库目标**：它保存运营方过去的回答，以及*每种回答何时适用*。它不是 FAQ。它的使用方：\n- #6 起草需要能检索、能填写的答案；\n- 中文客服需要每个回答的中文说明；\n- #7 需要每封历史回复对应的标准答案。\n\n建议的成功指标：客服实际使用的模板出现在检索结果前 3 名中，并且填写后的草稿与真实回复说的是同一件事。\n\n**三个存储**：\n1. 清洗后的邮件线程（原始与清洗后）。\n2. 稳定知识，按*独立类型*存放：\n   - 模板：整段回答 = `Message.core`；段落级块暂缓；\n   - 游戏事实；\n   - 政策（禁止的承诺、升级触发条件），由代码检查，不交给模型；\n   - 日中术语表。\n3. 限时的公告与事件（“Notice”）：事故、维护、修复、政策变更。\n\n跨存储的规则：\n- **每个**条目都有有效期。“稳定”指在被替换前一直有效。\n- 各存储用途不同：存储 2 按“现在”查询；存储 3 还要与**案件的问题发生时间**匹配。\n- 事故类模板链接到对应的事件。\n- 线程也按时间过滤：评测中不出现“现在”之后的数据。\n- 风格部件是带有效期的版本化组件：问候语、道歉变体、“再次联系我们”、结尾、禁止重复投稿提示。\n\n**出处与审核**：\n- 每个条目记录来源消息 ID、是依据数据重建还是人工录入，以及审核状态：draft / approved / retired / 政策变更后需重新审核。\n- 未审核的条目可以参考，但永远不会自动发送。\n- 所有者按覆盖率顺序审核模板，直到覆盖 80%（约 100–150 个），其余保持 draft。\n\n**版本**：（`id`, `version`）是编辑历史；有效期是现实中的适用范围。选择规则是“现在有效的版本”。契约目前假定“最新版本为准”，因此需要改契约。\n\n**通用模板**（不含案件具体内容；前 60 个中有 14 个覆盖约三分之一的回复）可以成为自动发送候选。门槛在*案件*上：\n- 意图在允许清单中，且该模板就是完整答案；\n- 分类置信度高；\n- 无敏感标签，且情绪不负面；\n- 是第一封回复。\n\n通用模板永远不能压过生效中的特定模板。\n\n**意图**：封闭列表。每个意图有所属类别、中文说明、向玩家索要的信息清单、默认风险等级。每个模板属于一个意图。\n\n**给 #7 的标注**：\n- 历史回复 → 模板；\n- 每封回复的解决信号：这封客服回复之后玩家是否又来信？在 `P>A1>P>A2` 中，A1 没有解决，A2 解决了。\n\n**时间上下文**：\n- 评测把“现在”模拟到分钟，时间块**追加在 LLM 请求末尾**，静态前缀保持可缓存。\n- 两个时间：“现在”（起草时间）和问题发生时间（`InquiryForm.occurred_at`）。\n- 每个时间带状态：known / estimated / unavailable。**没有就是没有。** 估计值要标注不确定性。按线程 ID 相邻估计的误差：中位数 1.2 小时，p80 为 12 小时，p95 为 64 小时，因此估计值无法判定很短的事故窗口；这类草稿转人工审核。\n- 限时模板*不*在静态目录中。只在生效时通过时间块注入，时间窗口由代码执行（`template_window` 检查）。\n\n**ReAct（混合式）**：\n- 代码始终注入安全相关的上下文：时间上下文、生效中的事件、该意图下的候选模板、适用政策。\n- 模型可以调用可选的工具：搜索事实、搜索相似案件、读线程、查询其他时间的事件、术语表。\n- 最多约 4 步，失败时回退到固定流水线。\n- 动作是 JSON，通过现有的 `complete_json` 用 Pydantic 校验（按 D-010，不用原生 tool calling）。\n- 轨迹保存在 `Draft` 上，草稿中的说法引用知识库条目。\n- 这把 #12 的一部分提前到 MVP。#7 对比“流水线”和“流水线 + 工具”。\n\n**角色证据**：\n- 排序：元数据 > 其他消息的佐证（引用头）> 整段模板匹配 > 内容关键词。\n- 只有弱证据 → `unknown`。\n- 新增 `Message.role_evidence`。#5 只从证据充分的客服回复中学习（防止知识库污染，#18）。\n\n**存储与格式**：\n- 运行时用 SQLite（D-010），行（`id`, `version`）不可改写。\n- 审核通过 YAML 导出/导入，每个模板一个文件，放在 `data/processed/kb/review/`。\n- LLM 生成的标注按内容哈希缓存；人工编辑作为覆盖层，以稳定的模板 ID 为键。\n- 由客户数据派生的内容不进 git。不含客户原文的人工内容（政策、意图、公告、公开术语表）可以提交。审核过的模板在仓库之外备份。\n\n**#7 的切分**：约 90% 的问题发生时间落在 2024-03，所以在*3 月内*按日期切分（没有日期时按线程 ID），而不是按月。结果按时间状态分别报告，包含注入样本，并增加“玩家被误判为客服或系统”的指标。\n\n## 交付物\n- **提案**：遵循 `docs/proposals/README.md` 的格式和编号；核对已有编号，包括 #13 worktree 的草稿。**开 PR 之前先在聊天里给我看草稿。**\n- **契约后续 issue**（针对 #3）：\n  - 带状态的时间对象；\n  - Notice/Event；Fact；Policy；Glossary entry；Intent；\n  - 上述类型都带有效期；\n  - `ReplyTemplate.intent` 和 `review_status`，以及“时间 T 时有效的版本”选择；\n  - `Message.role_evidence`；\n  - `Draft` 的引用和工具调用轨迹；\n  - `Case.id` 允许的字符。\n- **Issue 更新**：在每个 issue 正文或评论中说明改了什么、为什么改，并链接提案和 #18。\n\n## 规则\n- 根检出目录在 `docs/agent-conversations` 上，且有未推送的提交，所以基于 `origin/main` 新建 worktree 工作。\n- 签名提交；Conventional Commits。\n- 任何 push 或 PR 之前先问。\n- 文档、issue、PR 中不出现真实样本原文，只用汇总数据。\n</pasted_content id=\"6ec9\">",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:03:26.017Z",
-          "text": "I'll start by reading the required docs, skills and issues."
+          "text": "I'll start by reading the required docs, skills and issues.",
+          "translation_chs": "我先读一下必需的文档、技能和 issue。"
         },
         {
           "type": "tool_call",
@@ -69,7 +71,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:03:39.650Z",
-          "text": "The root is on `docs/agent-conversations`, which isn't up to date with main, so I'll read the docs from `origin/main`."
+          "text": "The root is on `docs/agent-conversations`, which isn't up to date with main, so I'll read the docs from `origin/main`.",
+          "translation_chs": "根目录在 `docs/agent-conversations` 分支上，和 main 不同步，所以我从 `origin/main` 读文档。"
         },
         {
           "type": "tool_call",
@@ -101,7 +104,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:03:52.755Z",
-          "text": "Now the issues and the existing contract code."
+          "text": "Now the issues and the existing contract code.",
+          "translation_chs": "现在看 issue 和现有的契约代码。"
         },
         {
           "type": "tool_call",
@@ -120,7 +124,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:04:26.341Z",
-          "text": "`--comments` printed only comments; fetching the bodies via JSON."
+          "text": "`--comments` printed only comments; fetching the bodies via JSON.",
+          "translation_chs": "`--comments` 只打印了评论，改用 JSON 获取正文。"
         },
         {
           "type": "tool_call",
@@ -139,7 +144,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:04:53.811Z",
-          "text": "Now the contract code, and the #13 worktree's proposal and decision numbering."
+          "text": "Now the contract code, and the #13 worktree's proposal and decision numbering.",
+          "translation_chs": "现在看契约代码，以及 #13 worktree 的提案和决策编号。"
         },
         {
           "type": "tool_call",
@@ -228,7 +234,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:08:53.418Z",
-          "text": "Worktree is ready at `../qingci-test-5-kb-design` on `docs/5-kb-design`, and signing is set to SSH. Next I'll write the proposal."
+          "text": "Worktree is ready at `../qingci-test-5-kb-design` on `docs/5-kb-design`, and signing is set to SSH. Next I'll write the proposal.",
+          "translation_chs": "worktree 已就绪：`../qingci-test-5-kb-design`，分支 `docs/5-kb-design`，签名已设为 SSH。接下来写提案。"
         },
         {
           "type": "tool_call",
@@ -247,7 +254,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:10:31.097Z",
-          "text": "Fixing one claim I overstated. Labelling \"when to use\" needs the player inquiries, so the labeller can't avoid reading them. The protection comes from delimiting that text and requiring review."
+          "text": "Fixing one claim I overstated. Labelling \"when to use\" needs the player inquiries, so the labeller can't avoid reading them. The protection comes from delimiting that text and requiring review.",
+          "translation_chs": "修正一处我说过头的地方。标注“何时适用”需要看玩家的来信，所以标注者无法避免读这些文本。防护来自对文本加分隔标记并要求审核。"
         },
         {
           "type": "tool_call",
@@ -296,7 +304,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:11:00.095Z",
-          "text": "Checking that the relative links resolve:"
+          "text": "Checking that the relative links resolve:",
+          "translation_chs": "检查相对链接能否正确解析："
         },
         {
           "type": "tool_call",
@@ -315,7 +324,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:11:47.019Z",
-          "text": "I've written the proposal draft and D-011 in the worktree `~/Projects/qingci-test-5-kb-design` on branch `docs/5-kb-design`. Nothing is committed, pushed or posted to GitHub yet. The proposal is numbered **0003**, because #12 already reserves `0001` and the #13 worktree's draft is `0002`. The decision record is **D-011**: D-009 lives on the conversations branch and main ends at D-010. The relative links resolve.\n\n## Decide before I continue\n\nThese are the places where I went past what you'd already agreed:\n\n1. **Who resolves `undetermined`: #6 analysis.** #6 already reads the whole live thread with the LLM. #5 is an offline batch whose labels don't need the answer: a reply followed by a bounce still gets its template label, with the resolution signal set to unknown. I wrote this into D-011 as decided; tell me if you'd rather keep it as a proposal only.\n2. **Where weak role evidence becomes `unknown`** (open question 1). Doing it at ingest means a forged greeting can no longer hide a case. But real one-off agent replies that end a thread would also turn `undetermined`. I lean toward keeping `role` as ingest sets it and having the trust-sensitive consumers treat weak evidence as `unknown`: #5 learning, the auto-send gate and #7 metrics. Then measure how many threads the stricter option would affect before deciding.\n3. **One addition to your contract list: a style-component type**, so greetings, closings and the other style parts can carry versions and validity windows.\n4. **Three more open questions** in the doc's last section:\n   - the status for the 132 threads that are a single system email;\n   - whether the 468 `HH:MM`-only problem times count as estimated or unavailable;\n   - where committed hand-written knowledge lives (I suggest `knowledge/`).\n\nThe issue number `#CONTRACT` is a placeholder in both files. I'll fill it in once the follow-up issue exists.\n\n## Draft: `docs/proposals/0003-knowledge-base.md`\n\n# 0003：知识库设计（#5）\n\n- 状态：**讨论中**（与仓库所有者讨论后的设计，见 D-011；契约改动在 #CONTRACT 中实现）\n- 里程碑：MVP\n- 关联：#5（知识库）、#6（起草）、#7（评测）、#12（Agent 循环）、#18（安全）、#3（契约）\n\n## 摘要\n\n知识库记录运营方**过去怎么回答**，以及每种回答**什么时候适用**。它不是 FAQ。知识分三个存储：邮件线程、稳定知识（模板、风格组件、游戏事实、政策、术语表、意图目录，各自独立成类型）、限时的公告与事件。**每个条目都有有效期**：稳定知识按“现在”查询，公告与事件还要和案件的**问题发生时间**匹配。版本（`id`, `version`）是编辑历史，有效期是现实中的适用范围，选择规则是“时间 T 时有效的版本”。每个条目记录出处和审核状态，未审核的条目可以参考，但永远不会自动发送。\n\n起草（#6）时，安全相关的上下文（时间、生效中的事件、候选模板、适用政策）由代码注入，时间窗口由代码检查；模型可以在有限步数内调用只读工具查询其他信息（混合式 ReAct），这把 #12 的一部分提前到 MVP。#5 只从角色证据充分的客服回复中学习，防止知识库被伪造的回复污染（#18）。\n\n## 问题\n\n1. **答案是否适用取决于时间。** 部分模板只适用于某次事故，有的事故窗口只有几个小时，政策也会变化。只有一个可选的 `valid_from`/`valid_to`、并且“最新版本为准”的模板，表达不了“3 月 5 日时有效的是哪个版本”，也无法在评测中重放历史上某个时刻。\n2. **时间本身经常不确定。** 2,872 个线程中，2,149 个有完整的问题发生时间，468 个只有 `HH:MM`，255 个没有表单；发送时间只恢复了 258 封。\n3. **下游需要的不只是模板正文。** #6 需要能检索、能填写的答案；中文客服需要中文说明；#7 需要每封历史回复对应的标准答案。\n4. **角色可以伪造**（#18 第 5 项），伪造的回复会污染知识库。\n5. **契约有缺口。** `CaseAnalysis.intent` 是任意字符串；没有事件、事实、政策、术语表的类型；`Draft` 无法记录引用和工具调用。\n\n## 目标与非目标\n\n**目标：** 能检索并填写、附中文说明的答案；每封历史客服回复都有标准答案和解决信号；所有条目都有有效期、出处和审核状态；时间窗口、政策、自动发送条件由代码执行；知识库不会被伪造的输入污染。\n**非目标：** FAQ；段落级模板块；完整的 Agent 循环（仍属于 #12）；访问控制（#13）；实现。\n\n## 成功指标\n\n客服实际使用的模板出现在检索结果的前 3 名中，并且填写后的草稿与真实回复说的是同一件事（由 #7 的 LLM 评审判断，先在人工标注样本上校准）。\n\n## 设计\n\n**§1 使用方**：#6 需要能检索、能填写的答案和适用条件；中文客服需要中文说明；#7 需要每封历史客服回复对应的模板和解决信号。\n\n**§2 三个存储**\n\n| 存储 | 内容 | 查询方式 |\n|---|---|---|\n| 1. 邮件线程 | `Case` / `Message` | 按“现在”过滤：评测中不出现“现在”之后的数据 |\n| 2. 稳定知识 | 模板（整段 `Message.core`）、风格组件、游戏事实、政策（由代码检查）、日中术语表、意图目录，各自是独立的类型 | 按“现在”查询 |\n| 3. 公告与事件 | 事故、维护、修复、政策变更 | 按“现在”查询，同时与问题发生时间匹配 |\n\n“稳定”指在被替换前一直有效。事故类模板链接到对应的事件。\n\n**§3 有效期与版本**：每个条目都有有效期 `[valid_from, valid_to)`。（`id`, `version`）是编辑历史，两者相互独立。在时间 T，从未下线、有效期包含 T 的版本中取 `version` 最大的一个。行不可改写，所以关闭有效期也是新建版本。示例：v1 一直有效；政策变化时新建 v2（内容同 v1，设置 `valid_to`）和 v3（新内容，设置 `valid_from`），之后 v1 不会再被选中。这取代契约中“最新版本为准”的默认规则。\n\n**§4 出处与审核**：每个条目记录 `source_message_ids`、来源方式（reconstructed/manual）和审核状态（draft/approved/retired/needs_rereview）。未审核的条目可以参考，永远不自动发送。政策或事实变化时，引用它们的模板标为 needs_rereview。所有者按覆盖率审核模板，直到覆盖 80%（约 100–150 个），其余保持 draft。\n\n**§5 意图与模板**：意图是封闭列表，每个意图有所属类别、中文说明、向玩家索要的信息清单、默认风险等级，以及是否在自动发送允许清单中。`CaseAnalysis.intent` 只能取目录中的值，每个模板属于一个意图。通用模板是没有占位符、不提具体道具、时间或事故的模板（前 60 个中有 14 个，覆盖约三分之一的回复）。审核时确认是通用模板且风险为 `low` 的，才标为 `auto_send_allowed`。自动发送的门槛在案件上：意图在允许清单中、置信度高、无敏感标签且情绪不负面、是第一封回复，并且所有检查通过、没有疑似注入。通用模板永远排在生效中的特定模板之后。\n\n**§6 给 #7 的标注**：每封证据充分的客服回复映射到一个模板，或标为“无匹配”。解决信号：在 P > A1 > P > A2 中，A1 没有解决，A2 解决了；客服回复之后只有系统邮件或未知邮件时，解决信号为“未知”。\n\n**§7 `undetermined` 由 #6 的分析步骤判断**（见上文第 1 点），#5 不修改 `Case.status`。\n\n**§8 时间上下文**：两个时间，“现在”（生产中是系统时间；评测中模拟到分钟，取历史回复的发送时间，没有就估计）和问题发生时间（`occurred_at`）。\n\n- 每个时间带状态 known / estimated / unavailable；没有就是没有，估计值必须标注区间。\n- 按线程 ID 相邻估计的误差：中位数 1.2 小时，p80 12 小时，p95 64 小时。区间跨过事故窗口边界时判为“无法确定”，草稿转人工审核。\n- 问题发生时间由玩家填写，不可信：它只决定哪些事故模板可以作为候选，不能单独让案件得到补偿类答复；补偿类模板为 `high`，必须人工审核。\n- 时间块追加在 LLM 请求末尾，静态前缀保持可缓存。限时模板不在静态目录中，只在生效时通过时间块注入（文中附合成的 JSON 示例）。\n- `template_window` 检查由代码执行：要求模板在“现在”有效，并且它链接的事件与问题发生时间匹配。模型声称的时间不影响这项检查。\n\n**§9 混合式 ReAct**：代码始终注入时间上下文、生效中的事件、该意图下的候选模板和适用政策。模型可以调用以下只读工具：\n\n- `search_facts`：只返回“现在”有效的版本\n- `search_similar_cases`：只限“现在”之前的案件，排除当前案件\n- `read_thread`：只限当前案件\n- `lookup_events`：查询另一个时间点的事件，只作参考\n- `glossary`：查询术语对照\n\n最多约 4 步，失败时回退到固定流水线。动作是 JSON，通过 `complete_json` 用 Pydantic 校验（文中附示意代码）。轨迹和引用保存在 `Draft` 上，没有引用的事实性说法会被标出。#12 保留多轮对话、有副作用的工具、连接器和准入门槛。#7 对比“流水线”和“流水线 + 工具”。\n\n**§10 角色证据**：依据按强度排序为元数据 > 引用佐证 > 整段模板匹配 > 关键词，只有弱证据时按 unknown 处理。#4 填写它能看到的依据，整段模板匹配由 #5 在构建时补充。#5 只从证据充分的回复中学习：抄了完整模板的伪造回复不会带来新内容，内容新颖的伪造回复没有强证据。\n\n**§11 存储与格式**：\n\n- 运行时用 SQLite，行只插入、不改写。\n- 审核用 YAML，每个模板一个文件，放在 `data/processed/kb/review/`。\n- LLM 标注按内容哈希缓存。\n- 人工编辑作为覆盖层，以稳定的模板 ID 为键；重新构建时按重合度对应到已有 ID，对应不上就报告，不猜测。\n- 由客户数据派生的内容不进 git；不含客户原文的人工内容可以提交；审核过的模板在仓库之外备份。\n\n**§12 安全（#18）**：防止知识库污染；时间不能被正文操纵；工具只读、范围受限、使用分隔标记；正文不能改变分流；轨迹可审计；#7 加入注入样本，并统计玩家被误判为客服或系统的比例。\n\n**§13 #7 的切分**：完整的问题发生时间中有 1,942/2,149 落在 3 月，所以在 3 月内按日期切分，没有日期时按线程 ID 顺序。知识库只用训练部分构建。结果按时间状态分别报告，并对比流水线和流水线加工具两种模式。\n\n文档其余部分包括：\n\n- **契约改动**：你列出的项目，加上风格组件。\n- **考虑过的替代方案**：FAQ 式知识库、单表存储、最新版本为准、把限时模板放进静态目录、原生 tool calling、纯流水线、段落级模板块。\n- **风险**：证据过滤缩小学习数据、解决信号是近似的、估计时间太粗、审核工作量、稳定 ID 漂移、提交的内容混入客户原文、工具循环的成本。\n- **如何判断它是否有效**。\n- **需要仓库所有者决定的四个问题**。\n\n## Draft: D-011（appended to `docs/decisions.md`）\n\n**D-011：知识库记录“答案 + 何时适用”，所有条目带有效期。** 记录了上述已商定的决定：\n\n- 三个存储；\n- 每个条目都有有效期，按“时间 T 时有效的版本”选择；\n- 出处、审核状态，未审核内容不自动发送；\n- 封闭的意图列表和自动发送门槛；\n- 带状态的时间和末尾的时间块；\n- 混合式 ReAct；\n- 只从强证据回复中学习；\n- 存储规则；\n- `undetermined` 由 #6 判断。\n\n来源是 #5 和提案 0003；影响部分指向契约 issue 以及 #5、#6、#7、#12 的范围调整。\n\n---\n\nThe full text is in `~/Projects/qingci-test-5-kb-design/docs/proposals/0003-knowledge-base.md`; above is the full structure with sections 1–13 condensed. Once you've answered the points above, the plan is:\n\n1. Create the contract follow-up issue and fill in its number.\n2. Make the signed commits.\n3. Ask you before pushing and opening the PR.\n4. Update #5, #6, #7 and #12 and comment on #18, linking the proposal and the PR."
+          "text": "I've written the proposal draft and D-011 in the worktree `~/Projects/qingci-test-5-kb-design` on branch `docs/5-kb-design`. Nothing is committed, pushed or posted to GitHub yet. The proposal is numbered **0003**, because #12 already reserves `0001` and the #13 worktree's draft is `0002`. The decision record is **D-011**: D-009 lives on the conversations branch and main ends at D-010. The relative links resolve.\n\n## Decide before I continue\n\nThese are the places where I went past what you'd already agreed:\n\n1. **Who resolves `undetermined`: #6 analysis.** #6 already reads the whole live thread with the LLM. #5 is an offline batch whose labels don't need the answer: a reply followed by a bounce still gets its template label, with the resolution signal set to unknown. I wrote this into D-011 as decided; tell me if you'd rather keep it as a proposal only.\n2. **Where weak role evidence becomes `unknown`** (open question 1). Doing it at ingest means a forged greeting can no longer hide a case. But real one-off agent replies that end a thread would also turn `undetermined`. I lean toward keeping `role` as ingest sets it and having the trust-sensitive consumers treat weak evidence as `unknown`: #5 learning, the auto-send gate and #7 metrics. Then measure how many threads the stricter option would affect before deciding.\n3. **One addition to your contract list: a style-component type**, so greetings, closings and the other style parts can carry versions and validity windows.\n4. **Three more open questions** in the doc's last section:\n   - the status for the 132 threads that are a single system email;\n   - whether the 468 `HH:MM`-only problem times count as estimated or unavailable;\n   - where committed hand-written knowledge lives (I suggest `knowledge/`).\n\nThe issue number `#CONTRACT` is a placeholder in both files. I'll fill it in once the follow-up issue exists.\n\n## Draft: `docs/proposals/0003-knowledge-base.md`\n\n# 0003：知识库设计（#5）\n\n- 状态：**讨论中**（与仓库所有者讨论后的设计，见 D-011；契约改动在 #CONTRACT 中实现）\n- 里程碑：MVP\n- 关联：#5（知识库）、#6（起草）、#7（评测）、#12（Agent 循环）、#18（安全）、#3（契约）\n\n## 摘要\n\n知识库记录运营方**过去怎么回答**，以及每种回答**什么时候适用**。它不是 FAQ。知识分三个存储：邮件线程、稳定知识（模板、风格组件、游戏事实、政策、术语表、意图目录，各自独立成类型）、限时的公告与事件。**每个条目都有有效期**：稳定知识按“现在”查询，公告与事件还要和案件的**问题发生时间**匹配。版本（`id`, `version`）是编辑历史，有效期是现实中的适用范围，选择规则是“时间 T 时有效的版本”。每个条目记录出处和审核状态，未审核的条目可以参考，但永远不会自动发送。\n\n起草（#6）时，安全相关的上下文（时间、生效中的事件、候选模板、适用政策）由代码注入，时间窗口由代码检查；模型可以在有限步数内调用只读工具查询其他信息（混合式 ReAct），这把 #12 的一部分提前到 MVP。#5 只从角色证据充分的客服回复中学习，防止知识库被伪造的回复污染（#18）。\n\n## 问题\n\n1. **答案是否适用取决于时间。** 部分模板只适用于某次事故，有的事故窗口只有几个小时，政策也会变化。只有一个可选的 `valid_from`/`valid_to`、并且“最新版本为准”的模板，表达不了“3 月 5 日时有效的是哪个版本”，也无法在评测中重放历史上某个时刻。\n2. **时间本身经常不确定。** 2,872 个线程中，2,149 个有完整的问题发生时间，468 个只有 `HH:MM`，255 个没有表单；发送时间只恢复了 258 封。\n3. **下游需要的不只是模板正文。** #6 需要能检索、能填写的答案；中文客服需要中文说明；#7 需要每封历史回复对应的标准答案。\n4. **角色可以伪造**（#18 第 5 项），伪造的回复会污染知识库。\n5. **契约有缺口。** `CaseAnalysis.intent` 是任意字符串；没有事件、事实、政策、术语表的类型；`Draft` 无法记录引用和工具调用。\n\n## 目标与非目标\n\n**目标：** 能检索并填写、附中文说明的答案；每封历史客服回复都有标准答案和解决信号；所有条目都有有效期、出处和审核状态；时间窗口、政策、自动发送条件由代码执行；知识库不会被伪造的输入污染。\n**非目标：** FAQ；段落级模板块；完整的 Agent 循环（仍属于 #12）；访问控制（#13）；实现。\n\n## 成功指标\n\n客服实际使用的模板出现在检索结果的前 3 名中，并且填写后的草稿与真实回复说的是同一件事（由 #7 的 LLM 评审判断，先在人工标注样本上校准）。\n\n## 设计\n\n**§1 使用方**：#6 需要能检索、能填写的答案和适用条件；中文客服需要中文说明；#7 需要每封历史客服回复对应的模板和解决信号。\n\n**§2 三个存储**\n\n| 存储 | 内容 | 查询方式 |\n|---|---|---|\n| 1. 邮件线程 | `Case` / `Message` | 按“现在”过滤：评测中不出现“现在”之后的数据 |\n| 2. 稳定知识 | 模板（整段 `Message.core`）、风格组件、游戏事实、政策（由代码检查）、日中术语表、意图目录，各自是独立的类型 | 按“现在”查询 |\n| 3. 公告与事件 | 事故、维护、修复、政策变更 | 按“现在”查询，同时与问题发生时间匹配 |\n\n“稳定”指在被替换前一直有效。事故类模板链接到对应的事件。\n\n**§3 有效期与版本**：每个条目都有有效期 `[valid_from, valid_to)`。（`id`, `version`）是编辑历史，两者相互独立。在时间 T，从未下线、有效期包含 T 的版本中取 `version` 最大的一个。行不可改写，所以关闭有效期也是新建版本。示例：v1 一直有效；政策变化时新建 v2（内容同 v1，设置 `valid_to`）和 v3（新内容，设置 `valid_from`），之后 v1 不会再被选中。这取代契约中“最新版本为准”的默认规则。\n\n**§4 出处与审核**：每个条目记录 `source_message_ids`、来源方式（reconstructed/manual）和审核状态（draft/approved/retired/needs_rereview）。未审核的条目可以参考，永远不自动发送。政策或事实变化时，引用它们的模板标为 needs_rereview。所有者按覆盖率审核模板，直到覆盖 80%（约 100–150 个），其余保持 draft。\n\n**§5 意图与模板**：意图是封闭列表，每个意图有所属类别、中文说明、向玩家索要的信息清单、默认风险等级，以及是否在自动发送允许清单中。`CaseAnalysis.intent` 只能取目录中的值，每个模板属于一个意图。通用模板是没有占位符、不提具体道具、时间或事故的模板（前 60 个中有 14 个，覆盖约三分之一的回复）。审核时确认是通用模板且风险为 `low` 的，才标为 `auto_send_allowed`。自动发送的门槛在案件上：意图在允许清单中、置信度高、无敏感标签且情绪不负面、是第一封回复，并且所有检查通过、没有疑似注入。通用模板永远排在生效中的特定模板之后。\n\n**§6 给 #7 的标注**：每封证据充分的客服回复映射到一个模板，或标为“无匹配”。解决信号：在 P > A1 > P > A2 中，A1 没有解决，A2 解决了；客服回复之后只有系统邮件或未知邮件时，解决信号为“未知”。\n\n**§7 `undetermined` 由 #6 的分析步骤判断**（见上文第 1 点），#5 不修改 `Case.status`。\n\n**§8 时间上下文**：两个时间，“现在”（生产中是系统时间；评测中模拟到分钟，取历史回复的发送时间，没有就估计）和问题发生时间（`occurred_at`）。\n\n- 每个时间带状态 known / estimated / unavailable；没有就是没有，估计值必须标注区间。\n- 按线程 ID 相邻估计的误差：中位数 1.2 小时，p80 12 小时，p95 64 小时。区间跨过事故窗口边界时判为“无法确定”，草稿转人工审核。\n- 问题发生时间由玩家填写，不可信：它只决定哪些事故模板可以作为候选，不能单独让案件得到补偿类答复；补偿类模板为 `high`，必须人工审核。\n- 时间块追加在 LLM 请求末尾，静态前缀保持可缓存。限时模板不在静态目录中，只在生效时通过时间块注入（文中附合成的 JSON 示例）。\n- `template_window` 检查由代码执行：要求模板在“现在”有效，并且它链接的事件与问题发生时间匹配。模型声称的时间不影响这项检查。\n\n**§9 混合式 ReAct**：代码始终注入时间上下文、生效中的事件、该意图下的候选模板和适用政策。模型可以调用以下只读工具：\n\n- `search_facts`：只返回“现在”有效的版本\n- `search_similar_cases`：只限“现在”之前的案件，排除当前案件\n- `read_thread`：只限当前案件\n- `lookup_events`：查询另一个时间点的事件，只作参考\n- `glossary`：查询术语对照\n\n最多约 4 步，失败时回退到固定流水线。动作是 JSON，通过 `complete_json` 用 Pydantic 校验（文中附示意代码）。轨迹和引用保存在 `Draft` 上，没有引用的事实性说法会被标出。#12 保留多轮对话、有副作用的工具、连接器和准入门槛。#7 对比“流水线”和“流水线 + 工具”。\n\n**§10 角色证据**：依据按强度排序为元数据 > 引用佐证 > 整段模板匹配 > 关键词，只有弱证据时按 unknown 处理。#4 填写它能看到的依据，整段模板匹配由 #5 在构建时补充。#5 只从证据充分的回复中学习：抄了完整模板的伪造回复不会带来新内容，内容新颖的伪造回复没有强证据。\n\n**§11 存储与格式**：\n\n- 运行时用 SQLite，行只插入、不改写。\n- 审核用 YAML，每个模板一个文件，放在 `data/processed/kb/review/`。\n- LLM 标注按内容哈希缓存。\n- 人工编辑作为覆盖层，以稳定的模板 ID 为键；重新构建时按重合度对应到已有 ID，对应不上就报告，不猜测。\n- 由客户数据派生的内容不进 git；不含客户原文的人工内容可以提交；审核过的模板在仓库之外备份。\n\n**§12 安全（#18）**：防止知识库污染；时间不能被正文操纵；工具只读、范围受限、使用分隔标记；正文不能改变分流；轨迹可审计；#7 加入注入样本，并统计玩家被误判为客服或系统的比例。\n\n**§13 #7 的切分**：完整的问题发生时间中有 1,942/2,149 落在 3 月，所以在 3 月内按日期切分，没有日期时按线程 ID 顺序。知识库只用训练部分构建。结果按时间状态分别报告，并对比流水线和流水线加工具两种模式。\n\n文档其余部分包括：\n\n- **契约改动**：你列出的项目，加上风格组件。\n- **考虑过的替代方案**：FAQ 式知识库、单表存储、最新版本为准、把限时模板放进静态目录、原生 tool calling、纯流水线、段落级模板块。\n- **风险**：证据过滤缩小学习数据、解决信号是近似的、估计时间太粗、审核工作量、稳定 ID 漂移、提交的内容混入客户原文、工具循环的成本。\n- **如何判断它是否有效**。\n- **需要仓库所有者决定的四个问题**。\n\n## Draft: D-011（appended to `docs/decisions.md`）\n\n**D-011：知识库记录“答案 + 何时适用”，所有条目带有效期。** 记录了上述已商定的决定：\n\n- 三个存储；\n- 每个条目都有有效期，按“时间 T 时有效的版本”选择；\n- 出处、审核状态，未审核内容不自动发送；\n- 封闭的意图列表和自动发送门槛；\n- 带状态的时间和末尾的时间块；\n- 混合式 ReAct；\n- 只从强证据回复中学习；\n- 存储规则；\n- `undetermined` 由 #6 判断。\n\n来源是 #5 和提案 0003；影响部分指向契约 issue 以及 #5、#6、#7、#12 的范围调整。\n\n---\n\nThe full text is in `~/Projects/qingci-test-5-kb-design/docs/proposals/0003-knowledge-base.md`; above is the full structure with sections 1–13 condensed. Once you've answered the points above, the plan is:\n\n1. Create the contract follow-up issue and fill in its number.\n2. Make the signed commits.\n3. Ask you before pushing and opening the PR.\n4. Update #5, #6, #7 and #12 and comment on #18, linking the proposal and the PR.",
+          "translation_chs": "提案草稿和 D-011 已写在 worktree `~/Projects/qingci-test-5-kb-design` 的 `docs/5-kb-design` 分支上。尚未提交、推送，也没有发到 GitHub。提案编号为 **0003**，因为 #12 已经占用了 `0001`，#13 worktree 的草稿是 `0002`。决策记录为 **D-011**：D-009 在 conversations 分支上，main 上最新的是 D-010。相对链接都能正确解析。\n\n## 继续之前需要你决定\n\n以下是我超出了你已商定范围的地方：\n\n1. **由谁处理 `undetermined`：由 #6 分析。** #6 本来就用 LLM 读整个在线线程。#5 是离线批处理，它的标注不需要这个答案：一封客服回复后跟一封退信，仍然能得到模板标注，解决信号记为 unknown。我按已决定写进了 D-011；如果你更希望只作为提案，告诉我。\n2. **弱角色证据在哪里变成 `unknown`**（开放问题 1）。在 ingest 阶段处理，伪造的问候语就无法再藏住案件。但真正结束线程的一次性客服回复也会变成 `undetermined`。我倾向于保留 ingest 设置的 `role`，让对信任敏感的消费者把弱证据视为 `unknown`：#5 的学习、自动发送门槛和 #7 的指标。然后再测量更严格的方案会影响多少线程，再决定。\n3. **给你的契约清单加一项：风格组件类型**，让问候语、结尾和其他风格部件能带版本和有效期。\n4. **另外三个开放问题**，在文档最后一节：\n   - 132 个只有一封系统邮件的线程用什么状态；\n   - 468 个只有 `HH:MM` 的问题发生时间算 estimated 还是 unavailable；\n   - 可以提交的人工知识放在哪里（我建议 `knowledge/`）。\n\n两个文件里的 issue 编号 `#CONTRACT` 都是占位符。等后续 issue 建好后我会填上。\n\n## 草稿：`docs/proposals/0003-knowledge-base.md`\n\n# 0003：知识库设计（#5）\n\n- 状态：**讨论中**（与仓库所有者讨论后的设计，见 D-011；契约改动在 #CONTRACT 中实现）\n- 里程碑：MVP\n- 关联：#5（知识库）、#6（起草）、#7（评测）、#12（Agent 循环）、#18（安全）、#3（契约）\n\n## 摘要\n\n知识库记录运营方**过去怎么回答**，以及每种回答**什么时候适用**。它不是 FAQ。知识分三个存储：邮件线程、稳定知识（模板、风格组件、游戏事实、政策、术语表、意图目录，各自独立成类型）、限时的公告与事件。**每个条目都有有效期**：稳定知识按“现在”查询，公告与事件还要和案件的**问题发生时间**匹配。版本（`id`, `version`）是编辑历史，有效期是现实中的适用范围，选择规则是“时间 T 时有效的版本”。每个条目记录出处和审核状态，未审核的条目可以参考，但永远不会自动发送。\n\n起草（#6）时，安全相关的上下文（时间、生效中的事件、候选模板、适用政策）由代码注入，时间窗口由代码检查；模型可以在有限步数内调用只读工具查询其他信息（混合式 ReAct），这把 #12 的一部分提前到 MVP。#5 只从角色证据充分的客服回复中学习，防止知识库被伪造的回复污染（#18）。\n\n## 问题\n\n1. **答案是否适用取决于时间。** 部分模板只适用于某次事故，有的事故窗口只有几个小时，政策也会变化。只有一个可选的 `valid_from`/`valid_to`、并且“最新版本为准”的模板，表达不了“3 月 5 日时有效的是哪个版本”，也无法在评测中重放历史上某个时刻。\n2. **时间本身经常不确定。** 2,872 个线程中，2,149 个有完整的问题发生时间，468 个只有 `HH:MM`，255 个没有表单；发送时间只恢复了 258 封。\n3. **下游需要的不只是模板正文。** #6 需要能检索、能填写的答案；中文客服需要中文说明；#7 需要每封历史回复对应的标准答案。\n4. **角色可以伪造**（#18 第 5 项），伪造的回复会污染知识库。\n5. **契约有缺口。** `CaseAnalysis.intent` 是任意字符串；没有事件、事实、政策、术语表的类型；`Draft` 无法记录引用和工具调用。\n\n## 目标与非目标\n\n**目标：** 能检索并填写、附中文说明的答案；每封历史客服回复都有标准答案和解决信号；所有条目都有有效期、出处和审核状态；时间窗口、政策、自动发送条件由代码执行；知识库不会被伪造的输入污染。\n**非目标：** FAQ；段落级模板块；完整的 Agent 循环（仍属于 #12）；访问控制（#13）；实现。\n\n## 成功指标\n\n客服实际使用的模板出现在检索结果的前 3 名中，并且填写后的草稿与真实回复说的是同一件事（由 #7 的 LLM 评审判断，先在人工标注样本上校准）。\n\n## 设计\n\n**§1 使用方**：#6 需要能检索、能填写的答案和适用条件；中文客服需要中文说明；#7 需要每封历史客服回复对应的模板和解决信号。\n\n**§2 三个存储**\n\n| 存储 | 内容 | 查询方式 |\n|---|---|---|\n| 1. 邮件线程 | `Case` / `Message` | 按“现在”过滤：评测中不出现“现在”之后的数据 |\n| 2. 稳定知识 | 模板（整段 `Message.core`）、风格组件、游戏事实、政策（由代码检查）、日中术语表、意图目录，各自是独立的类型 | 按“现在”查询 |\n| 3. 公告与事件 | 事故、维护、修复、政策变更 | 按“现在”查询，同时与问题发生时间匹配 |\n\n“稳定”指在被替换前一直有效。事故类模板链接到对应的事件。\n\n**§3 有效期与版本**：每个条目都有有效期 `[valid_from, valid_to)`。（`id`, `version`）是编辑历史，两者相互独立。在时间 T，从未下线、有效期包含 T 的版本中取 `version` 最大的一个。行不可改写，所以关闭有效期也是新建版本。示例：v1 一直有效；政策变化时新建 v2（内容同 v1，设置 `valid_to`）和 v3（新内容，设置 `valid_from`），之后 v1 不会再被选中。这取代契约中“最新版本为准”的默认规则。\n\n**§4 出处与审核**：每个条目记录 `source_message_ids`、来源方式（reconstructed/manual）和审核状态（draft/approved/retired/needs_rereview）。未审核的条目可以参考，永远不自动发送。政策或事实变化时，引用它们的模板标为 needs_rereview。所有者按覆盖率审核模板，直到覆盖 80%（约 100–150 个），其余保持 draft。\n\n**§5 意图与模板**：意图是封闭列表，每个意图有所属类别、中文说明、向玩家索要的信息清单、默认风险等级，以及是否在自动发送允许清单中。`CaseAnalysis.intent` 只能取目录中的值，每个模板属于一个意图。通用模板是没有占位符、不提具体道具、时间或事故的模板（前 60 个中有 14 个，覆盖约三分之一的回复）。审核时确认是通用模板且风险为 `low` 的，才标为 `auto_send_allowed`。自动发送的门槛在案件上：意图在允许清单中、置信度高、无敏感标签且情绪不负面、是第一封回复，并且所有检查通过、没有疑似注入。通用模板永远排在生效中的特定模板之后。\n\n**§6 给 #7 的标注**：每封证据充分的客服回复映射到一个模板，或标为“无匹配”。解决信号：在 P > A1 > P > A2 中，A1 没有解决，A2 解决了；客服回复之后只有系统邮件或未知邮件时，解决信号为“未知”。\n\n**§7 `undetermined` 由 #6 的分析步骤判断**（见上文第 1 点），#5 不修改 `Case.status`。\n\n**§8 时间上下文**：两个时间，“现在”（生产中是系统时间；评测中模拟到分钟，取历史回复的发送时间，没有就估计）和问题发生时间（`occurred_at`）。\n\n- 每个时间带状态 known / estimated / unavailable；没有就是没有，估计值必须标注区间。\n- 按线程 ID 相邻估计的误差：中位数 1.2 小时，p80 12 小时，p95 64 小时。区间跨过事故窗口边界时判为“无法确定”，草稿转人工审核。\n- 问题发生时间由玩家填写，不可信：它只决定哪些事故模板可以作为候选，不能单独让案件得到补偿类答复；补偿类模板为 `high`，必须人工审核。\n- 时间块追加在 LLM 请求末尾，静态前缀保持可缓存。限时模板不在静态目录中，只在生效时通过时间块注入（文中附合成的 JSON 示例）。\n- `template_window` 检查由代码执行：要求模板在“现在”有效，并且它链接的事件与问题发生时间匹配。模型声称的时间不影响这项检查。\n\n**§9 混合式 ReAct**：代码始终注入时间上下文、生效中的事件、该意图下的候选模板和适用政策。模型可以调用以下只读工具：\n\n- `search_facts`：只返回“现在”有效的版本\n- `search_similar_cases`：只限“现在”之前的案件，排除当前案件\n- `read_thread`：只限当前案件\n- `lookup_events`：查询另一个时间点的事件，只作参考\n- `glossary`：查询术语对照\n\n最多约 4 步，失败时回退到固定流水线。动作是 JSON，通过 `complete_json` 用 Pydantic 校验（文中附示意代码）。轨迹和引用保存在 `Draft` 上，没有引用的事实性说法会被标出。#12 保留多轮对话、有副作用的工具、连接器和准入门槛。#7 对比“流水线”和“流水线 + 工具”。\n\n**§10 角色证据**：依据按强度排序为元数据 > 引用佐证 > 整段模板匹配 > 关键词，只有弱证据时按 unknown 处理。#4 填写它能看到的依据，整段模板匹配由 #5 在构建时补充。#5 只从证据充分的回复中学习：抄了完整模板的伪造回复不会带来新内容，内容新颖的伪造回复没有强证据。\n\n**§11 存储与格式**：\n\n- 运行时用 SQLite，行只插入、不改写。\n- 审核用 YAML，每个模板一个文件，放在 `data/processed/kb/review/`。\n- LLM 标注按内容哈希缓存。\n- 人工编辑作为覆盖层，以稳定的模板 ID 为键；重新构建时按重合度对应到已有 ID，对应不上就报告，不猜测。\n- 由客户数据派生的内容不进 git；不含客户原文的人工内容可以提交；审核过的模板在仓库之外备份。\n\n**§12 安全（#18）**：防止知识库污染；时间不能被正文操纵；工具只读、范围受限、使用分隔标记；正文不能改变分流；轨迹可审计；#7 加入注入样本，并统计玩家被误判为客服或系统的比例。\n\n**§13 #7 的切分**：完整的问题发生时间中有 1,942/2,149 落在 3 月，所以在 3 月内按日期切分，没有日期时按线程 ID 顺序。知识库只用训练部分构建。结果按时间状态分别报告，并对比流水线和流水线加工具两种模式。\n\n文档其余部分包括：\n\n- **契约改动**：你列出的项目，加上风格组件。\n- **考虑过的替代方案**：FAQ 式知识库、单表存储、最新版本为准、把限时模板放进静态目录、原生 tool calling、纯流水线、段落级模板块。\n- **风险**：证据过滤缩小学习数据、解决信号是近似的、估计时间太粗、审核工作量、稳定 ID 漂移、提交的内容混入客户原文、工具循环的成本。\n- **如何判断它是否有效**。\n- **需要仓库所有者决定的四个问题**。\n\n## 草稿：D-011（追加到 `docs/decisions.md`）\n\n**D-011：知识库记录“答案 + 何时适用”，所有条目带有效期。** 记录了上述已商定的决定：\n\n- 三个存储；\n- 每个条目都有有效期，按“时间 T 时有效的版本”选择；\n- 出处、审核状态，未审核内容不自动发送；\n- 封闭的意图列表和自动发送门槛；\n- 带状态的时间和末尾的时间块；\n- 混合式 ReAct；\n- 只从强证据回复中学习；\n- 存储规则；\n- `undetermined` 由 #6 判断。\n\n来源是 #5 和提案 0003；影响部分指向契约 issue 以及 #5、#6、#7、#12 的范围调整。\n\n---\n\n完整文本在 `~/Projects/qingci-test-5-kb-design/docs/proposals/0003-knowledge-base.md`；上面是完整结构，第 1–13 节做了压缩。你答复上述几点后，计划是：\n\n1. 建契约后续 issue，并填上编号。\n2. 做签名提交。\n3. push 和开 PR 之前先问你。\n4. 更新 #5、#6、#7、#12，并在 #18 下评论，链接提案和 PR。"
         }
       ]
     },
@@ -324,11 +334,13 @@
       "timestamp": "2026-11-26T14:18:39.379Z",
       "kind": "message",
       "user": "Your quesion comes confusing. Give me more context, and seperate cleanly between problem/your proposal/weigh options",
+      "translation_chs": "你的问题读起来很混乱。多给些上下文，把问题、你的提议、权衡选项清楚分开。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:19:11.191Z",
-          "text": "Before rewriting the questions I'll get real numbers for the role-evidence one. Without them that question is hard to judge. The script is read-only and prints counts only."
+          "text": "Before rewriting the questions I'll get real numbers for the role-evidence one. Without them that question is hard to judge. The script is read-only and prints counts only.",
+          "translation_chs": "重写问题之前，我先拿到角色证据那个问题的真实数字。没有数字这个问题很难判断。脚本是只读的，只打印计数。"
         },
         {
           "type": "tool_call",
@@ -403,7 +415,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:20:31.540Z",
-          "text": "You're right, the questions were too compressed. Here they are again, each split into context, the problem, the options and my recommendation. The first two are calls I already made in the draft, which you should confirm. The other four are open questions.\n\nI measured question 2 on the real data so it has real numbers. These are counts only, from a local ingest run into the scratchpad.\n\n---\n\n## 1. Who resolves `undetermined` cases (already in the draft)\n\n**Context.** #4 sets a case's status from the last message in its thread. If that message is from an agent the case is `replied`; if it's from a player, the case is `open`. If it's a system email or the sender can't be told, the case is `undetermined`. That applies to 139 threads:\n- 132 threads that are a single system email (a bounce or a bulk-reply report);\n- 5 threads that are a single empty email;\n- 1 thread where an agent reply is followed by a bounce;\n- 1 thread where an agent reply is followed by two emails whose sender can't be told.\n\n**Problem.** Something has to read these threads and decide what they are.\n\n**Options.**\n- **A. #5's knowledge-base build decides.** It's an offline batch over historical data, so it can't help with new cases that arrive later. It also mixes queue status into knowledge-base work.\n- **B. #6's analysis step decides,** for each case it analyses. It already reads the whole thread with the LLM, and the inbox needs the answer for live cases. #5's labels don't depend on it: the one reply followed by a bounce still gets its template label, with the resolution signal recorded as \"unknown\".\n\n**My recommendation: B.** It's written into D-011 as decided. Say if you'd rather leave it as a proposal.\n\n---\n\n## 2. What \"weak evidence alone → `unknown`\" changes (open question 1)\n\n**Context.** Ingest marks an email as an agent reply if it opens with the fixed greeting. A player can type that greeting. Their email then counts as an agent reply, the thread shows `replied` and drops out of the open queue, and #5 could learn from it (#18 item 5). You agreed that weak evidence alone should mean `unknown`. The greeting itself is the weak evidence.\n\n**What the data shows.** I approximated the two kinds of strong evidence:\n- *quote corroboration*: a later message quotes this one under an agent sender;\n- *whole-template match*: the same normalised reply body appears in 3 or more threads.\n\n| | Agent replies (2,759) |\n|---|---|\n| Corroborated by a quote | 247 |\n| Whole-template match (needs #5's clusters) | 2,049 |\n| **Weak evidence only** | **463** |\n\nTwo facts follow from this:\n- **At ingest time, before #5 has run, 2,512 of 2,759 replies are weak-only,** because template-match evidence doesn't exist yet. Applying the rule at ingest would turn almost every reply into `unknown`.\n- After #5 adds template evidence, **436 of the 2,166 `replied` threads end in a weak-only reply.** These are mostly genuine one-off replies.\n\n**Problem.** The rule can apply at two levels. It can change `Message.role` itself, which drives case status. Or it can leave `role` alone and only change how trust-sensitive code reads it.\n\n**Options.**\n- **A. Downgrade `role` itself.** This has to happen after #5, or almost everything becomes `unknown`. It creates an ordering loop (#4 → #5 → re-run roles), and 436 threads move to `undetermined` for #6 to check.\n- **B. Keep `role`; trust-sensitive consumers check strength.** Those consumers are #5 learning, the auto-send gate and the #7 metrics. This is simple and changes nothing at ingest. But a forged greeting still hides a case from the open queue, so #18 item 5 is only half fixed.\n- **C. B plus a status rule.** A thread whose last reply has weak evidence only becomes `undetermined` instead of `replied`, so #6 looks at it. `role` stays honest about what the rules saw, and the queue is protected. The cost is #6 checking about 436 extra threads.\n\n**My recommendation: C.** It fixes the queue problem without the ordering loop, and checking about 436 threads is cheap. The draft currently says B; I'd change it to C.\n\n---\n\n## 3. A contract type for style components (my addition)\n\n**Context.** You agreed that the style parts are versioned components with validity windows. Those are the greeting, apology variants, \"contact us again\", the closing and the no-repost notice. Your contract list doesn't include a type for them.\n\n**Options.**\n- **A. A new `StyleComponent` type** with a kind (greeting, apology and so on), the Japanese text, a Chinese explanation, a validity window and a review status.\n- **B. Store them as `ReplyTemplate` with a kind field.** Templates require an intent, a category and slots, and they show up in retrieval. Style parts would pollute template search.\n- **C. Keep them as constants in code,** as ingest does today. That gives no versions, no validity windows and no review.\n\n**My recommendation: A.** I'll add it to the contract issue.\n\n---\n\n## 4. Status for threads that are a single system email (open question 2)\n\n**Context.** 132 threads contain one bounce or one bulk-reply report. They aren't inquiries and need no reply.\n\n**Problem.** Once #6 confirms that, no existing status fits. The existing statuses are `open`, `drafted`, `escalated`, `replied` and `undetermined`.\n\n**Options.**\n- **A. Add a status such as `no_reply_needed`.** Adding an enum value is allowed without bumping the schema version.\n- **B. Mark them `replied`.** That's wrong, because nobody replied, and it would skew #7.\n- **C. Leave them `undetermined`.** They then sit forever in a queue someone has to look through.\n- **D. Don't create cases for them at ingest.** That loses visibility of bounces, and a bounce of *our* reply matters.\n\n**My recommendation: A,** added to the contract issue.\n\n---\n\n## 5. Problem times with only `HH:MM` (open question 3)\n\n**Context.** 468 threads give a problem time of day but no date.\n\n**Problem.** Should that count as `estimated` or `unavailable`?\n\n**Options.**\n- **A. `estimated`.** The time of day is known; the date is a range ending at \"now\". This is still useful. If an incident ran 11:00–14:00 and the player wrote 20:00, the case is outside the window whatever the date, so the incident template can be excluded. If the player wrote 12:30, the window can't be decided and the draft goes to review.\n- **B. `unavailable`.** Simpler, but it throws away the time of day and can no longer rule incidents out.\n\n**My recommendation: A,** with the window check using the known time of day and the date range separately.\n\n---\n\n## 6. Where committed hand-written knowledge lives (open question 4)\n\n**Context.** Policies, intents, notices and the public-term glossary contain no customer text, so they can be committed.\n\n**Options.**\n- **A. `knowledge/` at the repo root.** This is operator content that gets reviewed like code but isn't code.\n- **B. `backend/copilot/kb/seed/`,** shipped as package data.\n\n**My recommendation: A.** This is low stakes.\n\n---\n\nOnce you confirm or change these, I'll update the draft and continue: create the contract issue, make the signed commits, then ask you before pushing."
+          "text": "You're right, the questions were too compressed. Here they are again, each split into context, the problem, the options and my recommendation. The first two are calls I already made in the draft, which you should confirm. The other four are open questions.\n\nI measured question 2 on the real data so it has real numbers. These are counts only, from a local ingest run into the scratchpad.\n\n---\n\n## 1. Who resolves `undetermined` cases (already in the draft)\n\n**Context.** #4 sets a case's status from the last message in its thread. If that message is from an agent the case is `replied`; if it's from a player, the case is `open`. If it's a system email or the sender can't be told, the case is `undetermined`. That applies to 139 threads:\n- 132 threads that are a single system email (a bounce or a bulk-reply report);\n- 5 threads that are a single empty email;\n- 1 thread where an agent reply is followed by a bounce;\n- 1 thread where an agent reply is followed by two emails whose sender can't be told.\n\n**Problem.** Something has to read these threads and decide what they are.\n\n**Options.**\n- **A. #5's knowledge-base build decides.** It's an offline batch over historical data, so it can't help with new cases that arrive later. It also mixes queue status into knowledge-base work.\n- **B. #6's analysis step decides,** for each case it analyses. It already reads the whole thread with the LLM, and the inbox needs the answer for live cases. #5's labels don't depend on it: the one reply followed by a bounce still gets its template label, with the resolution signal recorded as \"unknown\".\n\n**My recommendation: B.** It's written into D-011 as decided. Say if you'd rather leave it as a proposal.\n\n---\n\n## 2. What \"weak evidence alone → `unknown`\" changes (open question 1)\n\n**Context.** Ingest marks an email as an agent reply if it opens with the fixed greeting. A player can type that greeting. Their email then counts as an agent reply, the thread shows `replied` and drops out of the open queue, and #5 could learn from it (#18 item 5). You agreed that weak evidence alone should mean `unknown`. The greeting itself is the weak evidence.\n\n**What the data shows.** I approximated the two kinds of strong evidence:\n- *quote corroboration*: a later message quotes this one under an agent sender;\n- *whole-template match*: the same normalised reply body appears in 3 or more threads.\n\n| | Agent replies (2,759) |\n|---|---|\n| Corroborated by a quote | 247 |\n| Whole-template match (needs #5's clusters) | 2,049 |\n| **Weak evidence only** | **463** |\n\nTwo facts follow from this:\n- **At ingest time, before #5 has run, 2,512 of 2,759 replies are weak-only,** because template-match evidence doesn't exist yet. Applying the rule at ingest would turn almost every reply into `unknown`.\n- After #5 adds template evidence, **436 of the 2,166 `replied` threads end in a weak-only reply.** These are mostly genuine one-off replies.\n\n**Problem.** The rule can apply at two levels. It can change `Message.role` itself, which drives case status. Or it can leave `role` alone and only change how trust-sensitive code reads it.\n\n**Options.**\n- **A. Downgrade `role` itself.** This has to happen after #5, or almost everything becomes `unknown`. It creates an ordering loop (#4 → #5 → re-run roles), and 436 threads move to `undetermined` for #6 to check.\n- **B. Keep `role`; trust-sensitive consumers check strength.** Those consumers are #5 learning, the auto-send gate and the #7 metrics. This is simple and changes nothing at ingest. But a forged greeting still hides a case from the open queue, so #18 item 5 is only half fixed.\n- **C. B plus a status rule.** A thread whose last reply has weak evidence only becomes `undetermined` instead of `replied`, so #6 looks at it. `role` stays honest about what the rules saw, and the queue is protected. The cost is #6 checking about 436 extra threads.\n\n**My recommendation: C.** It fixes the queue problem without the ordering loop, and checking about 436 threads is cheap. The draft currently says B; I'd change it to C.\n\n---\n\n## 3. A contract type for style components (my addition)\n\n**Context.** You agreed that the style parts are versioned components with validity windows. Those are the greeting, apology variants, \"contact us again\", the closing and the no-repost notice. Your contract list doesn't include a type for them.\n\n**Options.**\n- **A. A new `StyleComponent` type** with a kind (greeting, apology and so on), the Japanese text, a Chinese explanation, a validity window and a review status.\n- **B. Store them as `ReplyTemplate` with a kind field.** Templates require an intent, a category and slots, and they show up in retrieval. Style parts would pollute template search.\n- **C. Keep them as constants in code,** as ingest does today. That gives no versions, no validity windows and no review.\n\n**My recommendation: A.** I'll add it to the contract issue.\n\n---\n\n## 4. Status for threads that are a single system email (open question 2)\n\n**Context.** 132 threads contain one bounce or one bulk-reply report. They aren't inquiries and need no reply.\n\n**Problem.** Once #6 confirms that, no existing status fits. The existing statuses are `open`, `drafted`, `escalated`, `replied` and `undetermined`.\n\n**Options.**\n- **A. Add a status such as `no_reply_needed`.** Adding an enum value is allowed without bumping the schema version.\n- **B. Mark them `replied`.** That's wrong, because nobody replied, and it would skew #7.\n- **C. Leave them `undetermined`.** They then sit forever in a queue someone has to look through.\n- **D. Don't create cases for them at ingest.** That loses visibility of bounces, and a bounce of *our* reply matters.\n\n**My recommendation: A,** added to the contract issue.\n\n---\n\n## 5. Problem times with only `HH:MM` (open question 3)\n\n**Context.** 468 threads give a problem time of day but no date.\n\n**Problem.** Should that count as `estimated` or `unavailable`?\n\n**Options.**\n- **A. `estimated`.** The time of day is known; the date is a range ending at \"now\". This is still useful. If an incident ran 11:00–14:00 and the player wrote 20:00, the case is outside the window whatever the date, so the incident template can be excluded. If the player wrote 12:30, the window can't be decided and the draft goes to review.\n- **B. `unavailable`.** Simpler, but it throws away the time of day and can no longer rule incidents out.\n\n**My recommendation: A,** with the window check using the known time of day and the date range separately.\n\n---\n\n## 6. Where committed hand-written knowledge lives (open question 4)\n\n**Context.** Policies, intents, notices and the public-term glossary contain no customer text, so they can be committed.\n\n**Options.**\n- **A. `knowledge/` at the repo root.** This is operator content that gets reviewed like code but isn't code.\n- **B. `backend/copilot/kb/seed/`,** shipped as package data.\n\n**My recommendation: A.** This is low stakes.\n\n---\n\nOnce you confirm or change these, I'll update the draft and continue: create the contract issue, make the signed commits, then ask you before pushing.",
+          "translation_chs": "你说得对，问题压得太紧了。重新列一遍，每个都拆成背景、问题、选项和我的建议。前两个是我已在草稿中做出的决定，需要你确认。后四个是开放问题。\n\n问题 2 我在真实数据上测过，所以有真实数字。这些只是计数，来自本地 ingest 运行到 scratchpad 的结果。\n\n---\n\n## 1. 由谁处理 `undetermined` 案件（草稿中已定）\n\n**背景。** #4 根据线程中最后一条消息设置案件状态。如果这条消息来自客服，案件是 `replied`；来自玩家，案件是 `open`。如果是系统邮件或无法判断发件人，案件是 `undetermined`。这涉及 139 个线程：\n- 132 个只有一封系统邮件的线程（退信或批量回复报告）；\n- 5 个只有一封空邮件的线程；\n- 1 个客服回复后跟一封退信的线程；\n- 1 个客服回复后跟两封无法判断发件人的邮件的线程。\n\n**问题。** 总得有东西读这些线程并判断它们是什么。\n\n**选项。**\n- **A. 由 #5 的知识库构建决定。** 它是对历史数据的离线批处理，帮不了之后到达的新案件。而且这会把队列状态混进知识库工作。\n- **B. 由 #6 的分析步骤决定**，对每个它分析的案件。它本来就用 LLM 读整个线程，而且收件箱对在线案件需要这个答案。#5 的标注不依赖它：那封后跟退信的回复仍然能得到模板标注，解决信号记为“未知”。\n\n**我的建议：B。** 已按已决定写进 D-011。如果你更希望只作为提案，请说。\n\n---\n\n## 2. “只有弱证据 → `unknown`”会改变什么（开放问题 1）\n\n**背景。** ingest 只要邮件以固定问候语开头，就把它标为客服回复。玩家也可以打这句问候语。于是他们的邮件被算作客服回复，线程显示 `replied`，从待处理队列里消失，#5 还可能从中学到东西（#18 第 5 项）。你同意只有弱证据时应视为 `unknown`。问候语本身就是弱证据。\n\n**数据说明了什么。** 我近似了两种强证据：\n- *引用佐证*：后续消息在客服发件人下引用了这条；\n- *整段模板匹配*：同样的归一化回复正文出现在 3 个或更多线程中。\n\n| | 客服回复（2,759） |\n|---|---|\n| 有引用佐证 | 247 |\n| 整段模板匹配（需要 #5 的聚类） | 2,049 |\n| **只有弱证据** | **463** |\n\n由此得出两个事实：\n- **在 ingest 阶段、#5 运行之前，2,759 封回复中有 2,512 封只有弱证据**，因为模板匹配证据还不存在。在 ingest 阶段应用这条规则会把几乎所有回复变成 `unknown`。\n- #5 补上模板证据后，**2,166 个 `replied` 线程中有 436 个以只有弱证据的回复结尾。** 这些大多是真正的一次性回复。\n\n**问题。** 这条规则可以在两个层面应用。它可以改变 `Message.role` 本身，而案件状态由它驱动；也可以不动 `role`，只改变对信任敏感的代码读取它的方式。\n\n**选项。**\n- **A. 直接降级 `role`。** 这必须在 #5 之后做，否则几乎全部变成 `unknown`。它会造成顺序循环（#4 → #5 → 重跑角色），并且 436 个线程会转为 `undetermined` 交给 #6 检查。\n- **B. 保留 `role`，由对信任敏感的消费者检查证据强度。** 这些消费者是 #5 的学习、自动发送门槛和 #7 的指标。这很简单，ingest 阶段什么都不变。但伪造的问候语仍然能把案件从待处理队列中藏起来，所以 #18 第 5 项只修了一半。\n- **C. 在 B 的基础上加一条状态规则。** 最后一封回复只有弱证据的线程变成 `undetermined` 而不是 `replied`，这样 #6 会看它。`role` 仍然如实反映规则看到的情况，队列也得到保护。代价是 #6 要多检查约 436 个线程。\n\n**我的建议：C。** 它解决了队列问题，又不引入顺序循环，多检查约 436 个线程成本很低。草稿目前写的是 B，我会改成 C。\n\n---\n\n## 3. 风格组件的契约类型（我加的）\n\n**背景。** 你同意风格部件是带有效期的版本化组件，即问候语、道歉变体、“再次联系我们”、结尾和禁止重复投稿提示。你的契约清单里没有它们的类型。\n\n**选项。**\n- **A. 新增 `StyleComponent` 类型**，包含种类（问候语、道歉等）、日文原文、中文说明、有效期和审核状态。\n- **B. 存成带 kind 字段的 `ReplyTemplate`。** 模板要求意图、类别和槽位，而且会出现在检索结果里。风格部件会污染模板搜索。\n- **C. 作为代码里的常量保留**，像现在 ingest 那样。这样没有版本、没有有效期、也没有审核。\n\n**我的建议：A。** 我会把它加进契约 issue。\n\n---\n\n## 4. 只有一封系统邮件的线程用什么状态（开放问题 2）\n\n**背景。** 132 个线程只含一封退信或一封批量回复报告。它们不是咨询，不需要回复。\n\n**问题。** #6 确认之后，现有状态没有合适的。现有状态是 `open`、`drafted`、`escalated`、`replied` 和 `undetermined`。\n\n**选项。**\n- **A. 新增类似 `no_reply_needed` 的状态。** 增加枚举值不需要提升 schema 版本。\n- **B. 标为 `replied`。** 这不对，因为没人回复，而且会带偏 #7。\n- **C. 保持 `undetermined`。** 它们会永远留在某个队列里，需要有人逐个看。\n- **D. ingest 时不创建案件。** 这样会失去对退信的可见性，而*我们*的回复被退信是有意义的。\n\n**我的建议：A**，加进契约 issue。\n\n---\n\n## 5. 只有 `HH:MM` 的问题发生时间（开放问题 3）\n\n**背景。** 468 个线程给出了问题发生的时间但没给日期。\n\n**问题。** 这算 `estimated` 还是 `unavailable`？\n\n**选项。**\n- **A. `estimated`。** 时间已知，日期是到“现在”为止的一个区间。这仍然有用。如果事故发生在 11:00–14:00，而玩家写的是 20:00，那么无论日期是哪天案件都在窗口之外，可以排除事故模板。如果玩家写的是 12:30，就无法判定窗口，草稿转人工审核。\n- **B. `unavailable`。** 更简单，但丢掉了时间，也没法再排除事故。\n\n**我的建议：A**，窗口检查分别使用已知的时间和日期区间。\n\n---\n\n## 6. 可提交的人工知识放在哪里（开放问题 4）\n\n**背景。** 政策、意图、公告和公开术语表不含客户原文，可以提交。\n\n**选项。**\n- **A. 仓库根目录的 `knowledge/`。** 这是运营方内容，像代码一样审核，但它不是代码。\n- **B. `backend/copilot/kb/seed/`**，作为包数据发布。\n\n**我的建议：A。** 这事影响不大。\n\n---\n\n等你确认或修改这些之后，我会更新草稿并继续：建契约 issue、做签名提交，然后在 push 之前问你。"
         }
       ]
     },
@@ -412,11 +425,13 @@
       "timestamp": "2026-11-26T14:30:03.533Z",
       "kind": "message",
       "user": "1. B. The pipeline #4 is designed to be a pipeline that with no LLM involvement, and the document already said about semantic analysis. So in #6 it would make sense.\n2. need more discussion\n3. I think this is overengineered. Do not do this unless informed this could change.\n4. A is good. The system should also learn when do not reply is the best option. Need to decide if DNR goes to manual or auto. I lean to auto - worst case the player will open another ticket and assume there was a glitch in syetem, but it could hurt authentic UX. However I belive this case should be rare - need data support.\n5. A.\n6. A.",
+      "translation_chs": "1. B。#4 的流水线本来就设计成完全不涉及 LLM 的流水线，文档里也讲过语义分析。所以放在 #6 更合理。\n2. 还需要讨论。\n3. 我觉得这是过度设计。除非被告知这块会变，否则不要做。\n4. A 可以。系统还应该学会什么时候“不回复”才是最佳选项。需要决定 DNR 走人工还是自动。我倾向自动——最坏情况是玩家再开一个工单，以为系统出了故障，但这可能损害真实的用户体验。不过我相信这种情况应该很少——需要数据支撑。\n5. A。\n6. A。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:30:25.383Z",
-          "text": "Running the numbers for the do-not-reply question first. Counts only."
+          "text": "Running the numbers for the do-not-reply question first. Counts only.",
+          "translation_chs": "先跑一下不回复问题的数字。只统计计数。"
         },
         {
           "type": "tool_call",
@@ -435,7 +450,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:30:46.392Z",
-          "text": "About 20% of player inquiries were never answered, so this isn't rare. One possible reason is duplicate submissions, so I'm checking for those before drawing conclusions."
+          "text": "About 20% of player inquiries were never answered, so this isn't rare. One possible reason is duplicate submissions, so I'm checking for those before drawing conclusions.",
+          "translation_chs": "约 20% 的玩家咨询从未得到回复，所以这并不少见。一个可能的原因是重复提交，所以我在下结论前先查一下这类情况。"
         },
         {
           "type": "tool_call",
@@ -468,7 +484,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:31:33.716Z",
-          "text": "That settles the data question for item 4. Most unanswered inquiries are duplicate submissions. I'll explain after updating the docs with your answers."
+          "text": "That settles the data question for item 4. Most unanswered inquiries are duplicate submissions. I'll explain after updating the docs with your answers.",
+          "translation_chs": "第 4 项的数据问题有答案了。大多数未回复的咨询是重复提交。我先把你的答复更新到文档里，再解释。"
         },
         {
           "type": "tool_call",
@@ -505,7 +522,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:31:55.924Z",
-          "text": "Renumbering the later sections and their cross-references, then applying the other answers."
+          "text": "Renumbering the later sections and their cross-references, then applying the other answers.",
+          "translation_chs": "给后面的章节和交叉引用重新编号，然后应用其他答复。"
         },
         {
           "type": "tool_call",
@@ -616,7 +634,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:32:42.795Z",
-          "text": "Now D-011 (do-not-reply, and the reason behind the `undetermined` call) and a data finding in `docs/data.md`."
+          "text": "Now D-011 (do-not-reply, and the reason behind the `undetermined` call) and a data finding in `docs/data.md`.",
+          "translation_chs": "现在改 D-011（不回复，以及 `undetermined` 那个决定背后的理由）和 `docs/data.md` 里的一条数据发现。"
         },
         {
           "type": "tool_call",
@@ -696,7 +715,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:33:21.197Z",
-          "text": "Adding one consequence of the duplicate finding to the #7 split section, since duplicate pairs would leak across a train/test split:"
+          "text": "Adding one consequence of the duplicate finding to the #7 split section, since duplicate pairs would leak across a train/test split:",
+          "translation_chs": "把一个由重复提交发现得出的结论加到 #7 的切分一节，因为重复对会在训练/测试切分中泄漏："
         },
         {
           "type": "tool_call",
@@ -717,7 +737,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:33:43.280Z",
-          "text": "I've updated the proposal, D-011 and `docs/data.md` with your answers. Nothing is committed yet, and question 2 stays open in the doc.\n\n**What changed**\n- **1 (who resolves `undetermined`): #6's analysis step.** Your reason is now written into both the proposal and D-011: #4 is a deterministic pipeline that never calls the LLM.\n- **3 (style parts):** they are now fixed, hand-written content with no versions and no validity windows. The doc says to revisit this only if the operator says the wording can change. I removed it from the contract list.\n- **4 (single system emails):** the new status is `no_reply_needed`. There's a new §8, \"不回复也是一种答复\" (\"not replying is also an answer\"), and the contract list now includes the status plus a place on `CaseAnalysis` to record the proposal, the reason and the duplicate's twin thread.\n- **5 (`HH:MM`-only times):** these are `estimated`. The time of day is known and the date is a range. The window check uses each part separately, so a time of day alone can still rule an incident out.\n- **6 (location):** committed hand-written knowledge goes in `knowledge/` at the repo root.\n\n## The data on not replying (for question 4)\n\n542 threads are player inquiries that never got a reply, about 20% of all inquiry threads. They're spread across the whole period, so they aren't a backlog at the point where the data stops.\n\n| Why there was no reply | Threads |\n|---|---|\n| **Duplicate submission.** The content, device, app version and problem time all match a thread that *was* answered, usually the very next thread ID. | **308** |\n| Duplicates of each other, with none of them answered | 68 |\n| Too short to compare | 32 |\n| No duplicate; reason unknown | 134 |\n\nSo not replying isn't rare, but most of it has a reason you can explain: the player submitted twice and the operator answered once. On auto versus manual:\n\n- **Duplicate of an answered thread: auto looks safe.** The player already got the answer, which takes care of your UX worry. One caveat: the sample has account IDs and emails blanked, so I could only match on content. In production, duplicates should be matched by account or sender address, so one player's inquiry is never dismissed as a copy of another player's identical text.\n- **A thread that is a single system email: auto is riskier than it looks.** A player can write something that looks like a bounce (#18 item 5), and auto-dismissing it loses a real inquiry. I'd make this auto only if #6 also finds no player question in it, and send it to review otherwise.\n- **Unknown reason: never auto.** There's nothing to learn from, so these aren't used as \"don't reply\" labels and go to review.\n\nThe proposal records this data and leaves the auto/manual choice to you. I also added one rule to the #7 split: a duplicate and its twin must land on the same side, or the same inquiry would appear in both training and test.\n\n## Question 2 (weak evidence): one more point for the discussion\n\nGuessing roles from the text is only needed because the sample has the senders stripped out. In live use, roles could come from metadata:\n- our own tool (#8) sends the agent replies, so it knows they're ours;\n- player emails arrive with mail headers.\n\nSo the question depends on **how cases arrive in production**:\n- **If the source supplies the sender** (a mail server or CRM), live roles are strong evidence. Text rules only matter for imported history, where the concern is the knowledge base learning from forged replies. Option B already prevents that: `role` stays as ingest set it, and the trust-sensitive steps treat weak evidence as `unknown`.\n- **If production cases also arrive as text exports like the sample**, a forged greeting can hide a live case. Then option C is worth its cost: threads that end in a weak-only reply become `undetermined` and #6 looks at them. That's about 436 threads in the sample.\n\nDo you know which of these applies? That's what decides between B and C for me.\n\nOnce you've settled questions 2 and 4, or told me to leave them open in the proposal, I'll create the contract follow-up issue, fill in its number, make the signed commits, and ask you before pushing."
+          "text": "I've updated the proposal, D-011 and `docs/data.md` with your answers. Nothing is committed yet, and question 2 stays open in the doc.\n\n**What changed**\n- **1 (who resolves `undetermined`): #6's analysis step.** Your reason is now written into both the proposal and D-011: #4 is a deterministic pipeline that never calls the LLM.\n- **3 (style parts):** they are now fixed, hand-written content with no versions and no validity windows. The doc says to revisit this only if the operator says the wording can change. I removed it from the contract list.\n- **4 (single system emails):** the new status is `no_reply_needed`. There's a new §8, \"不回复也是一种答复\" (\"not replying is also an answer\"), and the contract list now includes the status plus a place on `CaseAnalysis` to record the proposal, the reason and the duplicate's twin thread.\n- **5 (`HH:MM`-only times):** these are `estimated`. The time of day is known and the date is a range. The window check uses each part separately, so a time of day alone can still rule an incident out.\n- **6 (location):** committed hand-written knowledge goes in `knowledge/` at the repo root.\n\n## The data on not replying (for question 4)\n\n542 threads are player inquiries that never got a reply, about 20% of all inquiry threads. They're spread across the whole period, so they aren't a backlog at the point where the data stops.\n\n| Why there was no reply | Threads |\n|---|---|\n| **Duplicate submission.** The content, device, app version and problem time all match a thread that *was* answered, usually the very next thread ID. | **308** |\n| Duplicates of each other, with none of them answered | 68 |\n| Too short to compare | 32 |\n| No duplicate; reason unknown | 134 |\n\nSo not replying isn't rare, but most of it has a reason you can explain: the player submitted twice and the operator answered once. On auto versus manual:\n\n- **Duplicate of an answered thread: auto looks safe.** The player already got the answer, which takes care of your UX worry. One caveat: the sample has account IDs and emails blanked, so I could only match on content. In production, duplicates should be matched by account or sender address, so one player's inquiry is never dismissed as a copy of another player's identical text.\n- **A thread that is a single system email: auto is riskier than it looks.** A player can write something that looks like a bounce (#18 item 5), and auto-dismissing it loses a real inquiry. I'd make this auto only if #6 also finds no player question in it, and send it to review otherwise.\n- **Unknown reason: never auto.** There's nothing to learn from, so these aren't used as \"don't reply\" labels and go to review.\n\nThe proposal records this data and leaves the auto/manual choice to you. I also added one rule to the #7 split: a duplicate and its twin must land on the same side, or the same inquiry would appear in both training and test.\n\n## Question 2 (weak evidence): one more point for the discussion\n\nGuessing roles from the text is only needed because the sample has the senders stripped out. In live use, roles could come from metadata:\n- our own tool (#8) sends the agent replies, so it knows they're ours;\n- player emails arrive with mail headers.\n\nSo the question depends on **how cases arrive in production**:\n- **If the source supplies the sender** (a mail server or CRM), live roles are strong evidence. Text rules only matter for imported history, where the concern is the knowledge base learning from forged replies. Option B already prevents that: `role` stays as ingest set it, and the trust-sensitive steps treat weak evidence as `unknown`.\n- **If production cases also arrive as text exports like the sample**, a forged greeting can hide a live case. Then option C is worth its cost: threads that end in a weak-only reply become `undetermined` and #6 looks at them. That's about 436 threads in the sample.\n\nDo you know which of these applies? That's what decides between B and C for me.\n\nOnce you've settled questions 2 and 4, or told me to leave them open in the proposal, I'll create the contract follow-up issue, fill in its number, make the signed commits, and ask you before pushing.",
+          "translation_chs": "已按你的答复更新提案、D-011 和 `docs/data.md`。尚未提交，问题 2 在文档里保持开放。\n\n**改了什么**\n- **1（由谁处理 `undetermined`）：#6 的分析步骤。** 你的理由已写进提案和 D-011：#4 是确定性流水线，从不调用 LLM。\n- **3（风格部件）**：现在改为固定的人工撰写内容，没有版本，也没有有效期。文档写明只有当运营方说措辞可能变化时才重新考虑。我已把它从契约清单中删除。\n- **4（只有一封系统邮件）**：新状态是 `no_reply_needed`。新增了 §8“不回复也是一种答复”（不回复也算一种答复），契约清单加上了这个状态，以及 `CaseAnalysis` 上记录建议、理由和重复件对应线程的位置。\n- **5（只有 `HH:MM` 的时间）**：算 `estimated`。时间已知，日期是一个区间。窗口检查分别使用两部分，所以仅有时间仍能排除事故。\n- **6（位置）**：可提交的人工知识放在仓库根目录的 `knowledge/`。\n\n## 关于不回复的数据（对应问题 4）\n\n542 个线程是玩家咨询但从未得到回复，约占全部咨询线程的 20%。它们分布在整个时间段，所以不是数据截止时积压下来的。\n\n| 没有回复的原因 | 线程数 |\n|---|---|\n| **重复提交。** 内容、设备、应用版本和问题发生时间都与一个*已回复*的线程一致，通常是紧邻的下一个线程 ID。 | **308** |\n| 互相重复，且都没有得到回复 | 68 |\n| 太短，无法比较 | 32 |\n| 没有重复件；原因未知 | 134 |\n\n所以不回复并不少见，但大多数都有可解释的原因：玩家提交了两次，运营方只回答了一次。关于自动还是人工：\n\n- **已回复线程的重复件：自动看起来安全。** 玩家已经拿到答案，这解决了你担心的 UX 问题。有一个前提：样本里的账号 ID 和邮箱都被清空，所以我只能按内容匹配。生产环境中，重复件应按账号或发件地址匹配，避免把某个玩家的咨询当成另一个玩家相同文本的副本而不予处理。\n- **只有一封系统邮件的线程：自动比看起来更危险。** 玩家可以写出看起来像退信的内容（#18 第 5 项），自动忽略就丢掉了一个真实咨询。我倾向于只有 #6 也确认其中没有玩家提问时才自动，否则转人工审核。\n- **原因未知：永远不自动。** 没有可学习的信息，所以这些不作为“不回复”标注使用，转人工审核。\n\n提案记录这些数据，自动/人工的选择留给你。我还给 #7 的切分加了一条规则：重复件和它的对应件必须落在同一侧，否则同一个咨询会同时出现在训练集和测试集里。\n\n## 问题 2（弱证据）：再补一点供讨论\n\n之所以需要从文本猜角色，只是因为样本把发件人剥掉了。在实际运行中，角色可以来自元数据：\n- 我们自己的工具（#8）发送客服回复，所以它知道哪些是我们的；\n- 玩家邮件带有邮件头。\n\n所以这个问题取决于**案件在生产环境中如何到达**：\n- **如果来源提供发件人**（邮件服务器或 CRM），在线角色就是强证据。文本规则只对导入的历史数据有意义，那里担心的是知识库从伪造回复中学习。选项 B 已经能防住：`role` 保持 ingest 设置的值，对信任敏感的步骤把弱证据视为 `unknown`。\n- **如果生产案件也像样本一样以文本导出形式到达**，伪造的问候语就能藏住在线案件。那么选项 C 值得它的成本：以只有弱证据的回复结尾的线程变成 `undetermined`，#6 会看它们。样本里约 436 个线程。\n\n你知道是哪种情况吗？这决定了我选 B 还是 C。\n\n等你定下问题 2 和问题 4，或者让我在提案里保持开放，我就建契约后续 issue、填上编号、做签名提交，并在 push 之前问你。"
         }
       ]
     },
@@ -726,11 +747,13 @@
       "timestamp": "2026-11-26T14:38:13.814Z",
       "kind": "message",
       "user": "Since this is only a test and we do not have the actual shape fed from the real CRM - we would have to assume we do not have the metadata from fed input. Recommendation of #4 lgtm.",
+      "translation_chs": "因为这只是一个测试，我们并没有真实 CRM 的实际输入形态——只能假设输入里没有元数据。#4 的建议 lgtm。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:38:39.680Z",
-          "text": "Option C with no sender metadata creates an ordering problem. Template-match evidence was going to come from #5, so at ingest time nearly every reply would look weak. The fix is for ingest to compute the **exact** match itself: the same normalised reply body appearing in 3 or more threads. That check is deterministic and needs no LLM, and it's the version I measured (436 threads). Updating the docs on that basis."
+          "text": "Option C with no sender metadata creates an ordering problem. Template-match evidence was going to come from #5, so at ingest time nearly every reply would look weak. The fix is for ingest to compute the **exact** match itself: the same normalised reply body appearing in 3 or more threads. That check is deterministic and needs no LLM, and it's the version I measured (436 threads). Updating the docs on that basis.",
+          "translation_chs": "在没有发件人元数据的情况下选 C 会带来顺序问题。模板匹配证据原本要来自 #5，所以在 ingest 阶段几乎每封回复都显得证据弱。解决办法是让 ingest 自己计算**精确**匹配：同样的归一化回复正文出现在 3 个或更多线程中。这项检查是确定性的，不需要 LLM，也是我测过的版本（436 个线程）。据此更新文档。"
         },
         {
           "type": "tool_call",
@@ -809,7 +832,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:39:30.842Z",
-          "text": "Before writing the contract issue I'm checking what characters real `Case.id` values use, so the restriction I propose doesn't reject actual data."
+          "text": "Before writing the contract issue I'm checking what characters real `Case.id` values use, so the restriction I propose doesn't reject actual data.",
+          "translation_chs": "写契约 issue 之前，我先查一下真实 `Case.id` 用了哪些字符，免得我提的限制把真实数据拒掉。"
         },
         {
           "type": "tool_call",
@@ -842,7 +866,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:40:09.146Z",
-          "text": "Creating the contract follow-up issue now, since you asked for it directly. The PR link gets filled in once the PR exists."
+          "text": "Creating the contract follow-up issue now, since you asked for it directly. The PR link gets filled in once the PR exists.",
+          "translation_chs": "现在就建契约后续 issue，因为你直接要了。PR 链接等 PR 建好后再填。"
         },
         {
           "type": "tool_call",
@@ -875,7 +900,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:40:33.970Z",
-          "text": "Making two signed commits: the proposal with D-011, then the `data.md` finding. There are no AI attribution trailers, per your global instructions."
+          "text": "Making two signed commits: the proposal with D-011, then the `data.md` finding. There are no AI attribution trailers, per your global instructions.",
+          "translation_chs": "做两个签名提交：提案和 D-011，然后是 `data.md` 的发现。按你的全局指令，不带 AI 署名脚注。"
         },
         {
           "type": "tool_call",
@@ -894,7 +920,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:40:57.360Z",
-          "text": "I've folded both answers into the proposal, opened the contract follow-up issue, and committed everything. The two commits are signed and local only: nothing is pushed and no PR exists yet.\n\n**Your two answers, as written into the proposal**\n- **Weak role evidence (option C):** the proposal now assumes the input has no sender metadata. `role` stays as ingest sets it. A thread whose last agent reply has only weak evidence becomes `undetermined`, and #6 checks it.\n- **An ordering fix that makes C work:** the \"same reply body in 3 or more threads\" check now runs in #4 ingest, not #5. It's an exact match with no LLM, so ingest no longer depends on the knowledge-base build. On the sample, 436 `replied` threads become `undetermined`.\n- **One gap C doesn't close:** a player who pastes a whole common agent reply into a follow-up still looks like an agent, and the case shows as replied. It adds nothing new to the knowledge base. I listed it under risks as unlikely.\n- **Not replying:** the §8 table now uses your rules:\n  - a duplicate of an already-answered thread closes automatically;\n  - a single system email closes automatically only if the system evidence is strong *and* #6 finds no player question in it;\n  - anything else goes to manual review.\n- **Split rule for #7:** a duplicate and its twin always go on the same side of the train/test split.\n- The open-questions section is gone because every question is resolved.\n\n**Contract follow-up: [#19](https://github.com/NatsumeRyuhane/qingci-test/issues/19)**\n- It covers your list plus `CaseStatus.NO_REPLY_NEEDED`.\n- It also says #4 must fill in `role_evidence` and apply the new status rule in the same PR.\n- For `Case.id` it proposes `^[A-Za-z0-9_-]{1,64}$`. I checked the real data: all 2,872 IDs are 3–4 digit numbers, so all of them fit.\n- Its proposal links will only work once the proposal PR merges, and I'll add the PR link after opening it.\n\n**Commits on `docs/5-kb-design`** (worktree `../qingci-test-5-kb-design`):\n- `11d294f docs(kb): 提案 0003 知识库设计与决策 D-011`\n- `844e223 docs(data): 记录没有回复的玩家咨询的原因分布`, which adds the breakdown of unanswered inquiries to `docs/data.md`\n\nAll the numbers come from a local ingest run and are aggregates only. Relative links resolve. These are docs-only changes, so I didn't run the code checks.\n\nThat ingest run left derived customer data in the scratchpad: `$SCRATCHPAD/cases.jsonl`. It's outside the repo; I can delete it now if you prefer.\n\n**Next:** may I push `docs/5-kb-design` and open a PR titled `docs(kb): 提案 0003 知识库设计与决策 D-011`, with `Refs #5`? Once it's open, I'll add the PR link to #19 and #18, update the bodies of #5, #6, #7 and #12, and comment on #18."
+          "text": "I've folded both answers into the proposal, opened the contract follow-up issue, and committed everything. The two commits are signed and local only: nothing is pushed and no PR exists yet.\n\n**Your two answers, as written into the proposal**\n- **Weak role evidence (option C):** the proposal now assumes the input has no sender metadata. `role` stays as ingest sets it. A thread whose last agent reply has only weak evidence becomes `undetermined`, and #6 checks it.\n- **An ordering fix that makes C work:** the \"same reply body in 3 or more threads\" check now runs in #4 ingest, not #5. It's an exact match with no LLM, so ingest no longer depends on the knowledge-base build. On the sample, 436 `replied` threads become `undetermined`.\n- **One gap C doesn't close:** a player who pastes a whole common agent reply into a follow-up still looks like an agent, and the case shows as replied. It adds nothing new to the knowledge base. I listed it under risks as unlikely.\n- **Not replying:** the §8 table now uses your rules:\n  - a duplicate of an already-answered thread closes automatically;\n  - a single system email closes automatically only if the system evidence is strong *and* #6 finds no player question in it;\n  - anything else goes to manual review.\n- **Split rule for #7:** a duplicate and its twin always go on the same side of the train/test split.\n- The open-questions section is gone because every question is resolved.\n\n**Contract follow-up: [#19](https://github.com/NatsumeRyuhane/qingci-test/issues/19)**\n- It covers your list plus `CaseStatus.NO_REPLY_NEEDED`.\n- It also says #4 must fill in `role_evidence` and apply the new status rule in the same PR.\n- For `Case.id` it proposes `^[A-Za-z0-9_-]{1,64}$`. I checked the real data: all 2,872 IDs are 3–4 digit numbers, so all of them fit.\n- Its proposal links will only work once the proposal PR merges, and I'll add the PR link after opening it.\n\n**Commits on `docs/5-kb-design`** (worktree `../qingci-test-5-kb-design`):\n- `11d294f docs(kb): 提案 0003 知识库设计与决策 D-011`\n- `844e223 docs(data): 记录没有回复的玩家咨询的原因分布`, which adds the breakdown of unanswered inquiries to `docs/data.md`\n\nAll the numbers come from a local ingest run and are aggregates only. Relative links resolve. These are docs-only changes, so I didn't run the code checks.\n\nThat ingest run left derived customer data in the scratchpad: `$SCRATCHPAD/cases.jsonl`. It's outside the repo; I can delete it now if you prefer.\n\n**Next:** may I push `docs/5-kb-design` and open a PR titled `docs(kb): 提案 0003 知识库设计与决策 D-011`, with `Refs #5`? Once it's open, I'll add the PR link to #19 and #18, update the bodies of #5, #6, #7 and #12, and comment on #18.",
+          "translation_chs": "两个答复都已并入提案，契约后续 issue 也开了，所有东西都提交了。两个提交已签名，只在本地：没有 push，也还没有 PR。\n\n**你的两个答复，按写入提案的内容**\n- **弱角色证据（选项 C）**：提案现在假设输入没有发件人元数据。`role` 保持 ingest 设置的值。最后一封客服回复只有弱证据的线程变成 `undetermined`，#6 会检查它。\n- **让 C 可行的顺序修复**：“同样的回复正文出现在 3 个或更多线程中”的检查现在在 #4 的 ingest 中运行，而不是 #5。它是精确匹配，不用 LLM，所以 ingest 不再依赖知识库构建。在样本上，436 个 `replied` 线程变成 `undetermined`。\n- **C 没堵上的一个缺口**：玩家在后续邮件里粘一整段常见客服回复，仍然看起来像客服，案件显示为已回复。它不会给知识库带来新内容。我把它作为不太可能的情况列在风险里。\n- **不回复**：§8 的表现在按你的规则：\n  - 已回复线程的重复件自动关闭；\n  - 只有一封系统邮件的线程，只有在系统证据强*且* #6 没在里面发现玩家提问时才自动关闭；\n  - 其他情况一律转人工审核。\n- **#7 的切分规则**：重复件和它的对应件永远落在训练/测试切分的同一侧。\n- 开放问题一节已删除，因为所有问题都解决了。\n\n**契约后续：[#19](https://github.com/NatsumeRyuhane/qingci-test/issues/19)**\n- 覆盖你的清单，加上 `CaseStatus.NO_REPLY_NEEDED`。\n- 还说明 #4 必须在同一个 PR 里填写 `role_evidence` 并应用新的状态规则。\n- 对 `Case.id` 提议 `^[A-Za-z0-9_-]{1,64}$`。我查了真实数据：2,872 个 ID 都是 3–4 位数字，全都符合。\n- 它里面的提案链接要等提案 PR 合并后才有效，PR 开好后我会补上 PR 链接。\n\n**`docs/5-kb-design` 上的提交**（worktree `../qingci-test-5-kb-design`）：\n- `11d294f docs(kb): 提案 0003 知识库设计与决策 D-011`\n- `844e223 docs(data): 记录没有回复的玩家咨询的原因分布`，把未回复咨询的原因分布加进 `docs/data.md`\n\n所有数字都来自本地 ingest 运行，且只是汇总数据。相对链接都能解析。这些只是文档改动，所以没跑代码检查。\n\n那次 ingest 运行在 scratchpad 里留下了派生的客户数据：`$SCRATCHPAD/cases.jsonl`。它在仓库之外；如果你希望，我现在可以删掉。\n\n**下一步**：我可以 push `docs/5-kb-design`，并开一个标题为 `docs(kb): 提案 0003 知识库设计与决策 D-011`、带 `Refs #5` 的 PR 吗？开好之后，我会把 PR 链接加到 #19 和 #18，更新 #5、#6、#7、#12 的正文，并在 #18 下评论。"
         }
       ]
     },
@@ -903,11 +930,13 @@
       "timestamp": "2026-11-26T14:42:31.697Z",
       "kind": "message",
       "user": "yes, open the PR, then we could start working on #5",
+      "translation_chs": "好，开 PR，然后我们就可以开始做 #5 了。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:42:40.925Z",
-          "text": "Pushing and opening the PR."
+          "text": "Pushing and opening the PR.",
+          "translation_chs": "push 并开 PR。"
         },
         {
           "type": "tool_call",
@@ -940,7 +969,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:43:43.942Z",
-          "text": "PR is open: [#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20). Next I'll update the issues. Each body gets an \"更新\" (update) note at the top saying what changed and why."
+          "text": "PR is open: [#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20). Next I'll update the issues. Each body gets an \"更新\" (update) note at the top saying what changed and why.",
+          "translation_chs": "PR 已开：[#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20)。接下来更新 issue。每个正文顶部加一条“更新”说明，写清改了什么、为什么。"
         },
         {
           "type": "tool_call",
@@ -973,7 +1003,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:44:43.986Z",
-          "text": "Now #12 (I'm prepending an update note and leaving the rest of the body intact), the PR link in #19, and the #18 comment."
+          "text": "Now #12 (I'm prepending an update note and leaving the rest of the body intact), the PR link in #19, and the #18 comment.",
+          "translation_chs": "现在处理 #12（在开头加一条更新说明，其余正文保持不变）、#19 里的 PR 链接，以及 #18 的评论。"
         },
         {
           "type": "tool_call",
@@ -1034,7 +1065,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:46:45.692Z",
-          "text": "The PR is open and all the prep is finished. Before starting #5, one thing about order: #5 depends on #19, so I'd do #19 first.\n\n**PR:** [#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20) `docs(kb): 提案 0003 知识库设计与决策 D-011`. It's pushed from the worktree `../qingci-test-5-kb-design` and uses `Refs #5`, so merging it won't close #5.\n\n**Issues updated.** Each body now opens with an \"更新（2026-11-26）\" note saying what changed and why, and links the proposal, #20 and #18:\n- **#5** is rewritten. The changes are the knowledge-base goal and success metric, the intent list, `knowledge/` for hand-written content, learning only from replies with strong evidence, YAML review and the \"no reply\" labels. The counts now match the cleaned data, and the issue depends on #19.\n- **#6** adds:\n  - the time block at the end of the query, with code enforcing time windows;\n  - the bounded tool loop and the auto-send gate for general templates;\n  - resolving `undetermined` cases and the no-reply rules;\n  - citations and the tool trace on the draft, and the prompt-injection measures.\n- **#7** now splits within March by date, keeps each duplicate with its twin, and uses the new success metric. It reports by time status, adds injection samples and the \"player misread as agent or system\" metric, and compares the pipeline with and without tools.\n- **#12** says which part moved into the MVP and what stays post-MVP. The rest of its body is unchanged.\n- **#19** now links PR #20.\n- **#18** got a comment mapping each of its items to the design, including the remaining risk of a player pasting in a whole agent reply.\n\n**Starting #5.** #5 needs types that don't exist yet and come from #19: `role_evidence`, `ReplyTemplate.intent` and `review_status`, validity windows on every entry, and \"valid version at time T\" selection.\n- **Do #19 first (my recommendation).** It's mostly contract models and fixtures, plus the small ingest change (fill in `role_evidence`, apply the new status rule). Once it merges, #5, #6 and #7 can work in parallel on fixed contracts, the same way #3 enabled #4.\n- **Or start #5 now on the parts that don't touch the contract:** clustering `Message.core`, finding slots, coverage reports. The rest would wait for #19.\n\n#19 doesn't need #20 to merge first. Which would you like?\n\nThe derived data from my local ingest run is still in `$SCRATCHPAD/cases.jsonl`; it's outside the repo and I'll delete it if you want. I also saved a memory note on how you like decision questions laid out: context, problem, options, recommendation."
+          "text": "The PR is open and all the prep is finished. Before starting #5, one thing about order: #5 depends on #19, so I'd do #19 first.\n\n**PR:** [#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20) `docs(kb): 提案 0003 知识库设计与决策 D-011`. It's pushed from the worktree `../qingci-test-5-kb-design` and uses `Refs #5`, so merging it won't close #5.\n\n**Issues updated.** Each body now opens with an \"更新（2026-11-26）\" note saying what changed and why, and links the proposal, #20 and #18:\n- **#5** is rewritten. The changes are the knowledge-base goal and success metric, the intent list, `knowledge/` for hand-written content, learning only from replies with strong evidence, YAML review and the \"no reply\" labels. The counts now match the cleaned data, and the issue depends on #19.\n- **#6** adds:\n  - the time block at the end of the query, with code enforcing time windows;\n  - the bounded tool loop and the auto-send gate for general templates;\n  - resolving `undetermined` cases and the no-reply rules;\n  - citations and the tool trace on the draft, and the prompt-injection measures.\n- **#7** now splits within March by date, keeps each duplicate with its twin, and uses the new success metric. It reports by time status, adds injection samples and the \"player misread as agent or system\" metric, and compares the pipeline with and without tools.\n- **#12** says which part moved into the MVP and what stays post-MVP. The rest of its body is unchanged.\n- **#19** now links PR #20.\n- **#18** got a comment mapping each of its items to the design, including the remaining risk of a player pasting in a whole agent reply.\n\n**Starting #5.** #5 needs types that don't exist yet and come from #19: `role_evidence`, `ReplyTemplate.intent` and `review_status`, validity windows on every entry, and \"valid version at time T\" selection.\n- **Do #19 first (my recommendation).** It's mostly contract models and fixtures, plus the small ingest change (fill in `role_evidence`, apply the new status rule). Once it merges, #5, #6 and #7 can work in parallel on fixed contracts, the same way #3 enabled #4.\n- **Or start #5 now on the parts that don't touch the contract:** clustering `Message.core`, finding slots, coverage reports. The rest would wait for #19.\n\n#19 doesn't need #20 to merge first. Which would you like?\n\nThe derived data from my local ingest run is still in `$SCRATCHPAD/cases.jsonl`; it's outside the repo and I'll delete it if you want. I also saved a memory note on how you like decision questions laid out: context, problem, options, recommendation.",
+          "translation_chs": "PR 已开，所有准备工作都完成了。开始 #5 之前，有个顺序问题：#5 依赖 #19，所以我建议先做 #19。\n\n**PR**：[#20](https://github.com/NatsumeRyuhane/qingci-test/pull/20) `docs(kb): 提案 0003 知识库设计与决策 D-011`。从 worktree `../qingci-test-5-kb-design` 推送，使用 `Refs #5`，所以合并它不会关闭 #5。\n\n**已更新的 issue。** 每个正文现在开头都有一条“更新（2026-11-26）”说明，写清改了什么、为什么，并链接提案、#20 和 #18：\n- **#5** 已重写。改动包括知识库目标和成功指标、意图列表、人工内容放在 `knowledge/`、只从强证据回复中学习、YAML 审核以及“不回复”标注。计数现在与清洗后的数据一致，该 issue 依赖 #19。\n- **#6** 增加了：\n  - 请求末尾的时间块，时间窗口由代码执行；\n  - 有步数上限的工具循环，以及通用模板的自动发送门槛；\n  - 处理 `undetermined` 案件和不回复规则；\n  - 草稿上的引用和工具轨迹，以及提示注入的防护措施。\n- **#7** 现在在 3 月内按日期切分，每个重复件和它的对应件放在一起，并使用新的成功指标。结果按时间状态报告，增加注入样本和“玩家被误判为客服或系统”的指标，并对比有工具和无工具的流水线。\n- **#12** 说明了哪部分提前到 MVP、哪些留在 MVP 之后。其余正文不变。\n- **#19** 现在链接 PR #20。\n- **#18** 加了一条评论，把它的每一项对应到设计上，包括玩家粘贴整段客服回复这一残留风险。\n\n**开始 #5。** #5 需要一些还不存在、来自 #19 的类型：`role_evidence`、`ReplyTemplate.intent` 和 `review_status`、每个条目的有效期，以及“时间 T 时有效的版本”选择。\n- **先做 #19（我的建议）。** 它主要就是契约模型和 fixture，加上一点 ingest 改动（填写 `role_evidence`、应用新状态规则）。合并之后，#5、#6、#7 就能在固定契约上并行，就像 #3 为 #4 打好了基础那样。\n- **或者现在就开始 #5 中不碰契约的部分**：聚类 `Message.core`、找槽位、覆盖率报告。其余部分等 #19。\n\n#19 不需要等 #20 合并。你想选哪个？\n\n本地 ingest 运行产生的派生数据还在 `$SCRATCHPAD/cases.jsonl`；它在仓库之外，你要求的话我会删掉。我还存了一条记忆，记下你希望决策问题怎么组织：背景、问题、选项、建议。"
         }
       ]
     },
@@ -1043,11 +1075,13 @@
       "timestamp": "2026-11-26T14:52:17.033Z",
       "kind": "message",
       "user": "current commit is failing ci - on a lint check. Please revise, also CR had comments need resolve",
+      "translation_chs": "当前 commit 挂在 CI 上——是个 lint 检查。请修一下，另外 CR 还有评论需要解决",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:52:23.937Z",
-          "text": "Checking the CI failure and the review threads on #20."
+          "text": "Checking the CI failure and the review threads on #20.",
+          "translation_chs": "我先看一下 #20 的 CI 失败和评审讨论。"
         },
         {
           "type": "tool_call",
@@ -1108,7 +1142,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:54:20.432Z",
-          "text": "Commit 1 is the CI fix. I'm letting ruff format the code block, which changes nothing else."
+          "text": "Commit 1 is the CI fix. I'm letting ruff format the code block, which changes nothing else.",
+          "translation_chs": "提交 1 是修 CI。我让 ruff 格式化代码块，其他什么都没动。"
         },
         {
           "type": "tool_call",
@@ -1127,7 +1162,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:54:39.557Z",
-          "text": "Commit 2 fixes the version rule, covering both version comments: a newer version fully replaces the older one, real-world changes become a new entry, and recorded time is kept separate from validity."
+          "text": "Commit 2 fixes the version rule, covering both version comments: a newer version fully replaces the older one, real-world changes become a new entry, and recorded time is kept separate from validity.",
+          "translation_chs": "提交 2 修版本规则，覆盖那两条版本相关的评论：新版本完整替换旧版本，现实中的变化成为新条目，记录时间与有效期分开保存。"
         },
         {
           "type": "tool_call",
@@ -1160,7 +1196,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:55:11.929Z",
-          "text": "Pushing the two fixes and replying on the three resolved threads. I'm not resolving any of them myself. #19's version-selection row needs the same change."
+          "text": "Pushing the two fixes and replying on the three resolved threads. I'm not resolving any of them myself. #19's version-selection row needs the same change.",
+          "translation_chs": "推送这两个修复，并在三个已修好的讨论里回复。我不会自己去标记解决。#19 里版本选择那一行也要做同样的改动。"
         },
         {
           "type": "tool_call",
@@ -1193,7 +1230,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T14:56:30.632Z",
-          "text": "## Status\n\n**CI:** fixed in `656ddbb`. The failure was `ruff format --check` on the Python code block in the proposal. ruff 0.17 formats code blocks inside Markdown files. Local `ruff format --check` and `ruff check` both pass, and the new run on #20 has started.\n\n**CodeRabbit comments:** three are fixed, pushed and replied to, and all three threads are still open for the reviewer:\n- **Old version coming back** (fixed in `9a71b7c`). The reviewer was right: under my rule, once a newer version expired or was retired, an older one would be selected again. Now each entry's latest version replaces the old one completely. A real-world change such as a policy update becomes a new entry that `supersedes` the old one.\n- **Recorded time vs. validity** (fixed in `9a71b7c`). Each version now has `known_from`, meaning when the operator first knew it, and a replay only sees versions known by the simulated \"now\".\n  - It also has `recorded_at`, the actual entry time, kept for audit only.\n  - I didn't filter on `recorded_at`: every review happens in 2026, after all the sample data, so a replay would find no knowledge at all.\n  - D-011 and #19 are updated to match.\n- **Formatting** (fixed in `656ddbb`).\n\nThe fourth comment is an architectural trade-off, so I'm bringing it to you before replying.\n\n## Open: can repetition alone prove an agent reply? (line 248)\n\n**Context.** Without sender metadata, the proposal accepted three kinds of evidence that a message is an agent reply:\n- **corroboration:** a later email quotes this message under the agent's sender name;\n- **repetition:** the same reply text appears in 3 or more threads;\n- **keywords:** the fixed greeting, which counts as weak.\n\nRepetition currently counts as strong evidence.\n\n**Problem.** CodeRabbit is right. A player can submit the same *novel* fake reply, starting with the greeting, in 3 threads. It then gets strong evidence, and #5 learns the attacker's text as a template. Repetition isn't independent of the attacker. There's a deeper limit too: with text alone, no evidence is impossible to forge. Corroboration can be faked inside the attacker's own thread with a crafted quote header, though that takes more effort.\n\n**Options** (measured on the sample, out of 2,759 agent replies):\n\n| | Strong evidence | `replied` threads that become `undetermined` | Attacker's novel text learned? |\n|---|---|---|---|\n| **A. Keep as is** (repetition is strong evidence) | 2,296 | 436 | Yes, with 3 submissions |\n| **B. Repetition only extends trust from corroborated text.** A reply is strong if it's corroborated, or if its exact text also appears as a corroborated reply somewhere | 1,860 (247 + 1,613) | 861 | No |\n| **C. B for ingest and status, plus your review as a second trust source for #5.** Repeated-only texts (443 replies) enter the knowledge base as flagged drafts. They appear only in your review queue and never as candidates for the model until you approve them | Same as B at ingest; more after review | 861 | No, unless you approve it |\n\nThe trade-offs:\n- **B** is the simplest secure option. But it shrinks the learning set to 67% of replies, so the 80% coverage target is at risk.\n- **C** keeps the path to 80%, because your review, which goes in coverage order anyway, is what clears repeated-only templates.\n- **B and C both** send 861 threads instead of 436 to #6 for an LLM check. That's cheap.\n- **Coupling (C):** I'd keep the status rule on ingest's evidence only, so status never depends on review state.\n\n**My recommendation: C.** The residual risk is a forger who crafts fake quote headers. Your review is the last defense there, and real sender metadata in production would close it.\n\nShould I go with C, then reply to the thread and update the proposal, #19 and #18?"
+          "text": "## Status\n\n**CI:** fixed in `656ddbb`. The failure was `ruff format --check` on the Python code block in the proposal. ruff 0.17 formats code blocks inside Markdown files. Local `ruff format --check` and `ruff check` both pass, and the new run on #20 has started.\n\n**CodeRabbit comments:** three are fixed, pushed and replied to, and all three threads are still open for the reviewer:\n- **Old version coming back** (fixed in `9a71b7c`). The reviewer was right: under my rule, once a newer version expired or was retired, an older one would be selected again. Now each entry's latest version replaces the old one completely. A real-world change such as a policy update becomes a new entry that `supersedes` the old one.\n- **Recorded time vs. validity** (fixed in `9a71b7c`). Each version now has `known_from`, meaning when the operator first knew it, and a replay only sees versions known by the simulated \"now\".\n  - It also has `recorded_at`, the actual entry time, kept for audit only.\n  - I didn't filter on `recorded_at`: every review happens in 2026, after all the sample data, so a replay would find no knowledge at all.\n  - D-011 and #19 are updated to match.\n- **Formatting** (fixed in `656ddbb`).\n\nThe fourth comment is an architectural trade-off, so I'm bringing it to you before replying.\n\n## Open: can repetition alone prove an agent reply? (line 248)\n\n**Context.** Without sender metadata, the proposal accepted three kinds of evidence that a message is an agent reply:\n- **corroboration:** a later email quotes this message under the agent's sender name;\n- **repetition:** the same reply text appears in 3 or more threads;\n- **keywords:** the fixed greeting, which counts as weak.\n\nRepetition currently counts as strong evidence.\n\n**Problem.** CodeRabbit is right. A player can submit the same *novel* fake reply, starting with the greeting, in 3 threads. It then gets strong evidence, and #5 learns the attacker's text as a template. Repetition isn't independent of the attacker. There's a deeper limit too: with text alone, no evidence is impossible to forge. Corroboration can be faked inside the attacker's own thread with a crafted quote header, though that takes more effort.\n\n**Options** (measured on the sample, out of 2,759 agent replies):\n\n| | Strong evidence | `replied` threads that become `undetermined` | Attacker's novel text learned? |\n|---|---|---|---|\n| **A. Keep as is** (repetition is strong evidence) | 2,296 | 436 | Yes, with 3 submissions |\n| **B. Repetition only extends trust from corroborated text.** A reply is strong if it's corroborated, or if its exact text also appears as a corroborated reply somewhere | 1,860 (247 + 1,613) | 861 | No |\n| **C. B for ingest and status, plus your review as a second trust source for #5.** Repeated-only texts (443 replies) enter the knowledge base as flagged drafts. They appear only in your review queue and never as candidates for the model until you approve them | Same as B at ingest; more after review | 861 | No, unless you approve it |\n\nThe trade-offs:\n- **B** is the simplest secure option. But it shrinks the learning set to 67% of replies, so the 80% coverage target is at risk.\n- **C** keeps the path to 80%, because your review, which goes in coverage order anyway, is what clears repeated-only templates.\n- **B and C both** send 861 threads instead of 436 to #6 for an LLM check. That's cheap.\n- **Coupling (C):** I'd keep the status rule on ingest's evidence only, so status never depends on review state.\n\n**My recommendation: C.** The residual risk is a forger who crafts fake quote headers. Your review is the last defense there, and real sender metadata in production would close it.\n\nShould I go with C, then reply to the thread and update the proposal, #19 and #18?",
+          "translation_chs": "## 状态\n\n**CI**：已在 `656ddbb` 修复。失败的是提案里那段 Python 代码块的 `ruff format --check`。ruff 0.17 会格式化 Markdown 文件里的代码块。本地的 `ruff format --check` 和 `ruff check` 都通过，#20 上新的一轮检查已经跑起来了。\n\n**CodeRabbit 评论**：三条已修复、已推送并已回复，三个讨论都还开着，留给评审人：\n- **旧版本复活**（已在 `9a71b7c` 修复）。评审人说得对：按我原来的规则，一旦新版本过期或退役，旧版本又会被重新选中。现在每个条目的最新版本会完整替换旧版本。现实中的变化（比如政策更新）会成为新条目，通过 `supersedes` 取代旧条目。\n- **记录时间与有效期**（已在 `9a71b7c` 修复）。每个版本现在都有 `known_from`，表示运营方最早知道它的时间；回放时只能看到模拟「现在」之前已知的版本。\n  - 它还有 `recorded_at`，即实际的录入时间，只用于审计。\n  - 我没有按 `recorded_at` 过滤：所有评审都发生在 2026 年，晚于全部样本数据，按它过滤回放会一条知识都找不到。\n  - D-011 和 #19 已同步更新。\n- **格式**（已在 `656ddbb` 修复）。\n\n第四条评论是架构上的取舍，所以我先来问你，再回复。\n\n## 待定：仅靠重复能证明是坐席回复吗？（第 248 行）\n\n**背景**。在没有发件人元数据的情况下，提案接受三类证据来证明某条消息是坐席回复：\n- **互证**：后续邮件以坐席的发件人名引用这条消息；\n- **重复**：同样的回复文本出现在 3 个或更多线程里；\n- **关键词**：固定的问候语，算作弱证据。\n\n目前重复算作强证据。\n\n**问题**。CodeRabbit 说得对。玩家可以把同一条*全新编造*的假回复（以那句问候语开头）投到 3 个线程里，它就能拿到强证据，#5 便会把攻击者的文本学成模板。重复并不独立于攻击者。更深一层的限制是：只靠文本，任何证据都能伪造。互证也能在攻击者自己的线程里用构造好的引用头伪造，只是更费劲。\n\n**选项**（在样本上实测，基数为 2,759 条坐席回复）：\n\n| | 强证据 | 从 `replied` 变成 `undetermined` 的线程 | 攻击者的新文本会被学到吗？ |\n|---|---|---|---|\n| **A. 维持现状**（重复算强证据） | 2,296 | 436 | 会，提交 3 次即可 |\n| **B. 重复只用来延伸已互证文本的信任。** 一条回复只要有互证，或者其精确文本在别处也作为已互证回复出现，才算强证据 | 1,860（247 + 1,613） | 861 | 不会 |\n| **C. 在 ingest 和状态判断上用 B，再加上你的审核作为 #5 的第二个信任来源。** 仅有重复的文本（443 条回复）会以「已标记」草稿进入知识库，只出现在你的审核队列里，在你批准之前永远不会成为模型的候选 | ingest 阶段与 B 相同；审核后更多 | 861 | 不会，除非你批准 |\n\n取舍：\n- **B** 是最简单的安全选项，但它把学习集缩到回复总量的 67%，80% 覆盖率的目标就有风险。\n- **C** 保留了走到 80% 的路径，因为你的审核本来就按覆盖率顺序进行，正是它把仅有重复的模板放行。\n- **B 和 C 都会**把 861 个线程（而不是 436 个）交给 #6 做 LLM 检查。这很便宜。\n- **耦合（C）**：我会让状态规则只依赖 ingest 的证据，这样状态永远不取决于审核状态。\n\n**我的建议：C**。剩余风险是有人伪造引用头。你的审核是那里的最后一道防线，生产环境里有真实的发件人元数据就能堵上。\n\n要不要就按 C 走？确认后我会回复该讨论，并更新提案、#19 和 #18。"
         }
       ]
     },
@@ -1202,6 +1240,7 @@
       "timestamp": "2026-11-26T15:00:27.195Z",
       "kind": "message",
       "user": "I think we should go for C and note explicitly as a proposal - if this system is ever going to be used at prod, we should request for metadata so we know at least what is from us/user/a well-known mail system.",
+      "translation_chs": "我觉得就按 C 走，并且在提案里写明：这套系统将来要上生产的话，我们得向邮件系统要元数据，至少要知道哪些是我们发的、哪些是玩家发的、哪些来自已知的邮件系统。",
       "steps": [
         {
           "type": "tool_call",
@@ -1248,7 +1287,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:01:28.898Z",
-          "text": "Pushed as `6b87b39`. Next I'm replying on the thread and syncing the PR body, #19, #5 and #6, plus a follow-up comment on #18."
+          "text": "Pushed as `6b87b39`. Next I'm replying on the thread and syncing the PR body, #19, #5 and #6, plus a follow-up comment on #18.",
+          "translation_chs": "已推送为 `6b87b39`。接下来我去回复该讨论，并同步 PR 正文、#19、#5 和 #6，另外在 #18 上补一条评论。"
         },
         {
           "type": "tool_call",
@@ -1281,7 +1321,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:02:55.930Z",
-          "text": "CI on #20 now passes: the `backend` job is green and so are the other four. I went with option C and replied on all four CodeRabbit threads. I didn't resolve any, since that's the reviewer's call, and CodeRabbit is re-reviewing the latest push now.\n\n**Option C, in the proposal (§11) and D-011** (commit `6b87b39`):\n- **Repetition is now only a supporting signal.** An agent reply counts as strong evidence only if a later email quotes it under the agent's name, or if its text is identical to a reply that was quoted that way.\n- **Repeated-only text needs your approval first.** It enters the knowledge base as a flagged draft that appears only in your review queue. The model and the agents never see it until you approve it; after that, the approval counts as a trust source for #5.\n- **On the sample:**\n  - 1,860 of 2,759 agent replies have strong evidence at ingest.\n  - 861 of 2,166 `replied` threads (instead of 436) become `undetermined` and go to #6.\n- **A case's status depends only on ingest's evidence**, never on review state.\n- **Two new risks are listed:**\n  - a player can hand-write a fake quote header in their own thread;\n  - more threads go to #6 for checking.\n\n**Production metadata** is now an explicit proposal, in §11 and in D-011. Before any production use, ask the data source to mark each email as from us, from the player, or from a known mail system. That gives role evidence that can't be forged from the body text, and it would largely remove both the forged-reply and the forged-bounce problems.\n\n**The other review fixes:**\n- `656ddbb`: ruff formatting of the code block in the proposal. This was the CI failure.\n- `9a71b7c`: version selection.\n  - Each entry's latest version is the one used, and its validity window decides whether it applies. An old version can no longer come back.\n  - A real-world change becomes a new entry that `supersedes` the old one.\n  - `known_from` controls what a historical replay can see.\n\n**Synced to the new evidence rules:** the PR #20 description, #19's evidence and version rows, #5's clustering task and #6's `undetermined` task. #18 got a follow-up comment with the stricter rules, the new risk and the metadata proposal.\n\nThe metadata proposal currently lives only in the proposal and D-011. If you want it tracked separately, I can open a `proposal`-labelled issue for it."
+          "text": "CI on #20 now passes: the `backend` job is green and so are the other four. I went with option C and replied on all four CodeRabbit threads. I didn't resolve any, since that's the reviewer's call, and CodeRabbit is re-reviewing the latest push now.\n\n**Option C, in the proposal (§11) and D-011** (commit `6b87b39`):\n- **Repetition is now only a supporting signal.** An agent reply counts as strong evidence only if a later email quotes it under the agent's name, or if its text is identical to a reply that was quoted that way.\n- **Repeated-only text needs your approval first.** It enters the knowledge base as a flagged draft that appears only in your review queue. The model and the agents never see it until you approve it; after that, the approval counts as a trust source for #5.\n- **On the sample:**\n  - 1,860 of 2,759 agent replies have strong evidence at ingest.\n  - 861 of 2,166 `replied` threads (instead of 436) become `undetermined` and go to #6.\n- **A case's status depends only on ingest's evidence**, never on review state.\n- **Two new risks are listed:**\n  - a player can hand-write a fake quote header in their own thread;\n  - more threads go to #6 for checking.\n\n**Production metadata** is now an explicit proposal, in §11 and in D-011. Before any production use, ask the data source to mark each email as from us, from the player, or from a known mail system. That gives role evidence that can't be forged from the body text, and it would largely remove both the forged-reply and the forged-bounce problems.\n\n**The other review fixes:**\n- `656ddbb`: ruff formatting of the code block in the proposal. This was the CI failure.\n- `9a71b7c`: version selection.\n  - Each entry's latest version is the one used, and its validity window decides whether it applies. An old version can no longer come back.\n  - A real-world change becomes a new entry that `supersedes` the old one.\n  - `known_from` controls what a historical replay can see.\n\n**Synced to the new evidence rules:** the PR #20 description, #19's evidence and version rows, #5's clustering task and #6's `undetermined` task. #18 got a follow-up comment with the stricter rules, the new risk and the metadata proposal.\n\nThe metadata proposal currently lives only in the proposal and D-011. If you want it tracked separately, I can open a `proposal`-labelled issue for it.",
+          "translation_chs": "#20 的 CI 现在通过了：`backend` job 是绿的，另外四个也一样。我按选项 C 做了，并在四个 CodeRabbit 讨论里都回复了。我一个都没标记解决——那是评审人的决定；CodeRabbit 正在重新评审最新这次 push。\n\n**选项 C，已写入提案（§11）和 D-011**（提交 `6b87b39`）：\n- **重复现在只是辅助信号。** 一条坐席回复只有在后续邮件以坐席名义引用它，或者其文本与某条被这样引用过的回复完全一致时，才算强证据。\n- **仅有重复的文本必须先经你批准。** 它以「已标记」草稿进入知识库，只出现在你的审核队列里。在你批准之前，模型和坐席都看不到它；批准之后，这次审核就算作 #5 的一个信任来源。\n- **在样本上：**\n  - 2,759 条坐席回复中有 1,860 条在 ingest 阶段就有强证据。\n  - 2,166 个 `replied` 线程中有 861 个（而不是 436 个）变成 `undetermined`，交给 #6。\n- **案件状态只取决于 ingest 的证据**，与审核状态无关。\n- **新增两条风险：**\n  - 玩家可以在自己的线程里手写伪造的引用头；\n  - 更多线程被送去 #6 检查。\n\n**生产环境的元数据**现在是一条明确的提案，写在 §11 和 D-011 里。在任何生产使用之前，要求数据源把每封邮件标注为来自我们、来自玩家，或来自已知邮件系统。这样得到的角色证据无法从正文伪造，能基本消除伪造回复和伪造退信这两个问题。\n\n**其余评审修复：**\n- `656ddbb`：提案里代码块的 ruff 格式问题，就是这次 CI 失败的原因。\n- `9a71b7c`：版本选择。\n  - 使用每个条目的最新版本，由它的有效期决定是否适用。旧版本不会再复活。\n  - 现实中的变化会成为新条目，`supersedes` 旧条目。\n  - `known_from` 决定历史回放能看到什么。\n\n**已按新的证据规则同步**：PR #20 描述、#19 的证据与版本相关条目、#5 的聚类任务、#6 的 `undetermined` 任务。#18 上补了一条评论，写明更严格的规则、新增风险和元数据提案。\n\n元数据提案目前只存在于提案文档和 D-011 里。如果你想单独跟踪，我可以开一个带 `proposal` 标签的 issue。"
         }
       ]
     },
@@ -1290,11 +1331,13 @@
       "timestamp": "2026-11-26T15:06:57.743Z",
       "kind": "message",
       "user": "did you replied to the comment on the fix?",
+      "translation_chs": "修复那条评论你回了吗？",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:07:02.657Z",
-          "text": "I'll check on GitHub rather than answer from memory."
+          "text": "I'll check on GitHub rather than answer from memory.",
+          "translation_chs": "我去 GitHub 上查一下，不凭记忆答。"
         },
         {
           "type": "tool_call",
@@ -1383,7 +1426,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:09:28.509Z",
-          "text": "The commit was pushed and both replies were posted, but the count sync failed (zsh doesn't word-split variables), so neither body was edited. Running it again with explicit arguments:"
+          "text": "The commit was pushed and both replies were posted, but the count sync failed (zsh doesn't word-split variables), so neither body was edited. Running it again with explicit arguments:",
+          "translation_chs": "commit 已推送，两条回复也都发出去了，但数量同步那步失败了（zsh 不会对变量做分词），所以两个正文都没改成。这次用显式参数重跑："
         },
         {
           "type": "tool_call",
@@ -1402,7 +1446,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:10:08.160Z",
-          "text": "Yes, I'd replied to all four original threads. CodeRabbit checked the three fixes and agreed with them. It left those threads open for a human reviewer rather than resolving them itself, so they're yours to resolve. The fourth (role evidence) is waiting on CodeRabbit's reply. That push also triggered **three new comments**, which I hadn't answered until now:\n\n| Thread | Status |\n|---|---|\n| `known_from` should use the latest evidence needed and the upper bound of any estimate (line 85) | **Fixed** in `aba23e0` and replied |\n| A pasted reply can make a thread look replied (line 259) | **Partly fixed** in `aba23e0` and replied (details below) |\n| Forged quote headers can still put player text in front of the model (line 258) | **Needs your decision**, not replied yet |\n\n**Line 259.** I added an exception: an \"agent reply\" that repeats an earlier reply in the same thread doesn't count as strong evidence. That catches a player pasting back the reply they received. It affects 2 threads, so the `undetermined` count goes from 861 to 863, and I've updated that number in the PR body and #19.\n\nI pushed back on the rest: CodeRabbit wants independent sender evidence before a thread leaves the open queue. The last message in a thread can never be quoted, so in the sample 0 of the 2,166 `replied` threads end with a corroborated message. That rule would mean no thread could ever count as replied without metadata. The thread stays open for CodeRabbit to answer.\n\n## Line 258: can unapproved templates reach the model?\n\n**Context.** A determined player could forge a reply in several threads and also hand-write a matching quote header in a follow-up email. That gives the fake reply strong evidence, so #5 would turn it into a draft template. Your earlier decision was that unreviewed entries can be used as references but are never auto-sent.\n\n**Problem.** \"References\" includes the model's prompt. A poisoned draft template would reach the model presented as an operator answer, which is the kind of content the model is told to trust and fill in. Untrusted player text already reaches the model through the current email and similar-case search, but that text is labelled as data. A template carries more authority.\n\n**Options.**\n- **A. Only approved templates go to the model; drafts are shown to agents only.** This is what CodeRabbit asks for. The model's candidate set becomes the approved templates, about 80% coverage after your review. It narrows your \"references\" decision to \"references for humans\".\n- **B. Drafts reach the model, but only as unverified references in the data section.** They're never offered as templates to fill in; only approved templates are. This keeps your decision, and poisoned text gets no more trust than a similar case.\n- **C. Leave it as is** and rely on the injection defences plus never auto-sending.\n\n**My recommendation: B.** It closes the trust gap CodeRabbit points at without dropping your decision, and the long tail can still help the model as background. Which do you want?"
+          "text": "Yes, I'd replied to all four original threads. CodeRabbit checked the three fixes and agreed with them. It left those threads open for a human reviewer rather than resolving them itself, so they're yours to resolve. The fourth (role evidence) is waiting on CodeRabbit's reply. That push also triggered **three new comments**, which I hadn't answered until now:\n\n| Thread | Status |\n|---|---|\n| `known_from` should use the latest evidence needed and the upper bound of any estimate (line 85) | **Fixed** in `aba23e0` and replied |\n| A pasted reply can make a thread look replied (line 259) | **Partly fixed** in `aba23e0` and replied (details below) |\n| Forged quote headers can still put player text in front of the model (line 258) | **Needs your decision**, not replied yet |\n\n**Line 259.** I added an exception: an \"agent reply\" that repeats an earlier reply in the same thread doesn't count as strong evidence. That catches a player pasting back the reply they received. It affects 2 threads, so the `undetermined` count goes from 861 to 863, and I've updated that number in the PR body and #19.\n\nI pushed back on the rest: CodeRabbit wants independent sender evidence before a thread leaves the open queue. The last message in a thread can never be quoted, so in the sample 0 of the 2,166 `replied` threads end with a corroborated message. That rule would mean no thread could ever count as replied without metadata. The thread stays open for CodeRabbit to answer.\n\n## Line 258: can unapproved templates reach the model?\n\n**Context.** A determined player could forge a reply in several threads and also hand-write a matching quote header in a follow-up email. That gives the fake reply strong evidence, so #5 would turn it into a draft template. Your earlier decision was that unreviewed entries can be used as references but are never auto-sent.\n\n**Problem.** \"References\" includes the model's prompt. A poisoned draft template would reach the model presented as an operator answer, which is the kind of content the model is told to trust and fill in. Untrusted player text already reaches the model through the current email and similar-case search, but that text is labelled as data. A template carries more authority.\n\n**Options.**\n- **A. Only approved templates go to the model; drafts are shown to agents only.** This is what CodeRabbit asks for. The model's candidate set becomes the approved templates, about 80% coverage after your review. It narrows your \"references\" decision to \"references for humans\".\n- **B. Drafts reach the model, but only as unverified references in the data section.** They're never offered as templates to fill in; only approved templates are. This keeps your decision, and poisoned text gets no more trust than a similar case.\n- **C. Leave it as is** and rely on the injection defences plus never auto-sending.\n\n**My recommendation: B.** It closes the trust gap CodeRabbit points at without dropping your decision, and the long tail can still help the model as background. Which do you want?",
+          "translation_chs": "回了，最初那四个讨论我都回复过。CodeRabbit 检查了三个修复并表示认可。它没自己标记解决，而是留给人类评审人，所以这几个得你来解决。第四个（角色证据）在等 CodeRabbit 回复。那次 push 还触发了**三条新评论**，我一直没回：\n\n| 讨论 | 状态 |\n|---|---|\n| `known_from` 应取所需的最新证据，并对估算取上界（第 85 行） | 已在 `aba23e0` **修复**并回复 |\n| 粘贴的回复能让线程看起来像已回复（第 259 行） | 已在 `aba23e0` **部分修复**并回复（详见下文） |\n| 伪造的引用头仍能把玩家文本送到模型面前（第 258 行） | **需要你决定**，尚未回复 |\n\n**第 259 行**。我加了一个例外：与其所在线程中更早的回复重复的「坐席回复」不算强证据。这能抓住玩家把自己收到的回复粘回来的情况。影响 2 个线程，`undetermined` 从 861 变成 863，我已更新 PR 正文和 #19 里的数字。\n\n其余部分我提出了反对：CodeRabbit 要求线程离开待处理队列之前必须有独立的发件人证据。但线程里最后一条消息永远不可能被引用，所以在样本中 2,166 个 `replied` 线程里有 0 个以已互证的消息结尾。按那条规则，没有元数据就永远没有线程能算作已回复。这个讨论保持打开，等 CodeRabbit 回复。\n\n## 第 258 行：未批准的模板能到达模型吗？\n\n**背景**。一个肯下功夫的玩家可以在多个线程里伪造回复，并在后续邮件里手写对应的引用头。这样假回复就拿到了强证据，#5 会把它变成草稿模板。你之前的决定是：未审核的条目可以作为参考，但永远不会自动发送。\n\n**问题**。「参考」包含模型的 prompt。被投毒的草稿模板会以运营方答复的身份出现在模型面前，而模型被告知要信任并套用这类内容。不可信的玩家文本本来就会通过当前邮件和相似案件检索到达模型，但那是标为数据的。模板的权威性更高。\n\n**选项**。\n- **A. 只有已批准的模板才给模型，草稿只给坐席看。** 这是 CodeRabbit 的要求。模型的候选集变成已批准的模板，你审核之后覆盖率约 80%。这把你「参考」的决定窄化成「给人看的参考」。\n- **B. 草稿可以到达模型，但只作为未经验证的参考，放在数据区。** 它们永远不会作为可套用的模板提供给模型，只有已批准的模板才会。这保留你的决定，被投毒的文本得到的信任不会超过一个相似案件。\n- **C. 维持现状**，靠提示注入防护加上永不自动发送。\n\n**我的建议：B**。它堵上了 CodeRabbit 指出的信任缺口，又不推翻你的决定，长尾内容仍能作为背景帮到模型。你选哪个？"
         }
       ]
     },
@@ -1411,11 +1456,13 @@
       "timestamp": "2026-11-26T15:11:20.693Z",
       "kind": "message",
       "user": "Then building on the consensus, in our MVP I will check the approved template and knowledge base, but for automated knowledge base update based on mail theread, we should request metadata from the mail system, otherwise the system could be heavily compromized and cannot be trusted to use.",
+      "translation_chs": "那就按这个共识：MVP 阶段由我负责审核已批准的模板和知识库；但基于邮件线程自动更新知识库这件事，我们得先向邮件系统要元数据，否则系统可能被严重攻破，没法信任它。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:11:40.708Z",
-          "text": "Here's how I'll write that down:\n- **MVP:** your review is the trust anchor. You check the approved templates and the rest of the knowledge base, and only approved entries reach the model. Unreviewed drafts are references for agents only, marked as unreviewed in the UI. This is option A.\n- **Automated knowledge-base updates from new mail threads** are a hard precondition item: they're allowed only once the mail system provides sender metadata. Without it, new knowledge enters only through your review."
+          "text": "Here's how I'll write that down:\n- **MVP:** your review is the trust anchor. You check the approved templates and the rest of the knowledge base, and only approved entries reach the model. Unreviewed drafts are references for agents only, marked as unreviewed in the UI. This is option A.\n- **Automated knowledge-base updates from new mail threads** are a hard precondition item: they're allowed only once the mail system provides sender metadata. Without it, new knowledge enters only through your review.",
+          "translation_chs": "我会这样写下来：\n- **MVP**：你的审核是信任锚点。你审核模板和知识库的其余部分，只有已批准的条目才给模型。未审核的草稿只作为坐席的参考，并在 UI 里标记为未审核。这是选项 A。\n- **基于新邮件线程的自动知识库更新**是硬性前置条件：只有邮件系统提供发件人元数据之后才允许。没有元数据，新知识只能通过你的审核进入。"
         },
         {
           "type": "tool_call",
@@ -1476,7 +1523,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:13:05.725Z",
-          "text": "Your decision is written into the proposal and D-011, pushed in `61d72df`, and every CodeRabbit thread now has a reply.\n\n**What changed**\n- **Only approved entries reach the model.** That covers templates, facts, policies and events alike. In the MVP your review of the templates and the rest of the knowledge base is the trust anchor.\n- **Unreviewed drafts are only shown to agents,** marked as unreviewed in the UI. They never appear in the prompt and are never auto-sent. So even a forged reply that makes it into a draft can't reach the model posing as an operator's answer. I read your message as the \"approved only\" option; say if you meant something softer.\n- **No automated knowledge-base updates without sender metadata.** The doc says why: with roles guessed from text, forged replies could keep poisoning the knowledge base and the system couldn't be trusted. New knowledge enters only through your review, and automated updates wait for the metadata request.\n\n**Synced:**\n- #5 security notes;\n- #6 template retrieval, now approved entries only;\n- a follow-up comment on #18.\n\n**Review threads on #20:**\n\n| Thread | State |\n|---|---|\n| Formatting, version fallback, recorded time | CodeRabbit checked the fixes and agreed. It deliberately left them for a human to resolve, so they're yours. |\n| Repetition as role evidence | Replied, waiting on CodeRabbit |\n| `known_from` timing | Fixed in `aba23e0`, replied |\n| Pasted reply makes a thread look replied | Partly fixed in `aba23e0`, with my reasoning for the rest. Waiting on CodeRabbit |\n| Forged corroboration reaching the model | Fixed in `61d72df` with your decision, replied |\n\nThe new push will trigger another CodeRabbit pass. I won't poll for it; tell me when the reviews are in."
+          "text": "Your decision is written into the proposal and D-011, pushed in `61d72df`, and every CodeRabbit thread now has a reply.\n\n**What changed**\n- **Only approved entries reach the model.** That covers templates, facts, policies and events alike. In the MVP your review of the templates and the rest of the knowledge base is the trust anchor.\n- **Unreviewed drafts are only shown to agents,** marked as unreviewed in the UI. They never appear in the prompt and are never auto-sent. So even a forged reply that makes it into a draft can't reach the model posing as an operator's answer. I read your message as the \"approved only\" option; say if you meant something softer.\n- **No automated knowledge-base updates without sender metadata.** The doc says why: with roles guessed from text, forged replies could keep poisoning the knowledge base and the system couldn't be trusted. New knowledge enters only through your review, and automated updates wait for the metadata request.\n\n**Synced:**\n- #5 security notes;\n- #6 template retrieval, now approved entries only;\n- a follow-up comment on #18.\n\n**Review threads on #20:**\n\n| Thread | State |\n|---|---|\n| Formatting, version fallback, recorded time | CodeRabbit checked the fixes and agreed. It deliberately left them for a human to resolve, so they're yours. |\n| Repetition as role evidence | Replied, waiting on CodeRabbit |\n| `known_from` timing | Fixed in `aba23e0`, replied |\n| Pasted reply makes a thread look replied | Partly fixed in `aba23e0`, with my reasoning for the rest. Waiting on CodeRabbit |\n| Forged corroboration reaching the model | Fixed in `61d72df` with your decision, replied |\n\nThe new push will trigger another CodeRabbit pass. I won't poll for it; tell me when the reviews are in.",
+          "translation_chs": "你的决定已写进提案和 D-011，推送为 `61d72df`；现在每个 CodeRabbit 讨论都有回复了。\n\n**改了什么**\n- **只有已批准的条目才给模型。** 模板、事实、政策、事件都一样。MVP 阶段，你对模板和知识库其余部分的审核就是信任锚点。\n- **未审核的草稿只展示给坐席**，在 UI 里标记为未审核。它们永远不会出现在 prompt 里，也永远不会自动发送。所以即使伪造的回复混进了草稿，也无法冒充运营方答复到达模型。我把你的话理解成了「只要已批准」这个选项；如果你想要更宽松的做法，告诉我。\n- **没有发件人元数据就不做自动知识库更新。** 文档里写了原因：靠文本猜角色的话，伪造回复会持续污染知识库，系统就不可信了。新知识只能通过你的审核进入，自动更新要等元数据这件事落实。\n\n**已同步：**\n- #5 的安全说明；\n- #6 的模板检索，现在只用已批准条目；\n- #18 上的补充评论。\n\n**#20 上的评审讨论：**\n\n| 讨论 | 状态 |\n|---|---|\n| 格式、版本回退、记录时间 | CodeRabbit 检查了修复并表示认可，故意留给人来标记解决，所以归你。 |\n| 重复作为角色证据 | 已回复，等 CodeRabbit |\n| `known_from` 的时点 | 已在 `aba23e0` 修复并回复 |\n| 粘贴回复导致线程看起来像已回复 | 已在 `aba23e0` 部分修复，其余部分写了我的理由。等 CodeRabbit |\n| 伪造互证到达模型 | 已按你的决定在 `61d72df` 修复并回复 |\n\n这次 push 会再触发一轮 CodeRabbit。我不会去轮询；评审结果出来后告诉我。"
         }
       ]
     },
@@ -1485,6 +1533,7 @@
       "timestamp": "2026-11-26T15:16:04.974Z",
       "kind": "message",
       "user": "cr still nitpicking on line 85",
+      "translation_chs": "CR 还在第 85 行挑刺",
       "steps": [
         {
           "type": "tool_call",
@@ -1517,7 +1566,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:17:06.025Z",
-          "text": "I replied to the line-85 comment and disagreed. The thread is still open for you to decide.\n\n**My reasoning:** CodeRabbit wants a template's `known_from` delayed until a later email corroborates who sent its source reply. But `known_from` means when the operator knew the answer, and an agent who sent a reply on March 1 knew it on March 1. The later quote only affects when we can confirm the sender from the text, and that delay exists only because the sample has no sender metadata.\n\nA deployed system knows its own replies the moment it sends them. Without metadata, the knowledge base doesn't update itself from mail anyway: everything goes through your review, and the model only sees approved entries. Delaying `known_from` would make the historical replay pretend the system doesn't know what it sent, which skews #7 the other way. Role evidence decides *whether* a reply may be learned from; it doesn't change *when* the knowledge existed.\n\n**Doc change:** to stop this coming back, I added one paragraph to §3 of the proposal saying exactly that (`c5e5b5c`, signed and pushed).\n\nThat's now the only unresolved thread on #20. The other four, including role evidence and the pasted reply where I'd pushed back, are no longer listed as open.\n\nIf you'd rather go the conservative way and delay `known_from` until the evidence arrives, it's a one-line change. It would only make the #7 numbers slightly more pessimistic."
+          "text": "I replied to the line-85 comment and disagreed. The thread is still open for you to decide.\n\n**My reasoning:** CodeRabbit wants a template's `known_from` delayed until a later email corroborates who sent its source reply. But `known_from` means when the operator knew the answer, and an agent who sent a reply on March 1 knew it on March 1. The later quote only affects when we can confirm the sender from the text, and that delay exists only because the sample has no sender metadata.\n\nA deployed system knows its own replies the moment it sends them. Without metadata, the knowledge base doesn't update itself from mail anyway: everything goes through your review, and the model only sees approved entries. Delaying `known_from` would make the historical replay pretend the system doesn't know what it sent, which skews #7 the other way. Role evidence decides *whether* a reply may be learned from; it doesn't change *when* the knowledge existed.\n\n**Doc change:** to stop this coming back, I added one paragraph to §3 of the proposal saying exactly that (`c5e5b5c`, signed and pushed).\n\nThat's now the only unresolved thread on #20. The other four, including role evidence and the pasted reply where I'd pushed back, are no longer listed as open.\n\nIf you'd rather go the conservative way and delay `known_from` until the evidence arrives, it's a one-line change. It would only make the #7 numbers slightly more pessimistic.",
+          "translation_chs": "我在第 85 行的评论下回复了，表示不同意。讨论仍然开着，等你决定。\n\n**我的理由**：CodeRabbit 希望把模板的 `known_from` 推迟到后续邮件能够互证其源回复的发件人为止。但 `known_from` 的含义是运营方何时知道这个答案——3 月 1 日发出回复的坐席，在 3 月 1 日就知道了。后面的引用只影响我们何时能从文本确认发件人，而这个延迟只是因为样本没有发件人元数据。\n\n已部署的系统在发出回复的那一刻就知道自己的回复。没有元数据时，知识库本来也不会从邮件自动更新：一切都经你审核，模型只看已批准条目。推迟 `known_from` 会让历史回放假装系统不知道自己发过什么，反而把 #7 的结果往另一个方向带偏。角色证据决定的是*能否*从这条回复学习，并不改变知识*何时*就已存在。\n\n**文档改动**：为防止这个问题再来一轮，我在提案 §3 加了一段，把这个意思写清楚（`c5e5b5c`，已签名并推送）。\n\n现在这是 #20 上唯一未解决的讨论。另外四个——包括角色证据，以及我提出反对的粘贴回复那一条——都已不再列为打开状态。\n\n如果你更想走保守路线，把 `known_from` 推迟到证据到达时，那只是一行改动，只会让 #7 的数字稍微更悲观一点。"
         }
       ]
     },
@@ -1526,11 +1576,13 @@
       "timestamp": "2026-11-26T15:19:43.740Z",
       "kind": "message",
       "user": "I would say that introducing my audit as the root trust of source sounds about sane - in the MVP stage. In prod we will need the metadata from mail server, so if we operate on that premise, then the risk level is acceptable, and we should not tug on the trust issue as of now.",
+      "translation_chs": "我觉得把我的审核作为信任根源是合理的——在 MVP 阶段。到生产环境我们需要邮件服务器的元数据，所以只要我们按这个前提来做，风险水平是可以接受的，眼下不应该再在信任问题上反复拉扯。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:19:57.293Z",
-          "text": "That settles the trust model. Per the repo rules for an owner's no-fix call, I'll reply with the reason, note that it's your decision, and resolve the thread myself. I'll also write the premise into the proposal and D-011 as an accepted risk, so future reviews stop reopening it."
+          "text": "That settles the trust model. Per the repo rules for an owner's no-fix call, I'll reply with the reason, note that it's your decision, and resolve the thread myself. I'll also write the premise into the proposal and D-011 as an accepted risk, so future reviews stop reopening it.",
+          "translation_chs": "信任模型就这么定了。按仓库里对「所有者决定不改」的规定，我会回复理由、注明这是你的决定，并自己把讨论标记为已解决。我还会把这个前提作为已接受的风险写进提案和 D-011，免得以后评审再翻出来。"
         },
         {
           "type": "tool_call",
@@ -1605,7 +1657,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:22:23.859Z",
-          "text": "Now adding these as tasks to the issues that own each layer."
+          "text": "Now adding these as tasks to the issues that own each layer.",
+          "translation_chs": "现在把这些作为任务加到负责各层的 issue 里。"
         },
         {
           "type": "tool_call",
@@ -1624,7 +1677,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:23:40.637Z",
-          "text": "Your trust decision is recorded and the adversarial tests are written into the proposal and the issues. CI on #20 passes.\n\n**Trust model.** I added your decision to the proposal's risk section and to D-011 (`4193dca`):\n- in the MVP, your review is the root of trust for the knowledge base;\n- in production, sender metadata from the mail server is required;\n- on that basis the remaining forgery risk is accepted, and the text-evidence rules won't be tightened further during the MVP.\n\nI replied on the line-85 thread that this was your no-fix call and resolved it myself, as the repo rules allow for that case.\n\n**One more CodeRabbit comment, fixed in `ef30d06`:** §4 said unreviewed drafts are shown to agents, while §11 hides drafts backed only by repetition. §4 now states that exception. I've replied, and that thread is the only one still open, waiting on the reviewer.\n\n**Adversarial tests (`495490e`, new part of §13).** The rule is to test each layer as if the layer before it has already failed. For example, a fake LLM that fully obeys the injection still has to be stopped by:\n- the policy checks, which must fail;\n- the routing, which must not auto-send;\n- the tool checks, which must refuse the call or fall back to the fixed pipeline;\n- the time-window check;\n- the escaping of fake delimiters.\n\nThe table covers ten attack types, each with the layer that must stop it and the test condition:\n- prompt injection in the email body;\n- fake delimiters or a fake time block;\n- invisible and bidi characters;\n- forged agent replies;\n- forged quote headers;\n- forged bounces hiding a real inquiry;\n- a problem time placed inside an incident window;\n- out-of-scope tool calls;\n- malicious content in drafts;\n- formula injection on export.\n\nAll samples are synthetic and build on the existing `tests/ingest/test_adversarial.py`. CI tests the code defences with the fake LLM. `llm-live` and #7 measure how often the real model is fooled.\n\n**Where each layer's tests are tracked:**\n- **#5:** forged content never becomes an entry the model or agents see.\n- **#6:** compromised-model tests for every check, plus some `llm-live` runs.\n- **#7:** shares the same samples and reports the injection success rate.\n- **#19:** extends the ingest adversarial tests, including rejecting bad `Case.id` characters.\n- **#8:** a comment on escaping, showing invisible characters, and hiding drafts backed only by repetition.\n- **#18:** a comment mapping all of the above to its checklist.\n\nOnce you approve #20, the proposed next step is #19 (contract changes plus the ingest evidence rule), which unblocks #5."
+          "text": "Your trust decision is recorded and the adversarial tests are written into the proposal and the issues. CI on #20 passes.\n\n**Trust model.** I added your decision to the proposal's risk section and to D-011 (`4193dca`):\n- in the MVP, your review is the root of trust for the knowledge base;\n- in production, sender metadata from the mail server is required;\n- on that basis the remaining forgery risk is accepted, and the text-evidence rules won't be tightened further during the MVP.\n\nI replied on the line-85 thread that this was your no-fix call and resolved it myself, as the repo rules allow for that case.\n\n**One more CodeRabbit comment, fixed in `ef30d06`:** §4 said unreviewed drafts are shown to agents, while §11 hides drafts backed only by repetition. §4 now states that exception. I've replied, and that thread is the only one still open, waiting on the reviewer.\n\n**Adversarial tests (`495490e`, new part of §13).** The rule is to test each layer as if the layer before it has already failed. For example, a fake LLM that fully obeys the injection still has to be stopped by:\n- the policy checks, which must fail;\n- the routing, which must not auto-send;\n- the tool checks, which must refuse the call or fall back to the fixed pipeline;\n- the time-window check;\n- the escaping of fake delimiters.\n\nThe table covers ten attack types, each with the layer that must stop it and the test condition:\n- prompt injection in the email body;\n- fake delimiters or a fake time block;\n- invisible and bidi characters;\n- forged agent replies;\n- forged quote headers;\n- forged bounces hiding a real inquiry;\n- a problem time placed inside an incident window;\n- out-of-scope tool calls;\n- malicious content in drafts;\n- formula injection on export.\n\nAll samples are synthetic and build on the existing `tests/ingest/test_adversarial.py`. CI tests the code defences with the fake LLM. `llm-live` and #7 measure how often the real model is fooled.\n\n**Where each layer's tests are tracked:**\n- **#5:** forged content never becomes an entry the model or agents see.\n- **#6:** compromised-model tests for every check, plus some `llm-live` runs.\n- **#7:** shares the same samples and reports the injection success rate.\n- **#19:** extends the ingest adversarial tests, including rejecting bad `Case.id` characters.\n- **#8:** a comment on escaping, showing invisible characters, and hiding drafts backed only by repetition.\n- **#18:** a comment mapping all of the above to its checklist.\n\nOnce you approve #20, the proposed next step is #19 (contract changes plus the ingest evidence rule), which unblocks #5.",
+          "translation_chs": "你的信任决定已记录，对抗性测试已写进提案和各 issue。#20 的 CI 通过。\n\n**信任模型**。我把你的决定加进了提案的风险章节和 D-011（`4193dca`）：\n- MVP 阶段，你的审核是知识库的信任根源；\n- 生产环境必须要有邮件服务器提供的发件人元数据；\n- 基于这个前提，剩余的伪造风险予以接受，MVP 期间不再进一步收紧文本证据规则。\n\n我在第 85 行的讨论里回复说这是你决定不改，并按仓库规则中允许的情形自己标记了解决。\n\n**还有一条 CodeRabbit 评论，已在 `ef30d06` 修复**：§4 说未审核草稿会展示给坐席，而 §11 会隐藏仅靠重复支撑的草稿。§4 现在写明了这个例外。我已回复；那个讨论是唯一还开着的，等评审人。\n\n**对抗性测试（`495490e`，§13 的新增部分）。** 原则是把每一层都当成前一层已经失守来测。例如，一个完全听命于注入的假 LLM，仍然必须被下面这些拦住：\n- 政策检查，必须判失败；\n- 路由，必须不自动发送；\n- 工具检查，必须拒绝调用或回落到固定流程；\n- 时间窗检查；\n- 对伪造分隔符的转义。\n\n表格覆盖十种攻击类型，每种都写明必须拦住它的层和测试条件：\n- 邮件正文里的提示注入；\n- 伪造的分隔符或伪造的时间块；\n- 不可见字符和双向控制字符；\n- 伪造的坐席回复；\n- 伪造的引用头；\n- 伪造的退信掩盖真实咨询；\n- 把问题时间塞进事故时间窗；\n- 越界的工具调用；\n- 草稿里的恶意内容；\n- 导出时的公式注入。\n\n所有样本都是合成的，基于已有的 `tests/ingest/test_adversarial.py`。CI 用假 LLM 测试代码层防护。`llm-live` 和 #7 衡量真实模型被骗的频率。\n\n**各层测试的跟踪位置：**\n- **#5**：伪造内容永远不会成为模型或坐席能看到的条目。\n- **#6**：对每项检查做「模型已被攻陷」的测试，另加一些 `llm-live` 运行。\n- **#7**：共用同一批样本，报告注入成功率。\n- **#19**：扩展 ingest 的对抗性测试，包括拒绝非法的 `Case.id` 字符。\n- **#8**：一条评论，涉及转义、不可见字符的展示，以及隐藏仅靠重复支撑的草稿。\n- **#18**：一条评论，把以上内容对应到它的检查清单。\n\n等你批准 #20 之后，建议的下一步是 #19（契约改动加上 ingest 的证据规则），它能解锁 #5。"
         }
       ]
     },
@@ -1633,11 +1687,13 @@
       "timestamp": "2026-11-26T15:26:40.587Z",
       "kind": "message",
       "user": "#20 approved. Now moving on to #19.",
+      "translation_chs": "#20 已批准。接下来做 #19。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:26:49.197Z",
-          "text": "Starting #19. First I'll check whether #20 has merged, read #19 in full, and look at the code it touches."
+          "text": "Starting #19. First I'll check whether #20 has merged, read #19 in full, and look at the code it touches.",
+          "translation_chs": "开始 #19。先确认 #20 是否已合并，把 #19 完整读一遍，再看看它涉及的代码。"
         },
         {
           "type": "tool_call",
@@ -1656,7 +1712,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:27:10.802Z",
-          "text": "#20 is merged, so I'll remove its worktree. The root is still in use, so #19 gets a new worktree, and I'll assign #19 to you."
+          "text": "#20 is merged, so I'll remove its worktree. The root is still in use, so #19 gets a new worktree, and I'll assign #19 to you.",
+          "translation_chs": "#20 已合并，我把它的 worktree 删掉。根目录还在被占用，所以 #19 另开一个 worktree，并把 #19 指派给你。"
         },
         {
           "type": "tool_call",
@@ -1686,11 +1743,13 @@
       "timestamp": "2026-11-26T15:27:44.795Z",
       "kind": "message",
       "user": "Please cleanup root and syncronize it to the latest root. Prune unnecessary branches first, then finished worktrees.",
+      "translation_chs": "请清理一下根目录并同步到最新的根目录。先剪掉没用的分支，再清理已完成工作的 worktree。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:27:55.688Z",
-          "text": "I'll inspect everything before deleting anything: which branches and worktrees are merged, pushed, or still in use."
+          "text": "I'll inspect everything before deleting anything: which branches and worktrees are merged, pushed, or still in use.",
+          "translation_chs": "删任何东西之前我先全部查一遍：哪些分支和 worktree 已合并、已推送，或者还在用。"
         },
         {
           "type": "tool_call",
@@ -1723,7 +1782,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:28:43.997Z",
-          "text": "The `feat/19-kb-contracts` branch wouldn't delete because local `main` hadn't been fast-forwarded yet. The branch points at `origin/main`, so a normal `-d` should work now:"
+          "text": "The `feat/19-kb-contracts` branch wouldn't delete because local `main` hadn't been fast-forwarded yet. The branch points at `origin/main`, so a normal `-d` should work now:",
+          "translation_chs": "`feat/19-kb-contracts` 之前删不掉，是因为本地 `main` 还没快进。现在这个分支和 `origin/main` 指向同一个提交，普通的 `-d` 应该就能删："
         },
         {
           "type": "tool_call",
@@ -1770,7 +1830,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:29:07.466Z",
-          "text": "The root is cleaned up and on `main`, matching `origin/main` (`1701d3f`, the #20 merge), with no local changes.\n\n**What happened with the command you rejected:** it had already run before you stopped it. It removed the merged `qingci-test-5-kb-design` worktree, deleted that branch locally, created an empty `feat/19-kb-contracts` worktree, and assigned #19 to you. I left the assignment in place since #19 is next; say if you want it removed.\n\n**Branches**\n- **Deleted:** `build/2-foundation` (PR #15 merged; it matched its remote copy) and `feat/19-kb-contracts` (no commits).\n- **Kept:** `docs/agent-conversations`, the long-lived transcript branch. It now sits outside the root, still 4 commits ahead of `origin`. I didn't push those commits.\n\n**Worktrees**\n- **Removed:** `qingci-test-5-kb-design` (merged) and `qingci-test-19-kb-contracts` (empty).\n- **Kept**, because each has unpushed commits and no PR:\n  - `qingci-test-13-access-control` (proposal 0002 draft, 1 commit)\n  - `qingci-test-14-deploy` (4 commits)\n  - `qingci-test-4-thread-viewer` (1 commit)\n\n**Decision for you:** `origin/build/2-foundation` and `origin/docs/5-kb-design` still exist on GitHub although their PRs are merged. Shall I delete them? It's a change on GitHub, so I haven't.\n\nSince the root is now free, I'll do #19 there instead of in a new worktree, on a branch `feat/19-kb-contracts` off `origin/main`. Should I start?"
+          "text": "The root is cleaned up and on `main`, matching `origin/main` (`1701d3f`, the #20 merge), with no local changes.\n\n**What happened with the command you rejected:** it had already run before you stopped it. It removed the merged `qingci-test-5-kb-design` worktree, deleted that branch locally, created an empty `feat/19-kb-contracts` worktree, and assigned #19 to you. I left the assignment in place since #19 is next; say if you want it removed.\n\n**Branches**\n- **Deleted:** `build/2-foundation` (PR #15 merged; it matched its remote copy) and `feat/19-kb-contracts` (no commits).\n- **Kept:** `docs/agent-conversations`, the long-lived transcript branch. It now sits outside the root, still 4 commits ahead of `origin`. I didn't push those commits.\n\n**Worktrees**\n- **Removed:** `qingci-test-5-kb-design` (merged) and `qingci-test-19-kb-contracts` (empty).\n- **Kept**, because each has unpushed commits and no PR:\n  - `qingci-test-13-access-control` (proposal 0002 draft, 1 commit)\n  - `qingci-test-14-deploy` (4 commits)\n  - `qingci-test-4-thread-viewer` (1 commit)\n\n**Decision for you:** `origin/build/2-foundation` and `origin/docs/5-kb-design` still exist on GitHub although their PRs are merged. Shall I delete them? It's a change on GitHub, so I haven't.\n\nSince the root is now free, I'll do #19 there instead of in a new worktree, on a branch `feat/19-kb-contracts` off `origin/main`. Should I start?",
+          "translation_chs": "根目录已清理干净，切在 `main` 上，与 `origin/main`（`1701d3f`，即 #20 的合并提交）一致，没有本地改动。\n\n**你拒绝的那条命令**：它在你叫停之前就已经跑完了。它移除了已合并的 `qingci-test-5-kb-design` worktree、在本地删掉了那个分支、建了一个空的 `feat/19-kb-contracts` worktree，并把 #19 指派给你。因为接下来就是 #19，我把指派留着了；要撤掉的话说一声。\n\n**分支**\n- **已删除**：`build/2-foundation`（PR #15 已合并；与远端副本一致）和 `feat/19-kb-contracts`（没有提交）。\n- **保留**：`docs/agent-conversations`，长期存在的会话记录分支。它现在位于根目录之外，仍比 `origin` 多 4 个提交。这些提交我没有推送。\n\n**Worktree**\n- **已移除**：`qingci-test-5-kb-design`（已合并）和 `qingci-test-19-kb-contracts`（空）。\n- **保留**，因为各自都有未推送的提交且没有 PR：\n  - `qingci-test-13-access-control`（提案 0002 草稿，1 个提交）\n  - `qingci-test-14-deploy`（4 个提交）\n  - `qingci-test-4-thread-viewer`（1 个提交）\n\n**需要你决定**：`origin/build/2-foundation` 和 `origin/docs/5-kb-design` 的 PR 已合并，但远端分支还在 GitHub 上。要删掉吗？这属于 GitHub 上的改动，所以我没动。\n\n既然根目录已经空出来，我打算就在根目录做 #19，不再新开 worktree，分支 `feat/19-kb-contracts` 基于 `origin/main`。可以开始吗？"
         }
       ]
     },
@@ -1779,11 +1840,13 @@
       "timestamp": "2026-11-26T15:29:28.251Z",
       "kind": "message",
       "user": "merged branches can be deleted. Delete them, and do #19",
+      "translation_chs": "已合并的分支可以删。把它们删了，然后做 #19",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:29:33.625Z",
-          "text": "Deleting the two merged remote branches, then starting #19 in the root."
+          "text": "Deleting the two merged remote branches, then starting #19 in the root.",
+          "translation_chs": "先删掉那两个已合并的远端分支，然后在根目录开始 #19。"
         },
         {
           "type": "tool_call",
@@ -1886,7 +1949,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:32:29.087Z",
-          "text": "Commit 1: limit the characters allowed in `Case.id`. I'm writing the contract change first."
+          "text": "Commit 1: limit the characters allowed in `Case.id`. I'm writing the contract change first.",
+          "translation_chs": "提交 1：限制 `Case.id` 允许的字符。先写契约改动。"
         },
         {
           "type": "tool_call",
@@ -1905,7 +1969,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:32:46.314Z",
-          "text": "Now the ingest side: a bad ID in the sheet becomes a `SheetFormatError` that doesn't echo the cell's contents. Then come the fixtures and tests."
+          "text": "Now the ingest side: a bad ID in the sheet becomes a `SheetFormatError` that doesn't echo the cell's contents. Then come the fixtures and tests.",
+          "translation_chs": "接着是 ingest 一侧：表格里的非法 ID 会变成 `SheetFormatError`，且不回显单元格内容。然后是 fixture 和测试。"
         },
         {
           "type": "tool_call",
@@ -1994,7 +2059,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:33:57.293Z",
-          "text": "I'm on commit 1 of 9 for #19, the `Case.id` restriction. Lint and types pass. Three ingest tests fail, and I'm finding out why now."
+          "text": "I'm on commit 1 of 9 for #19, the `Case.id` restriction. Lint and types pass. Three ingest tests fail, and I'm finding out why now.",
+          "translation_chs": "我在做 #19 的第 1/9 个提交，即 `Case.id` 限制。lint 和类型检查通过。有三个 ingest 测试挂了，我正在查原因。"
         },
         {
           "type": "tool_call",
@@ -2027,7 +2093,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:34:22.262Z",
-          "text": "All backend checks pass. Before committing I'll confirm the real sample still imports under the new ID rule:"
+          "text": "All backend checks pass. Before committing I'll confirm the real sample still imports under the new ID rule:",
+          "translation_chs": "后端检查全过。提交前我确认一下真实样本在新的 ID 规则下还能正常导入："
         },
         {
           "type": "tool_call",
@@ -2060,7 +2127,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:35:11.080Z",
-          "text": "Next the time-object tests, including the `HH:MM`-only case:"
+          "text": "Next the time-object tests, including the `HH:MM`-only case:",
+          "translation_chs": "接下来是时间对象的测试，包括只给 `HH:MM` 的情况："
         },
         {
           "type": "tool_call",
@@ -2107,7 +2175,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:35:55.128Z",
-          "text": "Commit 2 is in (`2f63eef`). Commit 3 adds the fields every knowledge-base entry shares, the version-selection functions, and `ReplyTemplate` v2. First the current template fixture:"
+          "text": "Commit 2 is in (`2f63eef`). Commit 3 adds the fields every knowledge-base entry shares, the version-selection functions, and `ReplyTemplate` v2. First the current template fixture:",
+          "translation_chs": "提交 2 已落地（`2f63eef`）。提交 3 加上每个知识库条目共有的字段、版本选择函数，以及 `ReplyTemplate` v2。先看现在的模板 fixture："
         },
         {
           "type": "tool_call",
@@ -2182,7 +2251,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:37:34.671Z",
-          "text": "That's a bug in my test, not the code: my helper defaulted `recorded_at` to March 1, before `known_from`. The contract correctly rejects that. Defaulting `recorded_at` to a later date:"
+          "text": "That's a bug in my test, not the code: my helper defaulted `recorded_at` to March 1, before `known_from`. The contract correctly rejects that. Defaulting `recorded_at` to a later date:",
+          "translation_chs": "这是我测试里的 bug，不是代码的：我的辅助函数把 `recorded_at` 默认成 3 月 1 日，早于 `known_from`。契约拒绝它是正确的。把 `recorded_at` 默认成更晚的日期："
         },
         {
           "type": "tool_call",
@@ -2226,11 +2296,13 @@
       "timestamp": "2026-11-26T15:39:11.110Z",
       "kind": "message",
       "user": "I just wanted to align what we are working on: #19, not actual knowledge base content and pipeline, because that would go to #5.",
+      "translation_chs": "我只是想对齐一下我们在做什么：是 #19，不是真正的知识库内容和流水线，那些归 #5。",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:39:30.371Z",
-          "text": "Yes, everything so far is #19, the contract layer only. Nothing builds or fills the knowledge base; that stays in #5.\n\n**Done so far (3 signed commits, local only):**\n- **`cfbb4ee`:** `Case.id` may only use ASCII letters, digits, `_` and `-`. The sheet reader rejects bad IDs, and `Case` goes to schema v2.\n- **`2f63eef`:** the `TimePoint` and `TimeContext` models, for times that are known, estimated or unavailable.\n- **`901aa1b`:** `KnowledgeEntry`, the shared fields for every knowledge-base entry, plus the version-selection functions. #19 asks for these explicitly as pure functions with tests. `ReplyTemplate` goes to schema v2.\n\nAll of it is schema definitions, synthetic fixtures and tests. There is no clustering, no labelling, no `copilot kb build`, no `knowledge/` files and no LLM calls.\n\n**Still to do in #19, all contracts:**\n- schemas for Notice, Fact, Policy, GlossaryEntry and Intent (types plus synthetic fixtures only; writing the real entries is #5);\n- `CaseStatus.NO_REPLY_NEEDED` and the no-reply field on `CaseAnalysis`;\n- the `Draft` fields: citations, tool trace, mode and time context;\n- the `Message.role_evidence` model;\n- the `docs/architecture.md` update.\n\n**One part that isn't purely contracts:** #19's body says ingest (#4) must, in the same PR, fill in `role_evidence` and change the status rule. On the sample that moves 863 threads from `replied` to `undetermined`. It's a deterministic change with no LLM, and it stays in ingest, not in #5. The issue bundles it so the new field isn't left empty.\n\nShall I keep the ingest change in this PR as #19 says, or split it into its own small PR after the contract PR?"
+          "text": "Yes, everything so far is #19, the contract layer only. Nothing builds or fills the knowledge base; that stays in #5.\n\n**Done so far (3 signed commits, local only):**\n- **`cfbb4ee`:** `Case.id` may only use ASCII letters, digits, `_` and `-`. The sheet reader rejects bad IDs, and `Case` goes to schema v2.\n- **`2f63eef`:** the `TimePoint` and `TimeContext` models, for times that are known, estimated or unavailable.\n- **`901aa1b`:** `KnowledgeEntry`, the shared fields for every knowledge-base entry, plus the version-selection functions. #19 asks for these explicitly as pure functions with tests. `ReplyTemplate` goes to schema v2.\n\nAll of it is schema definitions, synthetic fixtures and tests. There is no clustering, no labelling, no `copilot kb build`, no `knowledge/` files and no LLM calls.\n\n**Still to do in #19, all contracts:**\n- schemas for Notice, Fact, Policy, GlossaryEntry and Intent (types plus synthetic fixtures only; writing the real entries is #5);\n- `CaseStatus.NO_REPLY_NEEDED` and the no-reply field on `CaseAnalysis`;\n- the `Draft` fields: citations, tool trace, mode and time context;\n- the `Message.role_evidence` model;\n- the `docs/architecture.md` update.\n\n**One part that isn't purely contracts:** #19's body says ingest (#4) must, in the same PR, fill in `role_evidence` and change the status rule. On the sample that moves 863 threads from `replied` to `undetermined`. It's a deterministic change with no LLM, and it stays in ingest, not in #5. The issue bundles it so the new field isn't left empty.\n\nShall I keep the ingest change in this PR as #19 says, or split it into its own small PR after the contract PR?",
+          "translation_chs": "是的，到目前为止都是 #19，只涉及契约层。没有任何东西在构建或填充知识库，那部分留在 #5。\n\n**目前完成（3 个已签名提交，仅在本地）**：\n- **`cfbb4ee`**：`Case.id` 只能使用 ASCII 字母、数字、`_` 和 `-`。表格读取器会拒绝非法 ID，`Case` 升到 schema v2。\n- **`2f63eef`**：`TimePoint` 和 `TimeContext` 模型，用于处理已知、估算或不可用的时间。\n- **`901aa1b`**：`KnowledgeEntry`，每个知识库条目共有的字段，外加版本选择函数。#19 明确要求把它们做成带测试的纯函数。`ReplyTemplate` 升到 schema v2。\n\n全部是 schema 定义、合成 fixture 和测试。没有聚类、没有标注、没有 `copilot kb build`、没有 `knowledge/` 文件，也没有 LLM 调用。\n\n**#19 里还要做的，全是契约：**\n- Notice、Fact、Policy、GlossaryEntry 和 Intent 的 schema（只做类型加合成 fixture，写真实条目是 #5 的事）；\n- `CaseStatus.NO_REPLY_NEEDED` 以及 `CaseAnalysis` 上的不回复字段；\n- `Draft` 的字段：引用、工具调用轨迹、模式和时间上下文；\n- `Message.role_evidence` 模型；\n- `docs/architecture.md` 的更新。\n\n**有一处不纯粹是契约**：#19 的正文要求 ingest（#4）在同一个 PR 里填好 `role_evidence` 并修改状态规则。在样本上这会把 863 个线程从 `replied` 移到 `undetermined`。这是一个确定性的改动，不涉及 LLM，而且留在 ingest，不进 #5。issue 把它捆在一起，是为了新字段不会空着。\n\n我是按 #19 说的把 ingest 的改动放在这个 PR 里，还是等契约 PR 之后拆成一个单独的小 PR？"
         }
       ]
     },
@@ -2239,11 +2311,13 @@
       "timestamp": "2026-11-26T15:39:54.751Z",
       "kind": "message",
       "user": "okay, continue",
+      "translation_chs": "好，继续",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:40:15.619Z",
-          "text": "Keeping the ingest change in this PR, as #19 says. Commit 4 adds the schemas for the new entry types, Intent, Fact, Policy, GlossaryEntry and Notice, with synthetic fixtures only.\n\nTwo design choices in this commit:\n- **Policies match fixed Japanese phrases** (after full-width/half-width normalisation), not regexes, so there's no backtracking risk (#18).\n- **A Notice's event window is separate from the entry's validity window.** A March 2 incident has to keep matching a player who writes on March 5."
+          "text": "Keeping the ingest change in this PR, as #19 says. Commit 4 adds the schemas for the new entry types, Intent, Fact, Policy, GlossaryEntry and Notice, with synthetic fixtures only.\n\nTwo design choices in this commit:\n- **Policies match fixed Japanese phrases** (after full-width/half-width normalisation), not regexes, so there's no backtracking risk (#18).\n- **A Notice's event window is separate from the entry's validity window.** A March 2 incident has to keep matching a player who writes on March 5.",
+          "translation_chs": "按 #19 说的，ingest 的改动留在这个 PR 里。提交 4 加上新条目类型的 schema：Intent、Fact、Policy、GlossaryEntry 和 Notice，只带合成 fixture。\n\n这个提交里有两个设计选择：\n- **政策匹配固定的日语句子**（经过全角/半角归一化），不用正则，所以没有回溯风险（#18）。\n- **Notice 的事件时间窗与条目的有效期是分开的。** 3 月 2 日的事故必须仍能匹配 3 月 5 日来写信的玩家。"
         },
         {
           "type": "tool_call",
@@ -2262,7 +2336,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:40:48.770Z",
-          "text": "Now the synthetic fixtures for the new types. They're consistent with the template fixtures, so the cross-reference tests can check them:"
+          "text": "Now the synthetic fixtures for the new types. They're consistent with the template fixtures, so the cross-reference tests can check them:",
+          "translation_chs": "现在写新类型的合成 fixture。它们与模板 fixture 保持一致，好让交叉引用测试能检查它们："
         },
         {
           "type": "tool_call",
@@ -2323,7 +2398,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:41:43.183Z",
-          "text": "Tests pass. One line is too long, and I'll move a function-level import in the test to the top of the file:"
+          "text": "Tests pass. One line is too long, and I'll move a function-level import in the test to the top of the file:",
+          "translation_chs": "测试通过。有一行太长，另外我把测试里函数内的 import 移到文件顶部："
         },
         {
           "type": "tool_call",
@@ -2342,7 +2418,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:41:56.841Z",
-          "text": "My edit script stopped at its first replacement, so nothing changed. Most likely `ruff format` had already rewrapped that line. Checking:"
+          "text": "My edit script stopped at its first replacement, so nothing changed. Most likely `ruff format` had already rewrapped that line. Checking:",
+          "translation_chs": "我的编辑脚本在第一个替换处就停了，所以什么都没改成。多半是 `ruff format` 已经把那行重新折过了。查一下："
         },
         {
           "type": "tool_call",
@@ -2361,7 +2438,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:42:07.915Z",
-          "text": "As expected, `ruff format` had already wrapped the line and lint is clean. Applying just the test-file cleanup:"
+          "text": "As expected, `ruff format` had already wrapped the line and lint is clean. Applying just the test-file cleanup:",
+          "translation_chs": "如所料，`ruff format` 已经把行折好了，lint 也干净。只应用测试文件的清理："
         },
         {
           "type": "tool_call",
@@ -2380,7 +2458,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:42:25.733Z",
-          "text": "Commit 4 is in (`d6cb61f`). Commit 5 adds `CaseStatus.NO_REPLY_NEEDED` and the no-reply proposal on `CaseAnalysis`. First the fixtures it builds on:"
+          "text": "Commit 4 is in (`d6cb61f`). Commit 5 adds `CaseStatus.NO_REPLY_NEEDED` and the no-reply proposal on `CaseAnalysis`. First the fixtures it builds on:",
+          "translation_chs": "提交 4 已落地（`d6cb61f`）。提交 5 加上 `CaseStatus.NO_REPLY_NEEDED` 和 `CaseAnalysis` 上的不回复建议字段。先看它依赖的 fixture："
         },
         {
           "type": "tool_call",
@@ -2455,7 +2534,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:43:55.824Z",
-          "text": "Now the tests, plus a cross-reference check that every fixture citation points at an existing entry of the right type and version:"
+          "text": "Now the tests, plus a cross-reference check that every fixture citation points at an existing entry of the right type and version:",
+          "translation_chs": "现在写测试，再加一个交叉引用检查：每个 fixture 引用都要指向存在且类型和版本正确的条目："
         },
         {
           "type": "tool_call",
@@ -2516,7 +2596,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:45:17.385Z",
-          "text": "Replacing the `assert` inside the validator with a plain check, since asserts are stripped under `-O`. Then the evidence tests:"
+          "text": "Replacing the `assert` inside the validator with a plain check, since asserts are stripped under `-O`. Then the evidence tests:",
+          "translation_chs": "把校验器里的 `assert` 换成普通检查，因为 `-O` 下 assert 会被去掉。然后是证据相关的测试："
         },
         {
           "type": "tool_call",
@@ -2563,7 +2644,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:46:35.201Z",
-          "text": "That refactor changes no behaviour and the ingest tests pass, so it gets its own commit:"
+          "text": "That refactor changes no behaviour and the ingest tests pass, so it gets its own commit:",
+          "translation_chs": "那个重构不改变行为，ingest 测试也通过，所以单独作为一个提交："
         },
         {
           "type": "tool_call",
@@ -2582,7 +2664,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:46:46.212Z",
-          "text": "Now the evidence module itself, which builds evidence per thread and then across threads:"
+          "text": "Now the evidence module itself, which builds evidence per thread and then across threads:",
+          "translation_chs": "现在是证据模块本身，它先按线程构建证据，再跨线程合并："
         },
         {
           "type": "tool_call",
@@ -2629,7 +2712,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:48:02.587Z",
-          "text": "My edit script stopped at its first replacement because `ruff format` had already rewrapped those lines. Reading the current text:"
+          "text": "My edit script stopped at its first replacement because `ruff format` had already rewrapped those lines. Reading the current text:",
+          "translation_chs": "编辑脚本在第一个替换处就停了，因为 `ruff format` 已经把那些行重新折过。先读一下当前文本："
         },
         {
           "type": "tool_call",
@@ -2648,7 +2732,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:48:11.725Z",
-          "text": "Both long lines are already wrapped, so only the test expectations still need changing:"
+          "text": "Both long lines are already wrapped, so only the test expectations still need changing:",
+          "translation_chs": "两行长的都已经折好了，只剩测试里的期望值还需要改："
         },
         {
           "type": "tool_call",
@@ -2667,7 +2752,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:48:27.982Z",
-          "text": "Next, tests for the evidence rules, and adversarial tests showing the attacks are stopped at ingest:"
+          "text": "Next, tests for the evidence rules, and adversarial tests showing the attacks are stopped at ingest:",
+          "translation_chs": "接下来是证据规则的测试，以及对抗性测试，证明这些攻击在 ingest 阶段就被拦下："
         },
         {
           "type": "tool_call",
@@ -2686,7 +2772,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:48:58.867Z",
-          "text": "All 349 tests pass. Two cleanups: one line is too long, and the `kinds` helper should take a typed `Message` instead of using `type: ignore`."
+          "text": "All 349 tests pass. Two cleanups: one line is too long, and the `kinds` helper should take a typed `Message` instead of using `type: ignore`.",
+          "translation_chs": "349 个测试全过。两处清理：一行太长；`kinds` 辅助函数应该接收带类型的 `Message`，而不是用 `type: ignore`。"
         },
         {
           "type": "tool_call",
@@ -2705,7 +2792,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:49:10.468Z",
-          "text": "As before, `ruff format` had already wrapped the long line, so my script stopped before writing anything. Applying just the other two changes:"
+          "text": "As before, `ruff format` had already wrapped the long line, so my script stopped before writing anything. Applying just the other two changes:",
+          "translation_chs": "和刚才一样，`ruff format` 已经把长行折好了，所以脚本在写入前就停了。只应用另外两处改动："
         },
         {
           "type": "tool_call",
@@ -2724,7 +2812,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:49:22.356Z",
-          "text": "Now the real-data run. I expect about 863 more `undetermined` threads, as measured earlier."
+          "text": "Now the real-data run. I expect about 863 more `undetermined` threads, as measured earlier.",
+          "translation_chs": "现在跑真实数据。预计会多出约 863 个 `undetermined` 线程，与之前测的一致。"
         },
         {
           "type": "tool_call",
@@ -2771,7 +2860,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:50:08.663Z",
-          "text": "Checking the \"146 distinct texts\" figure against the actual ingest output rather than my earlier estimate:"
+          "text": "Checking the \"146 distinct texts\" figure against the actual ingest output rather than my earlier estimate:",
+          "translation_chs": "拿实际的 ingest 输出核对「146 种不同文本」这个数字，而不是沿用我之前的估算："
         },
         {
           "type": "tool_call",
@@ -2790,7 +2880,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:50:15.952Z",
-          "text": "Confirmed: 146. Committing the ingest change, with the real-data numbers in the message:"
+          "text": "Confirmed: 146. Committing the ingest change, with the real-data numbers in the message:",
+          "translation_chs": "确认是 146。提交 ingest 的改动，提交信息里写上真实数据的结果："
         },
         {
           "type": "tool_call",
@@ -2809,7 +2900,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:50:31.453Z",
-          "text": "Commit 8 is in (`38c702d`). The last commit updates `docs/architecture.md` with the new entities and conventions:"
+          "text": "Commit 8 is in (`38c702d`). The last commit updates `docs/architecture.md` with the new entities and conventions:",
+          "translation_chs": "提交 8 已落地（`38c702d`）。最后一个提交用新的实体和约定更新 `docs/architecture.md`："
         },
         {
           "type": "tool_call",
@@ -2842,7 +2934,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:51:16.422Z",
-          "text": "All nine commits are in. Before asking you about the push, I'll run the remaining CI checks locally: the requirements export, API type generation, and the frontend."
+          "text": "All nine commits are in. Before asking you about the push, I'll run the remaining CI checks locally: the requirements export, API type generation, and the frontend.",
+          "translation_chs": "九个提交都齐了。在问你要不要推送之前，我先在本地跑完剩下的 CI 检查：requirements 导出、API 类型生成和前端。"
         },
         {
           "type": "tool_call",
@@ -2861,7 +2954,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:51:32.847Z",
-          "text": "The first two checks printed nothing, so I'm confirming their exit codes explicitly:"
+          "text": "The first two checks printed nothing, so I'm confirming their exit codes explicitly:",
+          "translation_chs": "前两项检查没有任何输出，我显式确认一下它们的退出码："
         },
         {
           "type": "tool_call",
@@ -2880,7 +2974,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:51:49.327Z",
-          "text": "#19 is done locally: 10 signed commits on `feat/19-kb-contracts`, in the root checkout. Every CI check passes locally except `backend-pip`, which I didn't run. Nothing is pushed yet.\n\n| Commit | Change |\n|---|---|\n| `cfbb4ee` | **Breaking:** `Case.id` may only use ASCII letters, digits, `_` and `-`. Bad IDs in the sheet become a format error that doesn't echo the cell. `Case` goes to schema v2 |\n| `2f63eef` | `TimePoint` (known / estimated / unavailable, including \"time of day known, date uncertain\") and `TimeContext` |\n| `901aa1b` | **Breaking:** shared knowledge-base fields and the version-selection functions. `ReplyTemplate` goes to schema v2 and requires `intent`. Only approved templates can be auto-sent |\n| `d6cb61f` | Schemas for Intent, Fact, Policy, GlossaryEntry and Notice. Policies match fixed phrases, not regexes |\n| `0db2e14` | `CaseStatus.NO_REPLY_NEEDED`, plus the no-reply proposal on `CaseAnalysis` |\n| `77f557e` | `Draft` gets citations, tool trace, mode, fallback reason and time context |\n| `7acdf6b` | The `Message.role_evidence` model: evidence kinds, strengths, and the strongest-evidence property |\n| `e55d30e` | Refactor with no behaviour change: shared quote matching |\n| `38c702d` | Ingest fills in the evidence and applies the new status rule. Adversarial tests cover a forged greeting, the same forgery sent in 5 threads, and a pasted-back reply. Also updates `docs/data.md` |\n| `7932b6c` | `docs/architecture.md`: entities and conventions |\n\n**Real-data run:**\n- `replied` drops from 2,166 to 1,303 and `undetermined` rises from 139 to 1,002. That's exactly the 863 threads predicted in the proposal.\n- Roles, `open` (567) and the recovered send times (258) are unchanged.\n- The import still takes about 1.1 s.\n\nFollowing your scope note, none of this builds or fills the knowledge base; that's #5.\n\n**Choices I made that the issue didn't spell out**, which I'll list in the PR for review:\n- A Notice's event window is separate from its validity window, so a March 2 incident still matches a player who writes on March 5.\n- The repetition threshold is a `build_cases` parameter, not an environment variable.\n- `Draft.time_context` is optional, so `Draft` stays at schema v1. #6 can make it required later.\n- References to cases from `CaseAnalysis` and `Draft` aren't restricted to the new ID pattern yet; only `Case.id`, `Message.thread_id` and message IDs are.\n\nMay I push `feat/19-kb-contracts` and open a PR titled `feat(contracts)!: 知识库契约、带状态的时间与角色证据` (\"knowledge-base contracts, time with status, and role evidence\")? It would use `Closes #19`."
+          "text": "#19 is done locally: 10 signed commits on `feat/19-kb-contracts`, in the root checkout. Every CI check passes locally except `backend-pip`, which I didn't run. Nothing is pushed yet.\n\n| Commit | Change |\n|---|---|\n| `cfbb4ee` | **Breaking:** `Case.id` may only use ASCII letters, digits, `_` and `-`. Bad IDs in the sheet become a format error that doesn't echo the cell. `Case` goes to schema v2 |\n| `2f63eef` | `TimePoint` (known / estimated / unavailable, including \"time of day known, date uncertain\") and `TimeContext` |\n| `901aa1b` | **Breaking:** shared knowledge-base fields and the version-selection functions. `ReplyTemplate` goes to schema v2 and requires `intent`. Only approved templates can be auto-sent |\n| `d6cb61f` | Schemas for Intent, Fact, Policy, GlossaryEntry and Notice. Policies match fixed phrases, not regexes |\n| `0db2e14` | `CaseStatus.NO_REPLY_NEEDED`, plus the no-reply proposal on `CaseAnalysis` |\n| `77f557e` | `Draft` gets citations, tool trace, mode, fallback reason and time context |\n| `7acdf6b` | The `Message.role_evidence` model: evidence kinds, strengths, and the strongest-evidence property |\n| `e55d30e` | Refactor with no behaviour change: shared quote matching |\n| `38c702d` | Ingest fills in the evidence and applies the new status rule. Adversarial tests cover a forged greeting, the same forgery sent in 5 threads, and a pasted-back reply. Also updates `docs/data.md` |\n| `7932b6c` | `docs/architecture.md`: entities and conventions |\n\n**Real-data run:**\n- `replied` drops from 2,166 to 1,303 and `undetermined` rises from 139 to 1,002. That's exactly the 863 threads predicted in the proposal.\n- Roles, `open` (567) and the recovered send times (258) are unchanged.\n- The import still takes about 1.1 s.\n\nFollowing your scope note, none of this builds or fills the knowledge base; that's #5.\n\n**Choices I made that the issue didn't spell out**, which I'll list in the PR for review:\n- A Notice's event window is separate from its validity window, so a March 2 incident still matches a player who writes on March 5.\n- The repetition threshold is a `build_cases` parameter, not an environment variable.\n- `Draft.time_context` is optional, so `Draft` stays at schema v1. #6 can make it required later.\n- References to cases from `CaseAnalysis` and `Draft` aren't restricted to the new ID pattern yet; only `Case.id`, `Message.thread_id` and message IDs are.\n\nMay I push `feat/19-kb-contracts` and open a PR titled `feat(contracts)!: 知识库契约、带状态的时间与角色证据` (\"knowledge-base contracts, time with status, and role evidence\")? It would use `Closes #19`.",
+          "translation_chs": "#19 在本地已完成：`feat/19-kb-contracts` 上有 10 个已签名提交，就在根目录检出里。除了我没跑的 `backend-pip`，所有 CI 检查在本地都通过。还没推送。\n\n| 提交 | 改动 |\n|---|---|\n| `cfbb4ee` | **破坏性变更**：`Case.id` 只能使用 ASCII 字母、数字、`_` 和 `-`。表格里的非法 ID 会变成不回显单元格内容的格式错误。`Case` 升到 schema v2 |\n| `2f63eef` | `TimePoint`（已知／估算／不可用，包括「知道时刻、日期不确定」）和 `TimeContext` |\n| `901aa1b` | **破坏性变更**：知识库共享字段和版本选择函数。`ReplyTemplate` 升到 schema v2 并强制要求 `intent`。只有已批准的模板才能自动发送 |\n| `d6cb61f` | Intent、Fact、Policy、GlossaryEntry 和 Notice 的 schema。政策匹配固定句子，不用正则 |\n| `0db2e14` | `CaseStatus.NO_REPLY_NEEDED`，以及 `CaseAnalysis` 上的不回复建议字段 |\n| `77f557e` | `Draft` 增加引用、工具调用轨迹、模式、回落原因和时间上下文 |\n| `7acdf6b` | `Message.role_evidence` 模型：证据类型、强度，以及取最强证据的属性 |\n| `e55d30e` | 不改变行为的重构：共用的引用匹配 |\n| `38c702d` | ingest 填充证据并应用新的状态规则。对抗性测试覆盖伪造问候语、同一伪造内容投到 5 个线程，以及粘贴回来的回复。同时更新 `docs/data.md` |\n| `7932b6c` | `docs/architecture.md`：实体与约定 |\n\n**真实数据运行结果：**\n- `replied` 从 2,166 降到 1,303，`undetermined` 从 139 升到 1,002，正好是提案里预测的 863 个线程。\n- 角色、`open`（567）和恢复出的发送时间（258）都没有变化。\n- 导入仍然约 1.1 秒。\n\n按你的范围说明，这些都不构建也不填充知识库；那部分是 #5。\n\n**issue 没有明确写、由我自己做的选择**，我会在 PR 里列出来供评审：\n- Notice 的事件时间窗与有效期分开，所以 3 月 2 日的事故仍能匹配 3 月 5 日写信的玩家。\n- 重复阈值是 `build_cases` 的参数，不是环境变量。\n- `Draft.time_context` 是可选的，所以 `Draft` 留在 schema v1。以后 #6 可以把它改成必填。\n- 目前只有 `Case.id`、`Message.thread_id` 和消息 ID 受新 ID 规则限制；`CaseAnalysis` 和 `Draft` 里对案件的引用还没有。\n\n我可以推送 `feat/19-kb-contracts` 并开一个标题为 `feat(contracts)!: 知识库契约、带状态的时间与角色证据` 的 PR 吗（\"knowledge-base contracts, time with status, and role evidence\"）？会用 `Closes #19`。"
         }
       ]
     },
@@ -2889,6 +2984,7 @@
       "timestamp": "2026-11-26T15:53:52.156Z",
       "kind": "message",
       "user": "push an d pr",
+      "translation_chs": "推送并开 PR",
       "steps": [
         {
           "type": "tool_call",
@@ -2921,7 +3017,8 @@
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T15:54:53.923Z",
-          "text": "The #19 branch is pushed and the PR is open: [#21](https://github.com/NatsumeRyuhane/qingci-test/pull/21), `feat(contracts)!: 知识库契约、带状态的时间与角色证据`, with `Closes #19`. The branch was already up to date with `main`, so the 10 signed commits went up as they were.\n\n**The PR description covers:**\n- one row per commit;\n- the checks I ran and their results;\n- the real-data before/after: `replied` 2,166 → 1,303 and `undetermined` 139 → 1,002;\n- the two breaking schema bumps. Re-running `copilot ingest` replaces the old cases file, and reading the old file fails with a clear version error.\n\nThe choices I made that the issue didn't specify are listed for review:\n- the Notice event window is kept separate from its validity window;\n- policies match fixed phrases instead of regexes;\n- the repetition threshold is a code parameter;\n- `Draft.time_context` stays optional;\n- only `Case.id`, thread IDs and message IDs are restricted, not references to cases elsewhere;\n- system-mail structure counts as strong evidence.\n\nIt also restates that all fixtures are synthetic and repeats the accepted risk of forged quote headers.\n\nI won't poll for reviews; tell me when they're in. Once #21 merges, #5 can start against these contracts."
+          "text": "The #19 branch is pushed and the PR is open: [#21](https://github.com/NatsumeRyuhane/qingci-test/pull/21), `feat(contracts)!: 知识库契约、带状态的时间与角色证据`, with `Closes #19`. The branch was already up to date with `main`, so the 10 signed commits went up as they were.\n\n**The PR description covers:**\n- one row per commit;\n- the checks I ran and their results;\n- the real-data before/after: `replied` 2,166 → 1,303 and `undetermined` 139 → 1,002;\n- the two breaking schema bumps. Re-running `copilot ingest` replaces the old cases file, and reading the old file fails with a clear version error.\n\nThe choices I made that the issue didn't specify are listed for review:\n- the Notice event window is kept separate from its validity window;\n- policies match fixed phrases instead of regexes;\n- the repetition threshold is a code parameter;\n- `Draft.time_context` stays optional;\n- only `Case.id`, thread IDs and message IDs are restricted, not references to cases elsewhere;\n- system-mail structure counts as strong evidence.\n\nIt also restates that all fixtures are synthetic and repeats the accepted risk of forged quote headers.\n\nI won't poll for reviews; tell me when they're in. Once #21 merges, #5 can start against these contracts.",
+          "translation_chs": "#19 的分支已推送，PR 已开：[#21](https://github.com/NatsumeRyuhane/qingci-test/pull/21)，标题 `feat(contracts)!: 知识库契约、带状态的时间与角色证据`，带 `Closes #19`。分支本来就和 `main` 同步，所以 10 个已签名提交原样推上去了。\n\n**PR 描述包括：**\n- 每个提交一行；\n- 我跑过的检查和结果；\n- 真实数据的前后对比：`replied` 2,166 → 1,303，`undetermined` 139 → 1,002；\n- 两处破坏性的 schema 升级。重跑 `copilot ingest` 会替换旧的 cases 文件，读取旧文件则会以清晰的版本错误失败。\n\nissue 没写明、由我决定的选择也列出来供评审：\n- Notice 的事件时间窗与有效期分开保留；\n- 政策用固定句子匹配，而不是正则；\n- 重复阈值是代码参数；\n- `Draft.time_context` 保持可选；\n- 只有 `Case.id`、线程 ID 和消息 ID 受限制，其他位置对案件的引用不受限；\n- 系统邮件的结构算作强证据。\n\n描述里还重申所有 fixture 都是合成的，并再次写明已接受的伪造引用头风险。\n\n我不会去轮询评审；结果出来后告诉我。等 #21 合并，#5 就可以基于这些契约开工了。"
         }
       ]
     },
@@ -2930,11 +3027,13 @@
       "timestamp": "2026-11-26T16:04:26.378Z",
       "kind": "message",
       "user": "#19 is merged. Cleanup, and recommend next step, then export&archive this conversation",
+      "translation_chs": "#19 已合并。做清理，并推荐下一步，然后导出并归档这段会话",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T16:04:36.615Z",
-          "text": "Starting with the cleanup: I'll confirm #21 merged, then look at branches and worktrees."
+          "text": "Starting with the cleanup: I'll confirm #21 merged, then look at branches and worktrees.",
+          "translation_chs": "先做清理：确认 #21 已合并，然后看分支和 worktree。"
         },
         {
           "type": "tool_call",
@@ -2985,11 +3084,13 @@
       "timestamp": "2026-11-26T16:05:24.996Z",
       "kind": "message",
       "user": "[Usage limit reached; a short grace allowance remains, then this turn is cut off without warning. Judge what's left: if it's genuinely only a few steps, finish it properly, then stop and say so without extra polishing. Otherwise don't attempt it all: finish the piece in hand and at most two more like it, then stop. The allowance also pays for any subagents you have running: they don't get this message and will keep going, so it's up to you how to handle them. Either way, end by telling the user their usage limit was reached, what's done and what's left.]",
+      "translation_chs": "[已达用量上限；还剩一小段宽限额度，之后这一轮会在没有预警的情况下被截断。判断剩下的事：如果确实只剩几步，就把它做完，然后停下并说明，不必额外打磨。否则不要试图全做完：把手头这块做完，最多再如法做两块，然后停下。这份额度同样支付你正在跑的子代理：它们收不到这条消息，会继续跑，怎么处理由你决定。无论如何，最后都要告诉用户用量上限已达、已完成什么、还剩什么。]",
       "steps": [
         {
           "type": "agent_message",
           "timestamp": "2026-11-26T16:05:32.521Z",
-          "text": "I can still fit the export: switch the root to the conversations branch, run the export script, add a README row, and make a signed commit. I'll do that, then stop."
+          "text": "I can still fit the export: switch the root to the conversations branch, run the export script, add a README row, and make a signed commit. I'll do that, then stop.",
+          "translation_chs": "还塞得下一次导出：把根目录切到会话分支，跑导出脚本，加一行 README，做一个已签名提交。做完就停。"
         },
         {
           "type": "tool_call",
