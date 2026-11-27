@@ -298,3 +298,28 @@ def test_citation_must_match_the_whole_sentence(guide: StyleGuide) -> None:
         cite = CitedClaim(EntryType.NOTICE, "syn-fix", 1, "【合成】", sentence_ja=partial)
         draft = compose(guide, f"{TEMPLATE_BODY}\n{claim}", citations=[cite])
         assert DraftCheckKind.CITATIONS in results(draft, ctx(guide, provided_entries=provided))
+
+
+@pytest.mark.parametrize(
+    ("body", "value"),
+    [
+        ("【合成データ】{{action}}いたします。", "返金"),  # 值在前，模板原文在后
+        ("【合成データ】全額を返{{rest}}", "金いたします。"),  # 短语跨在边界上
+    ],
+)
+def test_promise_formed_across_slot_boundary_fails(
+    guide: StyleGuide, body: str, value: str
+) -> None:
+    """评审意见（PR #28）：模板原文与填入的值拼接后才出现的政策短语不能豁免。"""
+    name = _slots(body)[0]
+    filled = fill_slots(body, {name: value})
+    draft = compose(guide, filled, chosen=candidate(body), slots={name: value})
+    detail = results(draft, ctx(guide))[DraftCheckKind.FORBIDDEN_PROMISE]
+    assert detail is not None and "拼成了" in detail
+
+
+def test_phrase_entirely_in_template_literal_stays_exempt_with_slots(guide: StyleGuide) -> None:
+    body = "【合成データ】{{item}}については返金いたします。"
+    filled = fill_slots(body, {"item": "ジェム"})
+    draft = compose(guide, filled, chosen=candidate(body), slots={"item": "ジェム"})
+    assert DraftCheckKind.FORBIDDEN_PROMISE not in results(draft, ctx(guide))

@@ -11,7 +11,8 @@
 - 模型在模板之外新增的文字（`added_text`）按政策、链接、其他案件的信息检查，新增的句子
   还要检查语体和引用；
 - 模型填入占位符的值同样是不可信的文字（`untrusted_text`），按政策、链接、其他案件的信息
-  检查。它们来自玩家的咨询，不需要知识库的引用；
+  检查。它们来自玩家的咨询，不需要知识库的引用。值与模板原文**拼接后**才出现的政策短语
+  也算模型的承诺：只有完全落在模板原文中的匹配可以豁免；
 - 模型改写了模板原文时，整段答复都按新增文字处理，结果只会更严格。
 
 **引用按整句对应。** 一条引用覆盖的是与它的 `sentence_ja` 规范化后完全相同的句子，不按子串
@@ -19,6 +20,7 @@
 “索要信息”句式（`is_info_request`），模型不能自己声明哪句话不需要引用。
 """
 
+import functools
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
@@ -232,11 +234,62 @@ def _phrases(policies: Iterable[Policy], text: str) -> list[str]:
     return [f"《{p.title_zh}》：{phrase}" for p in policies for phrase in p.matching_phrases(text)]
 
 
+def _filled_with_value_spans(body: str, values: Mapping[str, str]) -> tuple[str, list[range]]:
+    """把模板填好（逐段 NFKC），并记录填入的值在结果中的位置。没有值的占位符保持原样。"""
+    nfkc = functools.partial(unicodedata.normalize, "NFKC")
+    pieces: list[str] = []
+    spans: list[range] = []
+    position = last = 0
+    for match in PLACEHOLDER_PATTERN.finditer(body):
+        literal = nfkc(body[last : match.start()])
+        pieces.append(literal)
+        position += len(literal)
+        value = values.get(match.group(1), "").strip()
+        text = nfkc(value) if value else match.group(0)
+        if value:
+            spans.append(range(position, position + len(text)))
+        pieces.append(text)
+        position += len(text)
+        last = match.end()
+    pieces.append(nfkc(body[last:]))
+    return "".join(pieces), spans
+
+
+def _boundary_phrases(draft: ComposedDraft, policies: Iterable[Policy]) -> list[str]:
+    """模板原文与填入的值拼接后才出现的政策短语，例如模板「{{action}}いたします」填入「返金」。
+
+    只有完全落在模板原文中的匹配可以豁免；与填入的值相交的匹配都算模型的承诺。
+    """
+    if draft.candidate is None or not draft.slot_values:
+        return []
+    filled, spans = _filled_with_value_spans(draft.candidate.template.body_ja, draft.slot_values)
+    if not spans:
+        return []
+    found = []
+    for policy in policies:
+        for phrase in policy.phrases_ja:
+            needle = unicodedata.normalize("NFKC", phrase)
+            start = filled.find(needle)
+            while start != -1:
+                end = start + len(needle)
+                if any(start < span.stop and span.start < end for span in spans):
+                    found.append(f"《{policy.title_zh}》：{phrase}")
+                    break
+                start = filled.find(needle, start + 1)
+    return found
+
+
 def check_forbidden_promise(draft: ComposedDraft, context: CheckContext) -> DraftCheck:
     added = _phrases(context.forbidden_promises, draft.untrusted_text)
     if added:
         return _check(
             DraftCheckKind.FORBIDDEN_PROMISE, [f"新增文字或占位符的值中出现 {', '.join(added)}"]
+        )
+    joined = _boundary_phrases(draft, context.forbidden_promises)
+    if joined:
+        return _check(
+            DraftCheckKind.FORBIDDEN_PROMISE,
+            [f"占位符的值与模板原文拼成了 {', '.join(joined)}"],
         )
     literal = draft.candidate.template.body_ja if draft.candidate else ""
     in_template = _phrases(context.forbidden_promises, literal)
