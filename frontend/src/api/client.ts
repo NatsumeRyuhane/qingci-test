@@ -11,6 +11,7 @@ export type Case = Schemas["Case"];
 export type Message = Schemas["Message"];
 export type CaseAnalysis = Schemas["CaseAnalysis"];
 export type Draft = Schemas["Draft"];
+export type DraftCheck = Schemas["DraftCheck"];
 export type Feedback = Schemas["Feedback"];
 export type FeedbackAction = Schemas["FeedbackAction"];
 export type OutboundMail = Schemas["OutboundMail"];

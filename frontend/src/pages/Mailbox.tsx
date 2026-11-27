@@ -1,5 +1,5 @@
 // 模拟邮箱（演示用）：代替真实的邮件系统。来信从这里投递，系统发出的回复都留在发件箱，
-// 不会真正发出任何邮件。
+// 不会真正发出任何邮件。作为独立页面打开，演示时可以和工作台并排摆放。
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -11,29 +11,12 @@ import {
 } from "../api/client";
 import { ErrorNotice } from "../components/Badges";
 import { SafeText } from "../components/SafeText";
+import { EXAMPLE_GROUPS, EXAMPLES } from "../lib/examples";
 import { CATEGORY_LABELS, formatTime, label, STATUS_LABELS } from "../lib/labels";
+import { usePolling } from "../lib/polling";
 import { caseHref } from "../lib/route";
 
-/** 示例来信。SYNTHETIC：全部是手写的合成内容，不来自样本（D-002）。 */
-export const EXAMPLES: { name: string; category: InquiryCategory; body: string }[] = [
-  {
-    name: "道谢（常规）",
-    category: "feedback",
-    body: "いつも楽しく遊ばせていただいています。\n先日のイベントもとても面白かったです。これからも応援しています！",
-  },
-  {
-    name: "游戏故障（需要修改）",
-    category: "bug",
-    body: "昨日のアップデートの後から、ステージ3をクリアするとアプリが落ちてしまいます。\n何度か再起動しましたが直りません。",
-  },
-  {
-    name: "购买未到账（升级）",
-    category: "purchase",
-    body: "ジェムを購入したのですが、アイテムに反映されていません。\n代金は引き落とされているので、至急確認をお願いします。",
-  },
-];
-
-type Draft = {
+type Compose = {
   target: string;
   body: string;
   category: InquiryCategory | "";
@@ -42,7 +25,7 @@ type Draft = {
   occurredAt: string;
 };
 
-const EMPTY: Draft = {
+const EMPTY: Compose = {
   target: "",
   body: "",
   category: "",
@@ -51,13 +34,29 @@ const EMPTY: Draft = {
   occurredAt: "",
 };
 
-function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }) {
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+function ComposeForm({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }) {
+  const [draft, setDraft] = useState<Compose>(EMPTY);
+  const [example, setExample] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ caseId: string; seq: number } | null>(null);
+  const [sent, setSent] = useState<{ caseId: string; seq: number }[]>([]);
   const followUp = draft.target !== "";
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  const set = (patch: Partial<Compose>) => setDraft((d) => ({ ...d, ...patch }));
+  const note = EXAMPLES.find((e) => e.name === example)?.note;
+
+  const pick = (name: string) => {
+    setExample(name);
+    const chosen = EXAMPLES.find((e) => e.name === name);
+    if (!chosen) return;
+    setDraft({
+      ...EMPTY,
+      body: chosen.body,
+      category: chosen.form?.category ?? "",
+      device: chosen.form?.device ?? "",
+      appVersion: chosen.form?.app_version ?? "",
+      occurredAt: chosen.form?.occurred_at ?? "",
+    });
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -70,7 +69,7 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
       ...(draft.occurredAt && { occurred_at: draft.occurredAt }),
     };
     try {
-      const sent = await call(
+      const result = await call(
         api.POST("/v1/sim/inbox", {
           body: {
             body: draft.body,
@@ -79,8 +78,7 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
           },
         }),
       );
-      setResult({ caseId: sent.case_id, seq: sent.message_seq });
-      setDraft({ ...EMPTY, target: draft.target });
+      setSent((list) => [{ caseId: result.case_id, seq: result.message_seq }, ...list].slice(0, 8));
       onSent();
     } catch (e) {
       setError(errorText(e));
@@ -92,21 +90,25 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
   return (
     <form className="card" onSubmit={submit}>
       <h3>模拟玩家来信</h3>
-      <div className="examples">
-        示例：
-        {EXAMPLES.map((example) => (
-          <button
-            key={example.name}
-            type="button"
-            onClick={() => set({ target: "", body: example.body, category: example.category })}
-          >
-            {example.name}
-          </button>
-        ))}
-      </div>
+      <label className="field">
+        <span>示例来信（合成数据）</span>
+        <select id="example" value={example} onChange={(e) => pick(e.target.value)}>
+          <option value="">— 选择一个示例，或直接手写 —</option>
+          {EXAMPLE_GROUPS.map((group) => (
+            <optgroup key={group} label={group}>
+              {EXAMPLES.filter((e) => e.group === group).map((e) => (
+                <option key={e.name} value={e.name}>
+                  {e.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      {note && <p className="notice notice-info">演示要点：{note}</p>}
       <label className="field">
         <span>投递到</span>
-        <select value={draft.target} onChange={(e) => set({ target: e.target.value })}>
+        <select id="target" value={draft.target} onChange={(e) => set({ target: e.target.value })}>
           <option value="">新线程</option>
           {cases.map((c) => (
             <option key={c.id} value={c.id}>
@@ -118,9 +120,9 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
       <label className="field">
         <span>正文（日语）</span>
         <textarea
+          id="body"
           lang="ja"
-          rows={6}
-          required
+          rows={8}
           value={draft.body}
           onChange={(e) => set({ body: e.target.value })}
         />
@@ -131,6 +133,7 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
           <label className="field">
             <span>类别</span>
             <select
+              id="category"
               value={draft.category}
               onChange={(e) => set({ category: e.target.value as InquiryCategory | "" })}
             >
@@ -144,15 +147,24 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
           </label>
           <label className="field">
             <span>设备</span>
-            <input value={draft.device} onChange={(e) => set({ device: e.target.value })} />
+            <input
+              id="device"
+              value={draft.device}
+              onChange={(e) => set({ device: e.target.value })}
+            />
           </label>
           <label className="field">
             <span>应用版本</span>
-            <input value={draft.appVersion} onChange={(e) => set({ appVersion: e.target.value })} />
+            <input
+              id="app-version"
+              value={draft.appVersion}
+              onChange={(e) => set({ appVersion: e.target.value })}
+            />
           </label>
           <label className="field">
             <span>发生时间</span>
             <input
+              id="occurred-at"
               placeholder="例如 2026-11-27 09:00"
               value={draft.occurredAt}
               onChange={(e) => set({ occurredAt: e.target.value })}
@@ -161,16 +173,26 @@ function Compose({ cases, onSent }: { cases: CaseSummary[]; onSent: () => void }
         </fieldset>
       )}
       <ErrorNotice message={error} />
-      {result && (
-        <p className="notice notice-ok">
-          已投递到 <a href={caseHref(result.caseId)}>{result.caseId}</a>（第 {result.seq} 封）。
-        </p>
-      )}
-      <div className="actions">
+      <div className="actions end">
         <button type="submit" className="primary" disabled={busy || !draft.body.trim()}>
           投递
         </button>
       </div>
+      {sent.length > 0 && (
+        <div className="sent-log">
+          <span className="meta">本页投递的来信：</span>
+          <ul>
+            {sent.map((s) => (
+              <li key={`${s.caseId}:${s.seq}`}>
+                <a href={caseHref(s.caseId)} target="_blank" rel="noopener">
+                  {s.caseId}
+                </a>{" "}
+                第 {s.seq} 封
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </form>
   );
 }
@@ -179,22 +201,22 @@ function Outbox({ items, total }: { items: OutboundMail[]; total: number }) {
   return (
     <section className="card">
       <h3>发件箱（{total}）</h3>
+      <p className="meta">系统发出的回复都在这里，不会真正发送。每 5 秒自动刷新。</p>
       {items.length === 0 && <p className="muted">还没有发出的回复。</p>}
       <ul className="outbox">
         {items.map((mail) => (
           <li key={mail.id}>
             <header>
-              <a href={caseHref(mail.case_id)}>{mail.case_id}</a>
+              <a href={caseHref(mail.case_id)} target="_blank" rel="noopener">
+                {mail.case_id}
+              </a>
               <span className="meta">
                 #{mail.message_seq} · {mail.sent_by} · {formatTime(mail.sent_at)}
               </span>
             </header>
-            <details>
-              <summary>正文</summary>
-              <p className="body" lang="ja">
-                <SafeText text={mail.body_ja} />
-              </p>
-            </details>
+            <p className="body" lang="ja">
+              <SafeText text={mail.body_ja} />
+            </p>
           </li>
         ))}
       </ul>
@@ -224,17 +246,16 @@ export function Mailbox() {
   }, []);
 
   useEffect(reload, [reload]);
+  usePolling(reload);
 
   return (
     <section>
-      <div className="toolbar">
-        <h2>模拟邮箱</h2>
-        <span className="badge badge-warn">演示用</span>
-        <span className="meta">来信进入工作台收件箱；系统发出的回复只进发件箱，不会真正发送。</span>
-      </div>
+      <p className="meta">
+        来信进入工作台的收件箱；系统发出的回复只进发件箱，不会真正发送。示例都是合成数据。
+      </p>
       <ErrorNotice message={error} />
       <div className="two-columns">
-        <Compose cases={cases} onSent={reload} />
+        <ComposeForm cases={cases} onSent={reload} />
         <Outbox {...outbox} />
       </div>
     </section>

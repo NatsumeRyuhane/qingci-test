@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, call, errorText, type MetricsResponse, type MetricsRow } from "../api/client";
 import { ErrorNotice } from "../components/Badges";
 import { label, percent, ROUTE_LABELS } from "../lib/labels";
+import { usePolling } from "../lib/polling";
 
 function Table({
   title,
@@ -28,6 +29,7 @@ function Table({
                 <th scope="col">修改后批准率</th>
                 <th scope="col">升级率</th>
                 <th scope="col">驳回率</th>
+                <th scope="col">无需回复</th>
                 <th scope="col">平均编辑距离</th>
               </tr>
             </thead>
@@ -40,6 +42,7 @@ function Table({
                   <td>{percent(row.edited_rate)}</td>
                   <td>{percent(row.escalated_rate)}</td>
                   <td>{percent(row.rejected_rate)}</td>
+                  <td>{percent(row.no_reply_rate)}</td>
                   <td>{row.avg_edit_distance == null ? "—" : row.avg_edit_distance.toFixed(1)}</td>
                 </tr>
               ))}
@@ -54,15 +57,19 @@ function Table({
 export function Metrics() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const load = useCallback(() => {
     call(api.GET("/v1/metrics"))
-      .then(setMetrics)
+      .then((data) => {
+        setMetrics(data);
+        setError(null);
+      })
       .catch((e: unknown) => setError(errorText(e)));
   }, []);
+  useEffect(load, [load]);
+  usePolling(load);
   return (
     <section>
       <div className="toolbar">
-        <h2>指标</h2>
         <span className="meta">每封草稿以最后一次处理为准；编辑距离只算发出的回复（字符）。</span>
       </div>
       <ErrorNotice message={error} />

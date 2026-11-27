@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   api,
   type CaseList,
@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import { ErrorNotice, RouteBadge, StatusBadge } from "../components/Badges";
 import { SafeText } from "../components/SafeText";
+import { takeFlash } from "../lib/flash";
 import {
   CATEGORY_LABELS,
   formatTime,
@@ -18,6 +19,7 @@ import {
   STATUS_LABELS,
   URGENCY_LABELS,
 } from "../lib/labels";
+import { usePolling } from "../lib/polling";
 import { caseHref } from "../lib/route";
 
 const PAGE_SIZE = 50;
@@ -50,30 +52,41 @@ export function Inbox() {
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<CaseList | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flash] = useState(() => takeFlash());
+
+  const load = useCallback(
+    (isCancelled: () => boolean = () => false) => {
+      const query = {
+        limit: PAGE_SIZE,
+        offset,
+        ...(filters.status && { status: filters.status }),
+        ...(filters.route && { route: filters.route }),
+        ...(filters.category && { category: filters.category }),
+      };
+      call(api.GET("/v1/cases", { params: { query } }))
+        .then((data) => {
+          if (!isCancelled()) {
+            setList(data);
+            setError(null);
+          }
+        })
+        .catch((e: unknown) => {
+          if (!isCancelled()) setError(errorText(e));
+        });
+    },
+    [filters, offset],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    const query = {
-      limit: PAGE_SIZE,
-      offset,
-      ...(filters.status && { status: filters.status }),
-      ...(filters.route && { route: filters.route }),
-      ...(filters.category && { category: filters.category }),
-    };
-    call(api.GET("/v1/cases", { params: { query } }))
-      .then((data) => {
-        if (!cancelled) {
-          setList(data);
-          setError(null);
-        }
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(errorText(e));
-      });
+    load(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [filters, offset]);
+  }, [load]);
+
+  // 模拟邮箱在另一个标签页投递来信后，收件箱自动出现新案件
+  usePolling(() => load());
 
   const update = (patch: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...patch }));
@@ -103,11 +116,15 @@ export function Inbox() {
           onChange={(category) => update({ category })}
         />
       </div>
+      {flash && <p className="notice notice-ok">{flash}</p>}
       <ErrorNotice message={error} />
       {list && list.items.length === 0 && (
         <p className="empty">
-          没有符合条件的案件。可以在 <a href="#sim">模拟邮箱</a> 中投递一封来信，或运行{" "}
-          <code>copilot seed</code>。
+          没有符合条件的案件。可以在{" "}
+          <a href="#sim" target="_blank" rel="noopener">
+            模拟邮箱
+          </a>{" "}
+          中投递一封来信，或运行 <code>copilot seed</code>。
         </p>
       )}
       {list && list.items.length > 0 && (
