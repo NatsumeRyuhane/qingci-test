@@ -8,6 +8,8 @@ from typing import Any
 
 from copilot.contracts import (
     EntryOrigin,
+    Fact,
+    GlossaryEntry,
     InquiryCategory,
     Intent,
     Notice,
@@ -113,6 +115,14 @@ def notice(
         template_ids=template_ids or [],
         intents=intents or [],
     )
+
+
+def fact(entry_id: str = "syn-fact", statement: str = "【合成】数据迁移需要先绑定账号。") -> Fact:
+    return Fact(**_common(entry_id, 1), statement_zh=statement)
+
+
+def term(entry_id: str = "syn-term", ja: str = "ジェム", zh: str = "宝石") -> GlossaryEntry:
+    return GlossaryEntry(**_common(entry_id, 1), term_ja=ja, term_zh=zh)
 
 
 def forbidden(entry_id: str = "syn-no-refund", *phrases: str) -> Policy:
