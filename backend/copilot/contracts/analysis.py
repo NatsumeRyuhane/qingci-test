@@ -7,12 +7,15 @@ from pydantic import AwareDatetime, Field, model_validator
 from copilot.contracts.base import Contract, Document
 from copilot.contracts.case import CaseId
 from copilot.contracts.enums import (
+    CaseStatus,
     InquiryCategory,
     NoReplyReason,
     SensitivityTag,
     Sentiment,
     Urgency,
 )
+
+_THREAD_JUDGEMENT_STATUSES = {CaseStatus.OPEN, CaseStatus.REPLIED, CaseStatus.NO_REPLY_NEEDED}
 
 
 class NoReplyProposal(Contract):
@@ -52,6 +55,8 @@ class CaseAnalysis(Document):
     """判断出的咨询类别。可能与玩家在表单中选的不同。"""
     intent: str = Field(min_length=1)
     """更细的意图标识，例如 `purchase_not_delivered`。取值集合由知识库（#5）定义。"""
+    intent_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    """意图分类的置信度，0 到 1。自动发送门槛要求分类置信度达到配置阈值。"""
     sentiment: Sentiment
     """玩家的情绪。"""
     urgency: Urgency
@@ -64,6 +69,12 @@ class CaseAnalysis(Document):
     """提议的敏感标签。为访问控制（#13）预留，经人工确认后才写入 `Case.sensitivity_tags`。"""
     no_reply: NoReplyProposal | None = None
     """提议不回复时的理由。为空表示需要回复。"""
+    thread_judgement: CaseStatus | None = None
+    """对 `undetermined` 案件的语义判断（`open`、`replied` 或 `no_reply_needed`）。其他状态为空。"""
+    thread_judgement_reason_zh: str | None = None
+    """对 `undetermined` 案件做出 `thread_judgement` 判断的理由（中文）。"""
+    injection_signals: list[str] = Field(default_factory=list)
+    """检测到的疑似提示注入依据（代码检测与模型标记）。非空时禁止自动发送（#18）。"""
     model: str
     """生成分析的 LLM 模型名。"""
     created_at: AwareDatetime
@@ -73,4 +84,12 @@ class CaseAnalysis(Document):
     def _check_no_reply(self) -> Self:
         if self.no_reply and self.no_reply.duplicate_of == self.case_id:
             raise ValueError("案件不能是自己的重复提交（duplicate_of 等于 case_id）")
+        if (
+            self.thread_judgement is not None
+            and self.thread_judgement not in _THREAD_JUDGEMENT_STATUSES
+        ):
+            allowed = sorted(s.value for s in _THREAD_JUDGEMENT_STATUSES)
+            raise ValueError(
+                f"thread_judgement 只能是 {allowed}，实际为 {self.thread_judgement.value!r}"
+            )
         return self
