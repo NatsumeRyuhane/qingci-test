@@ -124,8 +124,8 @@ def submit_feedback(
     - 批准 / 修改后批准：回复进入发件箱，并作为客服邮件追加到案件，案件变为 `replied`。
       发出的正文有未通过的自检时，必须在 `confirmed_failed_checks` 中逐项确认，否则拒绝发送
       （修改后的正文由服务端重新自检，不信任客户端的结果）。
-    - 升级处理：案件变为 `escalated`，必须填写理由
-    - 驳回：案件回到 `open`，等待重新起草，必须填写理由
+    - 升级处理：案件变为 `escalated`，必须填写理由；已升级的案件不能再次升级（409）
+    - 驳回：案件回到 `open`，等待重新起草，必须填写理由；已升级的案件保持 `escalated`
     - 无需回复：案件变为 `no_reply_needed`，必须填写理由
 
     只能处理案件的最新草稿，并且草稿回复的必须是最新一封玩家邮件：玩家在起草之后又来信时，
@@ -142,6 +142,8 @@ def submit_feedback(
         raise ConflictError("这不是案件的最新草稿，请刷新后处理最新草稿")
     if latest_player_message(case).seq != draft.message_seq:
         raise ConflictError("玩家在起草之后又有来信，请重新起草")
+    if action is FeedbackAction.ESCALATED and case.status is CaseStatus.ESCALATED:
+        raise ConflictError("案件已经升级，不能再次升级")
 
     reason = (reason or "").strip() or None
     if action in NEEDS_REASON and reason is None:
@@ -212,7 +214,8 @@ def submit_feedback(
         case = case.model_copy(update={"status": CaseStatus.ESCALATED})
     elif action is FeedbackAction.NO_REPLY:
         case = case.model_copy(update={"status": CaseStatus.NO_REPLY_NEEDED})
-    else:
+    elif case.status is not CaseStatus.ESCALATED:
+        # 驳回：回到待处理，等待重新起草。已升级的案件保持 escalated，不能因驳回草稿而失去升级
         case = case.model_copy(update={"status": CaseStatus.OPEN})
     repo.save_case(case)
     return FeedbackResult(feedback=feedback, mail=mail, case=case)

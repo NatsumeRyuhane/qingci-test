@@ -215,4 +215,22 @@ describe("Workspace", () => {
     // 译文只有一段：与中文段数不同时提示
     expect(await screen.findByText(/逐段对照可能错位/)).toBeInTheDocument();
   });
+
+  it("已升级的案件：升级处理按钮不可用，其他操作仍然可用", async () => {
+    const escalated = detail();
+    mockApi(
+      routes({
+        "GET /v1/cases/:id": () => ({
+          ...escalated,
+          case: { ...escalated.case, status: "escalated" },
+        }),
+      }),
+    );
+    render(<Workspace caseId="SIM-1" actor="客服A" />);
+
+    expect(await screen.findByRole("button", { name: "升级处理" })).toBeDisabled();
+    expect(screen.getByText(/案件已升级/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "无需回复" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "确认发送" })).toBeEnabled();
+  });
 });

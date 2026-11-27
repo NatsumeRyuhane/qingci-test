@@ -265,3 +265,17 @@ def test_translate_with_base_only_replaces_changed_paragraphs(
     }
     result = client.post(f"/v1/drafts/{draft['id']}/translate", json=body).json()
     assert result["body_ja"] == "挨拶\n\n一段目\n\n【占位翻訳】改过的第二段\n\n結び"
+
+
+def test_escalated_case_stays_escalated(client: TestClient, seed: Seed) -> None:
+    """已升级的案件不能再次升级；驳回草稿也不会让它失去升级。"""
+    seed(case("SYN-1"))
+    draft = _draft(client)
+    assert _feedback(client, draft["id"], action="escalated", reason="退款").status_code == 201
+
+    again = _feedback(client, draft["id"], action="escalated", reason="再升级一次")
+    assert again.status_code == 409 and "已经升级" in again.json()["error"]["message"]
+    rejected = _feedback(client, draft["id"], action="rejected", reason="草稿不可用").json()
+    assert rejected["case_status"] == "escalated"
+    redraft = client.post("/v1/cases/SYN-1/drafts").json()
+    assert redraft["case"]["status"] == "escalated"

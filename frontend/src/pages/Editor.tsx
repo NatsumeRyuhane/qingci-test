@@ -242,6 +242,7 @@ export function Editor({
 }) {
   const draft = detail.draft as Draft;
   const closed = CLOSED_STATUSES.has(detail.case.status ?? "open");
+  const escalated = detail.case.status === "escalated";
   const [zhParts, setZhParts] = useState(() => splitParagraphs(draft.back_translation_zh));
   const [jaParts, setJaParts] = useState(() => splitParagraphs(draft.body_ja));
   const zh = joinParagraphs(zhParts);
@@ -405,6 +406,11 @@ export function Editor({
 
   return (
     <div className="editor">
+      {escalated && (
+        <p className="notice notice-warn">
+          案件已升级：可以发送回复、驳回草稿或标记无需回复，不能再次升级。
+        </p>
+      )}
       <Checks checks={checks} stale={checksStale} />
       <DraftSummary draft={draft} />
 
@@ -532,8 +538,10 @@ export function Editor({
               <button
                 key={s.action}
                 type="button"
-                title={s.hint}
-                disabled={disabled}
+                title={
+                  s.action === "escalated" && escalated ? "案件已经升级，不能再次升级" : s.hint
+                }
+                disabled={disabled || (s.action === "escalated" && escalated)}
                 aria-pressed={pending === s.action}
                 onClick={() => {
                   setPending(s.action);
