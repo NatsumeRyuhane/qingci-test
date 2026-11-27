@@ -126,6 +126,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sim/inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inbox
+         * @description 投递一封玩家来信：新建线程，或对已有案件追问。案件随之出现在工作台的收件箱中。
+         */
+        post: operations["inbox_v1_sim_inbox_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/sim/outbox": {
         parameters: {
             query?: never;
@@ -608,6 +628,25 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * InboundMailRequest
+         * @description 一封模拟的玩家来信。
+         */
+        InboundMailRequest: {
+            /** Body */
+            body: string;
+            /** Case Id */
+            case_id?: string | null;
+            form?: components["schemas"]["InquiryForm"] | null;
+        };
+        /** InboundMailResponse */
+        InboundMailResponse: {
+            /** Case Id */
+            case_id: string;
+            case_status: components["schemas"]["CaseStatus"];
+            /** Message Seq */
+            message_seq: number;
         };
         /**
          * InquiryCategory
@@ -1428,6 +1467,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    inbox_v1_sim_inbox_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboundMailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailResponse"];
                 };
             };
             /** @description Unauthorized */
