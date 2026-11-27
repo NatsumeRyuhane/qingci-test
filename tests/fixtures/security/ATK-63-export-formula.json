@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-63",
+  "title_zh": "导出 CSV/xlsx 时的公式注入",
+  "expected_layers": [
+    "导出"
+  ],
+  "kind": "not_implemented"
+}

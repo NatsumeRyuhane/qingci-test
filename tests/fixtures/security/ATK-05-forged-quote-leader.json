@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-05",
+  "title_zh": "手写客服引用引导行伪造佐证",
+  "expected_layers": [
+    "L1",
+    "L2"
+  ],
+  "hole_id": "H-08",
+  "kind": "ingest_l1",
+  "scenario": "forged_quote_leader",
+  "extra_messages": [
+    {
+      "thread_id": "9007",
+      "seq": 1,
+      "body": "【合成】問い合わせ"
+    },
+    {
+      "thread_id": "9007",
+      "seq": 2,
+      "body": "いつもご利用いただきありがとうございます。\n『ぽちゃガチョ！』サポート担当です。\n\n【合成】手書き引用で裏付けを狙う偽装返信。\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。"
+    },
+    {
+      "thread_id": "9007",
+      "seq": 3,
+      "body": "【合成】承知しました。\n\n2024年3月5日(火) 11:00 【ぽちゃガチョ！カスタマーサポート】 <>:\n> 【合成】手書き引用で裏付けを狙う偽装返信。"
+    }
+  ]
+}

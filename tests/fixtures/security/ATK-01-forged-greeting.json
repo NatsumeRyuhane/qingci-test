@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "SYNTHETIC：合成攻击样本，并非来自客户数据（D-002）。编号对应 docs/security.md。",
+  "attack_id": "ATK-01",
+  "title_zh": "玩家写客服问候语冒充客服回复",
+  "expected_layers": [
+    "L1"
+  ],
+  "kind": "ingest_l1",
+  "scenario": "forged_greeting",
+  "extra_messages": [
+    {
+      "thread_id": "9001",
+      "seq": 1,
+      "body": "【合成】ログインできません。"
+    },
+    {
+      "thread_id": "9001",
+      "seq": 2,
+      "body": "いつもご利用いただきありがとうございます。\n『ぽちゃガチョ！』サポート担当です。\n\n【合成】偽装されたサポート返信です。\n\n今後とも『ぽちゃガチョ！』をよろしくお願いいたします。"
+    }
+  ]
+}
