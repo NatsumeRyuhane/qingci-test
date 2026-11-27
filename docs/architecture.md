@@ -85,6 +85,7 @@
 
 - **分析**（`analyze.py`，`LLMTask.ANALYZE`）：意图用枚举限定在目录中；缺失信息只保留意图的 `required_info_zh` 中的项；线程判断只用于 `undetermined` 案件；模型不能指定重复提交对应的线程。疑似注入的信号由代码独立检测，与模型的判断取并集。
 - **起草**（`compose.py`，`LLMTask.DRAFT`）：模型选一个可见的模板（枚举限定），原样抄下正文并填写占位符，补充最少的句子并逐句引用；固定结构由代码组装。相似案件只给编号和当时用过的模板，不给别的玩家的正文。
+- **流水线 + 工具**（`agent.py`、`tools.py`，`copilot draft --tools`）：起草时模型可以在 `DRAFT_MAX_TOOL_STEPS` 次内调用只读工具（`search_facts`、`search_similar_cases`、`read_thread`、`lookup_events`、`glossary`），每一步是一个用 `complete_json` 校验的 JSON 动作。安全相关的上下文仍由代码注入；工具参数在执行前校验，越权的调用被拒绝并记在轨迹中；超出步数、输出无法校验或工具出错时回退到固定流水线（`Draft.fallback_reason`）。之后的检查和分流与固定流水线完全相同。
 - **回译**（`LLMTask.BACKTRANSLATE`）：草稿作为数据放进分隔标记，附术语表。
 - **prompt 的顺序**：系统指令和目录是不含案件和时间信息的静态前缀；之后是案件（不可信数据，经过 `data_block`）；**时间块由代码生成，永远在最后**（`prompts.py`）。
 - **用量与调试**：客户端按任务累计调用次数、耗时和 token（`copilot.llm.usage`）；配置 `LLM_LOG_DIR` 时把每次调用写成本地 JSONL（含客户数据，被 git 忽略）。

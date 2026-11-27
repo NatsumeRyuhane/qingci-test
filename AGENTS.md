@@ -175,7 +175,7 @@ uv run copilot kb annotate         # 用 LLM 标注模板候选（需要 LLM_MOD
 uv run copilot kb label            # 为所有切分生成 #7 的标准答案，写出 data/processed/kb/labels/
 uv run copilot kb review export    # 每个模板一个审核文件（data/processed/kb/review/），改完后 kb review import
 uv run copilot kb publish          # 把 knowledge/、模板和审核结果写入数据库（只插入新版本）
-uv run copilot draft <案件 ID>     # 分析、起草、自检和分流（#6），不发送邮件；--now 和 --before-seq 用于历史重放
+uv run copilot draft <案件 ID>     # 分析、起草、自检和分流（#6），不发送邮件；--now 和 --before-seq 用于历史重放，--tools 为“流水线 + 工具”
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
