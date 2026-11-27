@@ -5,9 +5,9 @@
 - **test**：评测集，只在报告基线时运行，保持它能反映系统的真实效果。
 
 默认方法是**在时间上均匀分布的分层抽样**（`stratified`）：按线程顺序（线程 ID 即提交顺序，
-`thread_order`）把时间线切成每层 `STRATUM_SIZE` 个线程，每层内按固定种子的哈希顺序，以
-`RATIOS` 的比例分配。这样 train 覆盖所有时期，知识库能学到“某个事件已经结束”这类只在
-后期出现的信号；dev 和 test 的时间分布与整体相同。
+`thread_order`）把时间线切成每层 `STRATUM_SIZE` 个线程，每层内按固定种子的哈希顺序排列，
+按每个单位的起点以 `RATIOS` 的比例切成三段（见 `_allocate`）。这样 train 覆盖所有时期，
+知识库能学到“某个事件已经结束”这类只在后期出现的信号；dev 和 test 的时间分布与整体相同。
 
 另有**按时间先后切分**（`chronological`）作对比：最早的 70% 为 train，之后依次是 dev、test。
 它衡量系统面对从未见过的时期（例如新的事故）时的表现。
@@ -63,7 +63,7 @@ RATIOS: Mapping[Split, float] = {Split.TRAIN: 0.70, Split.DEV: 0.15, Split.TEST:
 """各侧的线程比例。"""
 STRATUM_SIZE = 100
 """分层抽样时每层的线程数。样本中约 100 个线程相当于一天（docs/data.md）。"""
-SEED = "d012-v1"
+SEED = "d012-v2"
 """分层抽样的种子。改了它，切分就变了：评测数字不再可以与之前比较。"""
 DEFAULT_MANIFEST = Path("data/processed/split.json")
 """切分结果的默认位置（被 git 忽略：含有线程 ID，属于派生数据，见 data/README.md）。"""
@@ -167,18 +167,31 @@ def _units(cases: list[Case], groups: list[list[str]]) -> list[list[str]]:
     return units
 
 
+def _side(start: float, total: int, ratios: Mapping[Split, float]) -> Split:
+    """起点位于 `start`（从 0 开始，按线程数计）的单位分到哪一侧：按累计比例切成三段。"""
+    if start < ratios[Split.TRAIN] * total:
+        return Split.TRAIN
+    if start < (ratios[Split.TRAIN] + ratios[Split.DEV]) * total:
+        return Split.DEV
+    return Split.TEST
+
+
 def _allocate(
     units: list[list[str]], ratios: Mapping[Split, float], assignments: dict[str, Split]
 ) -> None:
-    """按给定的顺序把单位逐个分给当前最欠缺的一侧（按线程数计），使各侧接近 `ratios`。"""
-    counts = dict.fromkeys(Split, 0)
+    """按给定的顺序排列单位，按每个单位的**起点**（之前的单位累计的线程数）所在的段分配。
+
+    单位的顺序是随机的（哈希顺序），起点与单位的大小无关，所以一组重复提交分到各侧的概率
+    与单个线程相同。不能按“当前最欠缺的一侧”分配：多个线程的单位总是让比例最大的 train
+    最欠缺，重复提交会几乎都分到 train（样本中 93%），dev 和 test 中的“不回复”标准答案就会偏少。
+    """
+    total = sum(len(unit) for unit in units)
+    start = 0
     for unit in units:
-        total = sum(counts.values()) + len(unit)
-        # 平局时按 train、dev、test 的顺序（max 取第一个最大值）。
-        side = max(Split, key=lambda s: ratios[s] * total - counts[s])
-        counts[side] += len(unit)
+        side = _side(start, total, ratios)
         for case_id in unit:
             assignments[case_id] = side
+        start += len(unit)
 
 
 def _hash_order(seed: str, unit: list[str]) -> str:
@@ -211,13 +224,8 @@ def split_cases(
     else:
         # 按组内最早的线程在时间线上的原始位置决定一侧，整组跟随它。不能按已分配的线程数
         # 累计：一组重复提交会把它之后的所有线程往后推，边界附近的线程会被分错。
-        total = len(position)
-        bounds = [ratios[Split.TRAIN] * total, (ratios[Split.TRAIN] + ratios[Split.DEV]) * total]
         for unit in units:
-            first = position[unit[0]]
-            side = (
-                Split.TRAIN if first < bounds[0] else Split.DEV if first < bounds[1] else Split.TEST
-            )
+            side = _side(position[unit[0]], len(position), ratios)
             for case_id in unit:
                 assignments[case_id] = side
     return SplitManifest(
