@@ -113,3 +113,23 @@ def test_before_seq_drafts_before_the_real_reply(env: dict[str, Path]) -> None:
     assert outcome.analysis.message_seq == 1
     assert outcome.draft is not None
     assert "本当の回答" not in outcome.draft.body_ja
+
+
+def test_tools_mode_reports_the_trace(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_client(_: Settings) -> FakeLLMClient:
+        fake = FakeLLMClient()
+        fake.queue(LLMTask.ANALYZE, analysis_reply())
+        step = json.dumps({"tool": "glossary", "arguments": {"term": "ジェム"}, "final": None})
+        done = json.dumps({"tool": None, "arguments": {}, "final": json.loads(draft_reply())})
+        fake.queue(LLMTask.DRAFT, step, done)
+        fake.queue(LLMTask.BACKTRANSLATE, "【合成】回译")
+        return fake
+
+    monkeypatch.setattr(cli, "_llm_client", fake_client)
+    result = runner.invoke(cli.app, _args(env, "--tools"))
+    assert result.exit_code == 0, result.output
+    assert "方式：pipeline_with_tools" in result.output
+    assert "工具 1：glossary(term=ジェム)" in result.output
+    assert "draft：2 次" in result.output
