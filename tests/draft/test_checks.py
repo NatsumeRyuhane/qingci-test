@@ -200,7 +200,7 @@ def test_citation_of_unprovided_entry_fails(guide: StyleGuide) -> None:
 
 
 def test_info_request_needs_no_citation(guide: StyleGuide) -> None:
-    ask = "【合成】お手数ですが、購入日時をお知らせください。"
+    ask = "お手数ですが、購入日時をお知らせください。"
     draft = compose(guide, f"{TEMPLATE_BODY}\n{ask}")
     assert results(draft, ctx(guide)) == {}
 
@@ -270,9 +270,21 @@ def test_model_cannot_exempt_a_factual_sentence(guide: StyleGuide) -> None:
     [
         ("お手数ですが、購入日時をお知らせください。", True),
         ("スクリーンショットを添付いただけますでしょうか。", True),
+        (
+            "大変お手数をおかけしますが、ご利用の端末名と、問題が発生した日時をお知らせください。",
+            True,
+        ),
+        ("恐れ入りますが、エラー画面のスクリーンショットをお送りいただけますでしょうか。", True),
         ("修正されましたので、ご確認ください。", False),
         ("返金のお手続きをお願いいたします。", False),
         ("現在調査しております。", False),
+        # 评审意见（PR #28）：请求的前面有陈述分句时，整句仍要求引用。
+        ("このアイテムは無料ですので、ご確認ください。", False),
+        ("現在サーバーは正常ですので、ご確認ください。", False),
+        ("このアイテムは無料ですので、購入日時をお知らせください。", False),
+        ("サーバーが復旧したため、購入日時をお知らせください。", False),
+        # 请玩家操作的句子不豁免：操作说明是实质内容。
+        ("アプリを再起動してください。", False),
     ],
 )
 def test_is_info_request(sentence: str, expected: bool) -> None:

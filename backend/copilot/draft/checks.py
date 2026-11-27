@@ -15,8 +15,8 @@
 - 模型改写了模板原文时，整段答复都按新增文字处理，结果只会更严格。
 
 **引用按整句对应。** 一条引用覆盖的是与它的 `sentence_ja` 规范化后完全相同的句子，不按子串
-匹配，否则一个标点或一个共同的词就能“覆盖”另一句话。不需要引用的只有代码确认的“索要信息”
-句式（`is_info_request`），模型不能自己声明哪句话不需要引用。
+匹配，否则一个标点或一个共同的词就能“覆盖”另一句话。不需要引用的只有代码按白名单确认的
+“索要信息”句式（`is_info_request`），模型不能自己声明哪句话不需要引用。
 """
 
 import re
@@ -49,11 +49,22 @@ _URL = re.compile(r"https?://|www\.", re.IGNORECASE)
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _HTML = re.compile(r"[<＜]\s*/?\s*[A-Za-z!]")
 _SPACE = re.compile(r"\s+")
-_REQUEST_END = re.compile(
-    r"(ください|下さい|いただけますでしょうか|いただけますか|いただけないでしょうか|"
-    r"いただけませんでしょうか|いただけませんか|お願いいたします|お願い致します|お願いします|"
-    r"お願い申し上げます)$"
+_ASK = (
+    r"(?:ください|くださいますようお願いいたします|いただけますでしょうか|いただけますか|"
+    r"いただけないでしょうか|いただけませんでしょうか|いただきますようお願いいたします)"
 )
+_INFO_REQUEST = re.compile(
+    r"(?:(?:(?:大変)?お手数(?:ですが|をおかけしますが|をおかけいたしますが)|恐れ入りますが|"
+    r"差し支えなければ)、?){0,2}"
+    r"(?P<object>[^。！？!?]{1,60}?)(?:を|について)"
+    r"(?:(?:お知らせ|ご連絡|お送り|ご送付|ご提供|お教え|ご記入|ご返信|ご共有)" + _ASK + "|"
+    r"(?:添付|送付|返信|記入)(?:して)?" + _ASK + ")"
+)
+"""允许豁免引用的“索要信息”句式（白名单）：可选的客套前缀 + 要索要的东西 + を/について +
+固定的请求动词。整句必须完全匹配，不是只看结尾。"""
+_OBJECT_STATEMENT = re.compile(r"は|ので|ため|から|です|ます|まし|でし|けど|けれど")
+"""“要索要的东西”中不能出现的成分：主题、原因和敬体谓语都意味着前面有一个陈述分句，
+例如「このアイテムは無料ですので、…お知らせください」。"""
 _STATEMENT_MARK = re.compile(
     r"ました|でした|おります|ています|済み|完了|予定|修正|返金|返還|補償|補填|付与|配布|"
     r"プレゼント|お詫びの品"
@@ -71,11 +82,19 @@ def sentences(text: str) -> list[str]:
 
 
 def is_info_request(sentence: str) -> bool:
-    """是否是代码确认的“向玩家索要信息或请玩家操作”的句子：以请求的句式结尾，并且不含
-    陈述已经发生或将要发生的事的标记（例如“已修复”“预定”“退款”）。这样的句子不是
-    事实性说法，不需要引用。"""
-    core = _TRAILING.sub("", unicodedata.normalize("NFKC", sentence))
-    return bool(_REQUEST_END.search(core)) and not _STATEMENT_MARK.search(core)
+    """是否是代码确认的“向玩家索要信息”的句子。这样的句子不是事实性说法，不需要引用。
+
+    只认白名单中的完整句式（`_INFO_REQUEST`）：要索要的东西中不能有陈述分句
+    （`_OBJECT_STATEMENT`），整句也不能有陈述已经发生或将要发生的事的标记
+    （`_STATEMENT_MARK`，例如“已修复”“预定”“退款”）。请玩家**操作**的句子（例如
+    「ご確認ください」）不豁免：操作说明是实质内容，应当来自模板或知识库。
+    认不出的句子一律要求引用，结果只会更严格。
+    """
+    core = _TRAILING.sub("", unicodedata.normalize("NFKC", sentence).strip())
+    match = _INFO_REQUEST.fullmatch(core)
+    if match is None or _OBJECT_STATEMENT.search(match.group("object")):
+        return False
+    return not _STATEMENT_MARK.search(core)
 
 
 def fill_slots(body: str, values: dict[str, str]) -> str:
