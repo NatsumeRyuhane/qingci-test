@@ -341,6 +341,7 @@ function DraftEditor({
             action,
             final_body_ja: action === "edited" ? body : null,
             reason: hasReason ? reason.trim() : null,
+            ja_edited_directly: false,
           },
         }),
       );

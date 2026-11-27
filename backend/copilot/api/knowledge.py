@@ -41,12 +41,15 @@ class MetricsRow(BaseModel):
     edited: int
     escalated: int
     rejected: int
+    no_reply: int
+    """客服判断无需回复的草稿数。"""
     approved_rate: float
     """原样批准率。"""
     edited_rate: float
     """修改后批准率。"""
     escalated_rate: float
     rejected_rate: float
+    no_reply_rate: float
     avg_edit_distance: float | None
     """发出的回复的平均编辑距离（字符）。没有发出的回复时为空。"""
 
@@ -60,10 +63,12 @@ class MetricsRow(BaseModel):
             edited=count(FeedbackAction.EDITED, 0),
             escalated=count(FeedbackAction.ESCALATED, 0),
             rejected=count(FeedbackAction.REJECTED, 0),
+            no_reply=count(FeedbackAction.NO_REPLY, 0),
             approved_rate=tally.rate(FeedbackAction.APPROVED),
             edited_rate=tally.rate(FeedbackAction.EDITED),
             escalated_rate=tally.rate(FeedbackAction.ESCALATED),
             rejected_rate=tally.rate(FeedbackAction.REJECTED),
+            no_reply_rate=tally.rate(FeedbackAction.NO_REPLY),
             avg_edit_distance=tally.avg_edit_distance,
         )
 

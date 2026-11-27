@@ -13,16 +13,19 @@ from copilot.workbench.drafting import (
 )
 from copilot.workbench.mailbox import SIM_CASE_PREFIX, receive_mail
 from copilot.workbench.service import (
+    ACTIONABLE_STATUSES,
     CLOSED_STATUSES,
     ConflictError,
     FeedbackResult,
     InvalidRequestError,
+    edited_checks,
     generate_draft,
     submit_feedback,
 )
 from copilot.workbench.text import levenshtein
 
 __all__ = [
+    "ACTIONABLE_STATUSES",
     "CLOSED_STATUSES",
     "SIM_CASE_PREFIX",
     "ConflictError",
@@ -32,6 +35,7 @@ __all__ = [
     "FeedbackResult",
     "InvalidRequestError",
     "StubDrafter",
+    "edited_checks",
     "generate_draft",
     "latest_player_message",
     "levenshtein",

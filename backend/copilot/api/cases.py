@@ -6,7 +6,15 @@ from fastapi import APIRouter, Path, Query
 from pydantic import AwareDatetime, BaseModel, Field
 
 from copilot.api.deps import DrafterDep, Repo
-from copilot.contracts import Case, CaseAnalysis, Draft, Feedback, OutboundMail
+from copilot.contracts import (
+    Case,
+    CaseAnalysis,
+    Draft,
+    DraftCheck,
+    DraftCheckKind,
+    Feedback,
+    OutboundMail,
+)
 from copilot.contracts.case import CASE_ID_CHARS
 from copilot.contracts.enums import (
     CaseStatus,
@@ -17,7 +25,14 @@ from copilot.contracts.enums import (
     Urgency,
 )
 from copilot.storage import NotFoundError
-from copilot.workbench import generate_draft, latest_player_message, submit_feedback
+from copilot.storage.repository import Sort
+from copilot.workbench import (
+    ACTIONABLE_STATUSES,
+    edited_checks,
+    generate_draft,
+    latest_player_message,
+    submit_feedback,
+)
 
 PREVIEW_CHARS = 80
 MAX_BODY_CHARS = 20_000
@@ -82,7 +97,29 @@ class FeedbackRequest(BaseModel):
     final_body_ja: str | None = Field(default=None, max_length=MAX_BODY_CHARS)
     """修改后批准时必填：修改后的正文。"""
     reason: str | None = Field(default=None, max_length=2000)
-    """升级处理和驳回时必填，修改后批准时可选。"""
+    """升级处理、驳回和无需回复时必填，修改后发送时可选。"""
+    final_body_zh: str | None = Field(default=None, max_length=MAX_BODY_CHARS)
+    """客服编辑的中文回复，发送时记录。"""
+    ja_edited_directly: bool = False
+    """客服是否直接改过日语正文。"""
+    confirmed_failed_checks: list[DraftCheckKind] = Field(default_factory=list)
+    """客服确认后仍然发送的未通过自检项。发出的正文有未确认的未通过项时拒绝发送（422）。"""
+
+
+class TranslateRequest(BaseModel):
+    body_zh: str = Field(min_length=1, max_length=MAX_BODY_CHARS)
+    """客服编辑的中文回复。"""
+
+
+class CheckRequest(BaseModel):
+    body_ja: str = Field(min_length=1, max_length=MAX_BODY_CHARS)
+    """要检查的日语正文（客服直接改过的，或由中文翻译得到的）。"""
+
+
+class EditResult(BaseModel):
+    body_ja: str
+    checks: list[DraftCheck]
+    """对 `body_ja` 的自检：只依赖正文的检查重新运行，模板有效期沿用草稿的结果。"""
 
 
 class FeedbackResponse(BaseModel):
@@ -114,6 +151,13 @@ def _summary(repo: Repo, case: Case) -> CaseSummary:
     )
 
 
+def _require_draft(repo: Repo, draft_id: str) -> Draft:
+    draft = repo.get_draft(draft_id)
+    if draft is None:
+        raise NotFoundError(f"草稿不存在：{draft_id}")
+    return draft
+
+
 def _detail(repo: Repo, case_id: str) -> CaseDetail:
     case = repo.get_case(case_id)
     if case is None:
@@ -136,12 +180,21 @@ def router() -> APIRouter:
         status: CaseStatus | None = None,
         category: InquiryCategory | None = None,
         route: Route | None = None,
+        actionable: bool = False,
+        sort: Sort = "newest",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> CaseList:
-        """收件箱：按最近更新时间倒序列出案件，可按状态、类别和分流结果筛选。"""
+        """收件箱：按最近更新时间列出案件（`sort=oldest` 为先进先出），可按状态、类别和分流结果
+        筛选。`actionable=true` 只列需要人工处理的案件（未结案的）。"""
         page = repo.list_cases(
-            status=status, category=category, route=route, limit=limit, offset=offset
+            status=status,
+            statuses=ACTIONABLE_STATUSES if actionable else None,
+            category=category,
+            route=route,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
         return CaseList(items=[_summary(repo, case) for case in page.items], total=page.total)
 
@@ -165,25 +218,46 @@ def router() -> APIRouter:
         repo: Repo, drafter: DrafterDep, draft_id: DraftIdPath, body: BacktranslateRequest
     ) -> BacktranslateResponse:
         """把客服编辑后的日语正文回译为中文。不修改草稿本身。"""
-        if repo.get_draft(draft_id) is None:
-            raise NotFoundError(f"草稿不存在：{draft_id}")
+        _require_draft(repo, draft_id)
         return BacktranslateResponse(back_translation_zh=drafter.backtranslate(body.body_ja))
+
+    @r.post("/drafts/{draft_id}/translate")
+    def translate(
+        repo: Repo, drafter: DrafterDep, draft_id: DraftIdPath, body: TranslateRequest
+    ) -> EditResult:
+        """把客服编辑的中文回复译成日语（LLM），并对译文自检。不修改草稿本身。"""
+        draft = _require_draft(repo, draft_id)
+        body_ja = drafter.translate(body.body_zh)
+        return EditResult(body_ja=body_ja, checks=edited_checks(drafter, draft, body_ja))
+
+    @r.post("/drafts/{draft_id}/check")
+    def check(
+        repo: Repo, drafter: DrafterDep, draft_id: DraftIdPath, body: CheckRequest
+    ) -> EditResult:
+        """对客服直接改过的日语正文自检。只在代码中运行，不调用 LLM。"""
+        draft = _require_draft(repo, draft_id)
+        return EditResult(body_ja=body.body_ja, checks=edited_checks(drafter, draft, body.body_ja))
 
     @r.post("/drafts/{draft_id}/feedback", status_code=201)
     def create_feedback(
-        repo: Repo, draft_id: DraftIdPath, body: FeedbackRequest
+        repo: Repo, drafter: DrafterDep, draft_id: DraftIdPath, body: FeedbackRequest
     ) -> FeedbackResponse:
-        """批准（进入发件箱）、修改后批准、升级处理或驳回。
+        """批准（进入发件箱）、修改后发送、升级处理、驳回或无需回复。
 
-        只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。
+        只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。发出的正文有
+        未确认的未通过自检时返回 422。
         """
         result = submit_feedback(
             repo,
             draft_id,
             actor=body.actor,
             action=body.action,
+            drafter=drafter,
             final_body_ja=body.final_body_ja,
             reason=body.reason,
+            final_body_zh=body.final_body_zh,
+            ja_edited_directly=body.ja_edited_directly,
+            confirmed_failed_checks=body.confirmed_failed_checks,
         )
         return FeedbackResponse(
             feedback=result.feedback, mail=result.mail, case_status=result.case.status

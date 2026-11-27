@@ -14,6 +14,8 @@ from copilot.contracts import (
     CaseAnalysis,
     CaseStatus,
     Draft,
+    DraftCheck,
+    DraftCheckKind,
     InquiryCategory,
     Message,
     MessageRole,
@@ -47,6 +49,14 @@ class Drafter(Protocol):
 
     def backtranslate(self, body_ja: str) -> str:
         """把（客服编辑后的）日语回复回译为中文，供不懂日语的客服核对。"""
+        ...
+
+    def translate(self, body_zh: str) -> str:
+        """把客服编辑的中文回复译成日语全文（客服用中文工作）。"""
+        ...
+
+    def check(self, body_ja: str) -> list[DraftCheck]:
+        """对编辑后的日语正文运行只依赖正文的自检，不调用 LLM。"""
         ...
 
 
@@ -131,3 +141,16 @@ class StubDrafter:
 
     def backtranslate(self, body_ja: str) -> str:
         return f"【占位】没有调用回译服务。日语正文共 {len(body_ja)} 个字符。"
+
+    def translate(self, body_zh: str) -> str:
+        return f"{_GREETING_JA}\n\n【占位：没有调用翻译服务】\n{body_zh.strip()}\n\n{_CLOSING_JA}"
+
+    def check(self, body_ja: str) -> list[DraftCheck]:
+        structured = body_ja.startswith(_GREETING_JA) and body_ja.rstrip().endswith(_CLOSING_JA)
+        return [
+            DraftCheck(
+                kind=DraftCheckKind.STRUCTURE,
+                passed=structured,
+                detail_zh=None if structured else "【占位】开头或结尾不是固定的问候语、结语",
+            )
+        ]

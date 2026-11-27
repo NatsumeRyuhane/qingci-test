@@ -22,9 +22,9 @@ from typing import Any
 import openai
 
 from copilot.config import LLMTask, MissingConfigError, Settings
-from copilot.contracts import Case, TimeContext, TimePoint, TimeStatus
+from copilot.contracts import Case, DraftCheck, TimeContext, TimePoint, TimeStatus
 from copilot.draft.compose import back_translate
-from copilot.draft.retrieval import KnowledgeSnapshot, build_view, load_snapshot
+from copilot.draft.retrieval import KnowledgeSnapshot, KnowledgeView, build_view, load_snapshot
 from copilot.draft.service import DraftOutcome, DraftParams, draft_case
 from copilot.draft.similar import EmbeddingCache, SimilarCaseRetriever, corpus_before
 from copilot.draft.timectx import build_now
@@ -42,6 +42,7 @@ from copilot.llm import (
 )
 from copilot.storage import create_engine_for
 from copilot.workbench.drafting import DrafterFailedError, DrafterUnavailableError
+from copilot.workbench.editing import check_edited, translate_reply
 
 logger = logging.getLogger(__name__)
 
@@ -180,12 +181,25 @@ class PipelineDrafter:
             )
         )
 
-    def backtranslate(self, body_ja: str) -> str:
-        self._params()  # 缺少模型配置时给出与起草相同的提示
-        # 与起草时相同的术语表：现在适用的、已批准的版本
+    def _current_view(self) -> KnowledgeView:
+        """现在适用的、已批准的知识（与起草时相同的筛选），用于回译、翻译和编辑后的自检。"""
         now = TimeContext(
             now=build_now(self._now() if self._now is not None else None),
             problem_time=TimePoint(status=TimeStatus.UNAVAILABLE),
         )
-        glossary = build_view(self._snapshot(), now, form=None, known_at=None).glossary
+        return build_view(self._snapshot(), now, form=None, known_at=None)
+
+    def backtranslate(self, body_ja: str) -> str:
+        self._params()  # 缺少模型配置时给出与起草相同的提示
+        glossary = self._current_view().glossary
         return self._run(back_translate(body_ja, self._client(), glossary))
+
+    def translate(self, body_zh: str) -> str:
+        self._params()
+        view = self._current_view()
+        guide, _, _ = self._load()
+        return self._run(translate_reply(body_zh, self._client(), guide, view.glossary))
+
+    def check(self, body_ja: str) -> list[DraftCheck]:
+        guide, _, _ = self._load()
+        return check_edited(body_ja, guide, self._current_view().forbidden_promises)

@@ -5,11 +5,11 @@
 例如 API 的一个请求就是一个事务，“写入反馈 + 进入发件箱 + 更新案件”要么全部成功，要么全部不生效。
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Literal, Protocol
 
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from copilot.contracts.enums import CaseStatus, InquiryCategory, Route
 from copilot.storage.tables import AnalysisRow, CaseRow, DraftRow, FeedbackRow, OutboxRow
 
 Clock = Callable[[], datetime]
+Sort = Literal["newest", "oldest"]
 
 
 def utc_now() -> datetime:
@@ -50,12 +51,15 @@ class Repository(Protocol):
         self,
         *,
         status: CaseStatus | None = None,
+        statuses: Collection[CaseStatus] | None = None,
         category: InquiryCategory | None = None,
         route: Route | None = None,
+        sort: Sort = "newest",
         limit: int = 50,
         offset: int = 0,
     ) -> Page[Case]:
-        """按更新时间倒序列出案件。`route` 按最新草稿的分流结果筛选。"""
+        """按更新时间列出案件，默认最新的在前（`oldest` 为先进先出）。`statuses` 是状态的集合，
+        与 `status` 同时给出时取交集。`route` 按最新草稿的分流结果筛选。"""
         ...
 
     def add_analysis(self, analysis: CaseAnalysis) -> None: ...
@@ -120,21 +124,30 @@ class SqlRepository:
         self,
         *,
         status: CaseStatus | None = None,
+        statuses: Collection[CaseStatus] | None = None,
         category: InquiryCategory | None = None,
         route: Route | None = None,
+        sort: Sort = "newest",
         limit: int = 50,
         offset: int = 0,
     ) -> Page[Case]:
         query = select(CaseRow)
         if status is not None:
             query = query.where(CaseRow.status == status.value)
+        if statuses is not None:
+            query = query.where(CaseRow.status.in_([s.value for s in statuses]))
         if category is not None:
             query = query.where(CaseRow.category == category.value)
         if route is not None:
             query = query.where(CaseRow.route == route.value)
         total = self._session.scalar(select(func.count()).select_from(query.subquery())) or 0
         rows = self._session.scalars(
-            query.order_by(CaseRow.updated_at.desc(), CaseRow.id).limit(limit).offset(offset)
+            query.order_by(
+                CaseRow.updated_at.desc() if sort == "newest" else CaseRow.updated_at.asc(),
+                CaseRow.id,
+            )
+            .limit(limit)
+            .offset(offset)
         )
         return Page(items=[Case.model_validate(row.doc) for row in rows], total=total)
 

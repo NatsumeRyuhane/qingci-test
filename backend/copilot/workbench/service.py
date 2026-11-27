@@ -1,20 +1,50 @@
 """坐席流程的服务函数。只依赖 `Repository` 和 `Drafter` 接口。"""
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
-from copilot.contracts import Case, Feedback, Message, OutboundMail, RoleEvidence
-from copilot.contracts.enums import CaseStatus, FeedbackAction, MessageRole, RoleEvidenceKind
+from copilot.contracts import (
+    Case,
+    Draft,
+    DraftCheck,
+    Feedback,
+    Message,
+    OutboundMail,
+    RoleEvidence,
+)
+from copilot.contracts.enums import (
+    CaseStatus,
+    DraftCheckKind,
+    FeedbackAction,
+    MessageRole,
+    RoleEvidenceKind,
+)
 from copilot.draft.service import DraftOutcome
 from copilot.storage import NotFoundError, Repository
 from copilot.storage.repository import Clock, utc_now
 from copilot.workbench.drafting import Drafter, latest_player_message
+from copilot.workbench.editing import TEXT_INDEPENDENT_CHECKS
 from copilot.workbench.text import levenshtein
 
 CLOSED_STATUSES = frozenset({CaseStatus.REPLIED, CaseStatus.NO_REPLY_NEEDED})
 """已结案的状态。玩家追问会让案件回到 `open`，在那之前不能再起草或处理。"""
 
+ACTIONABLE_STATUSES = frozenset(set(CaseStatus) - CLOSED_STATUSES)
+"""需要人工处理的状态：待处理、已起草、已升级、待判断。"""
+
 SENT_BY_WORKBENCH = "由工作台发出（#8）"
 """系统发出的回复的角色依据说明。发件人是我们自己，所以是强证据（`metadata`）。"""
+
+
+NEEDS_REASON = frozenset(
+    {FeedbackAction.ESCALATED, FeedbackAction.REJECTED, FeedbackAction.NO_REPLY}
+)
+
+
+def edited_checks(drafter: Drafter, draft: Draft, body_ja: str) -> list[DraftCheck]:
+    """编辑后的正文的自检：重新运行只依赖正文的检查，与正文无关的检查沿用草稿原来的结果。"""
+    kept = [c for c in draft.checks if c.kind in TEXT_INDEPENDENT_CHECKS]
+    return [*drafter.check(body_ja), *kept]
 
 
 class ConflictError(RuntimeError):
@@ -77,15 +107,22 @@ def submit_feedback(
     *,
     actor: str,
     action: FeedbackAction,
+    drafter: Drafter,
     final_body_ja: str | None = None,
     reason: str | None = None,
+    final_body_zh: str | None = None,
+    ja_edited_directly: bool = False,
+    confirmed_failed_checks: Collection[DraftCheckKind] = (),
     clock: Clock = utc_now,
 ) -> FeedbackResult:
     """记录客服对草稿的处理，并相应地推进案件。
 
-    - 批准 / 修改后批准：回复进入发件箱，并作为客服邮件追加到案件，案件变为 `replied`
+    - 批准 / 修改后批准：回复进入发件箱，并作为客服邮件追加到案件，案件变为 `replied`。
+      发出的正文有未通过的自检时，必须在 `confirmed_failed_checks` 中逐项确认，否则拒绝发送
+      （修改后的正文由服务端重新自检，不信任客户端的结果）。
     - 升级处理：案件变为 `escalated`，必须填写理由
     - 驳回：案件回到 `open`，等待重新起草，必须填写理由
+    - 无需回复：案件变为 `no_reply_needed`，必须填写理由
 
     只能处理案件的最新草稿，并且草稿回复的必须是最新一封玩家邮件：玩家在起草之后又来信时，
     旧草稿没有考虑新的内容，需要重新起草。
@@ -103,8 +140,8 @@ def submit_feedback(
         raise ConflictError("玩家在起草之后又有来信，请重新起草")
 
     reason = (reason or "").strip() or None
-    if action in {FeedbackAction.ESCALATED, FeedbackAction.REJECTED} and reason is None:
-        raise InvalidRequestError("升级处理和驳回需要填写理由")
+    if action in NEEDS_REASON and reason is None:
+        raise InvalidRequestError("升级处理、驳回和无需回复需要填写理由")
     body: str | None = None
     distance = 0
     if action is FeedbackAction.EDITED:
@@ -118,6 +155,15 @@ def submit_feedback(
     elif action is FeedbackAction.APPROVED and final_body_ja not in {None, draft.body_ja}:
         raise InvalidRequestError("正文有修改，请使用“修改后批准”")
 
+    sends = action in {FeedbackAction.APPROVED, FeedbackAction.EDITED}
+    failed: list[DraftCheckKind] = []
+    if sends:
+        checks = draft.checks if body is None else edited_checks(drafter, draft, body)
+        failed = sorted({c.kind for c in checks if not c.passed})
+        unconfirmed = [k.value for k in failed if k not in set(confirmed_failed_checks)]
+        if unconfirmed:
+            raise InvalidRequestError(f"有未通过的自检：{', '.join(unconfirmed)}。确认后才能发送")
+
     now = clock()
     feedback = Feedback(
         draft_id=draft.id,
@@ -127,6 +173,9 @@ def submit_feedback(
         reason=reason,
         edit_distance=distance,
         created_at=now,
+        final_body_zh=(final_body_zh or None) if sends else None,
+        ja_edited_directly=ja_edited_directly and sends,
+        confirmed_failed_checks=failed,
     )
     repo.add_feedback(feedback)
 
@@ -157,6 +206,8 @@ def submit_feedback(
         )
     elif action is FeedbackAction.ESCALATED:
         case = case.model_copy(update={"status": CaseStatus.ESCALATED})
+    elif action is FeedbackAction.NO_REPLY:
+        case = case.model_copy(update={"status": CaseStatus.NO_REPLY_NEEDED})
     else:
         case = case.model_copy(update={"status": CaseStatus.OPEN})
     repo.save_case(case)

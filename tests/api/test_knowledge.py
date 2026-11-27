@@ -75,7 +75,9 @@ def _handle(client: TestClient, case_id: str, *steps: dict[str, Any]) -> None:
     for step in steps:
         body = {"actor": "客服A", **step}
         if step.get("action") == "edited":
-            body["final_body_ja"] = draft["body_ja"] + "追記"
+            body["final_body_ja"] = draft["body_ja"].replace(
+                "【占位の下書き】", "【占位の下書き】追記"
+            )
         assert client.post(f"/v1/drafts/{draft['id']}/feedback", json=body).status_code == 201
 
 
@@ -101,6 +103,7 @@ def test_metrics(app: FastAPI, client: TestClient, seed: Seed) -> None:
     )
     assert total["approved_rate"] == 0.5
     assert total["avg_edit_distance"] == pytest.approx(2 / 3)
+    assert total["no_reply"] == 0
     assert [row["key"] for row in metrics["by_template"]] == ["tpl-b"]
     routes = {row["key"]: row for row in metrics["by_route"]}
     assert routes["auto_send"]["handled"] == 2 and routes["auto_send"]["edited_rate"] == 0.5

@@ -13,7 +13,8 @@ export interface paths {
         };
         /**
          * List Cases
-         * @description 收件箱：按最近更新时间倒序列出案件，可按状态、类别和分流结果筛选。
+         * @description 收件箱：按最近更新时间列出案件（`sort=oldest` 为先进先出），可按状态、类别和分流结果
+         *     筛选。`actionable=true` 只列需要人工处理的案件（未结案的）。
          */
         get: operations["list_cases_v1_cases_get"];
         put?: never;
@@ -87,6 +88,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/drafts/{draft_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check
+         * @description 对客服直接改过的日语正文自检。只在代码中运行，不调用 LLM。
+         */
+        post: operations["check_v1_drafts__draft_id__check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/drafts/{draft_id}/feedback": {
         parameters: {
             query?: never;
@@ -98,11 +119,32 @@ export interface paths {
         put?: never;
         /**
          * Create Feedback
-         * @description 批准（进入发件箱）、修改后批准、升级处理或驳回。
+         * @description 批准（进入发件箱）、修改后发送、升级处理、驳回或无需回复。
          *
-         *     只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。
+         *     只能处理案件的最新草稿；案件已结案或玩家在起草后又来信时返回 409。发出的正文有
+         *     未确认的未通过自检时返回 422。
          */
         post: operations["create_feedback_v1_drafts__draft_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/drafts/{draft_id}/translate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Translate
+         * @description 把客服编辑的中文回复译成日语（LLM），并对译文自检。不修改草稿本身。
+         */
+        post: operations["translate_v1_drafts__draft_id__translate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -429,6 +471,11 @@ export interface components {
             summary_zh: string | null;
             urgency: components["schemas"]["Urgency"] | null;
         };
+        /** CheckRequest */
+        CheckRequest: {
+            /** Body Ja */
+            body_ja: string;
+        };
         /**
          * Citation
          * @description 草稿中的一个说法引用的知识库条目。没有引用的事实性说法会在检查中标出（提案 0003 §10）。
@@ -581,6 +628,13 @@ export interface components {
          * @enum {string}
          */
         DraftMode: "pipeline" | "pipeline_with_tools";
+        /** EditResult */
+        EditResult: {
+            /** Body Ja */
+            body_ja: string;
+            /** Checks */
+            checks: components["schemas"]["DraftCheck"][];
+        };
         /**
          * EntryOrigin
          * @description 知识库条目的来源方式。
@@ -691,8 +745,17 @@ export interface components {
             action: components["schemas"]["FeedbackAction"];
             /** Actor */
             actor: string;
+            /** Confirmed Failed Checks */
+            confirmed_failed_checks?: components["schemas"]["DraftCheckKind"][];
             /** Final Body Ja */
             final_body_ja?: string | null;
+            /** Final Body Zh */
+            final_body_zh?: string | null;
+            /**
+             * Ja Edited Directly
+             * @default false
+             */
+            ja_edited_directly: boolean;
             /** Reason */
             reason?: string | null;
         };
@@ -874,6 +937,10 @@ export interface components {
             handled: number;
             /** Key */
             key: string;
+            /** No Reply */
+            no_reply: number;
+            /** No Reply Rate */
+            no_reply_rate: number;
             /** Rejected */
             rejected: number;
             /** Rejected Rate */
@@ -1322,6 +1389,11 @@ export interface components {
              */
             tool: string;
         };
+        /** TranslateRequest */
+        TranslateRequest: {
+            /** Body Zh */
+            body_zh: string;
+        };
         /**
          * Urgency
          * @description 处理的紧急程度。
@@ -1343,6 +1415,8 @@ export interface operations {
                 status?: components["schemas"]["CaseStatus"] | null;
                 category?: components["schemas"]["InquiryCategory"] | null;
                 route?: components["schemas"]["Route"] | null;
+                actionable?: boolean;
+                sort?: "newest" | "oldest";
                 limit?: number;
                 offset?: number;
             };
@@ -1721,6 +1795,104 @@ export interface operations {
             };
         };
     };
+    check_v1_drafts__draft_id__check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditResult"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     create_feedback_v1_drafts__draft_id__feedback_post: {
         parameters: {
             query?: never;
@@ -1743,6 +1915,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeedbackResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    translate_v1_drafts__draft_id__translate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranslateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditResult"];
                 };
             };
             /** @description Unauthorized */
