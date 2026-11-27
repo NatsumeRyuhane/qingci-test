@@ -98,3 +98,11 @@ def test_empty_task_key_falls_back_to_global() -> None:
     endpoint = settings.llm_endpoint(LLMTask.DRAFT)
     assert endpoint.api_key.get_secret_value() == "global-key"
     assert endpoint.base_url == "https://global.example/v1"
+
+
+def test_service_tier() -> None:
+    assert make_settings().llm_service_tier is None
+    assert make_settings(llm_service_tier="").llm_service_tier is None
+    assert make_settings(llm_service_tier="flex").llm_service_tier == "flex"
+    with pytest.raises(ValueError):
+        make_settings(llm_service_tier="cheapest")

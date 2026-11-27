@@ -96,6 +96,9 @@ class OpenAICompatibleClient:
         extra: dict[str, Any] = {}
         if response_format is not None:
             extra["response_format"] = response_format
+        if self._settings.llm_service_tier is not None:
+            # 放在请求体的顶层（OpenRouter 的约定）。不用 SDK 的同名参数，避免受它的取值限制。
+            extra["extra_body"] = {"service_tier": self._settings.llm_service_tier}
         response = await self._client_for(endpoint).chat.completions.create(
             model=endpoint.model,
             messages=list(messages),  # type: ignore[arg-type]

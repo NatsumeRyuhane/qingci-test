@@ -7,7 +7,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,8 @@ class LLMTask(StrEnum):
 
 
 JsonMode = Literal["json_schema", "json_object", "none"]
+ServiceTier = Literal["default", "flex", "priority"]
+"""请求的服务等级（例如 OpenRouter 的 `service_tier`）。flex 更便宜、优先级更低。"""
 
 
 class MissingConfigError(RuntimeError):
@@ -44,6 +46,7 @@ class Settings(BaseSettings):
     llm_json_mode: JsonMode = "json_object"
     llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 2
+    llm_service_tier: ServiceTier | None = None
 
     llm_model_analyze: str | None = None
     llm_model_draft: str | None = None
@@ -68,6 +71,12 @@ class Settings(BaseSettings):
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"
     database_url: str = "sqlite:///data/copilot.db"
+
+    @field_validator("llm_service_tier", mode="before")
+    @classmethod
+    def _empty_tier_is_none(cls, value: object) -> object:
+        # 直接复制 .env.example 时值为空字符串，表示不指定。
+        return None if value == "" else value
 
     def llm_endpoint(self, task: LLMTask) -> Endpoint:
         """某个任务实际使用的端点。

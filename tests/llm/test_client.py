@@ -205,3 +205,16 @@ async def test_task_override_uses_its_own_endpoint() -> None:
     assert str(request.url) == "https://judge.example/v1/chat/completions"
     assert request.headers["authorization"] == "Bearer judge-key"
     assert endpoint.body()["model"] == "judge-model"
+
+
+async def test_service_tier_is_sent_when_configured() -> None:
+    endpoint = FakeEndpoint(chat_reply(VALID))
+    settings = make_settings(llm_service_tier="flex")
+    await make_client(endpoint, settings).complete_json(LLMTask.ANALYZE, MESSAGES, Triage)
+    assert endpoint.body()["service_tier"] == "flex"
+
+
+async def test_service_tier_is_omitted_by_default() -> None:
+    endpoint = FakeEndpoint(chat_reply("テキスト"))
+    await make_client(endpoint).complete_text(LLMTask.ANALYZE, MESSAGES)
+    assert "service_tier" not in endpoint.body()
