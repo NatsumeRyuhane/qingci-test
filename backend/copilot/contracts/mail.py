@@ -30,6 +30,7 @@ class OutboundMail(Document):
     body_ja: str = Field(min_length=1)
     """发出的正文（日语）：原样批准时是草稿正文，修改后批准时是客服修改后的正文。"""
     sent_by: str = Field(min_length=1)
-    """点击发送的客服，与对应 `Feedback.actor` 相同。"""
+    """发送人，与对应 `Feedback.actor` 相同：点击发送的客服；自动发送（D-018）时为
+    “系统（自动发送）”。"""
     sent_at: AwareDatetime
     """发送时间。"""

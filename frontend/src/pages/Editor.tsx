@@ -100,7 +100,9 @@ function DraftSummary({ draft }: { draft: Draft }) {
         ))}
       </ul>
       {draft.route === "auto_send" && (
-        <p className="notice notice-info">建议可以直接发送，仍需要你确认后点击发送。</p>
+        <p className="notice notice-info">
+          分流为可直接发送，但没有被自动发送（自动发送未开启，或草稿是手动生成的），请确认后发送。
+        </p>
       )}
       {ref && (
         <p className="muted">

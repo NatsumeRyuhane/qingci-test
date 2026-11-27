@@ -86,7 +86,7 @@ _PREVIEW_CHARS = 80
 _ROUTES: dict[InquiryCategory, tuple[Route, str]] = {
     InquiryCategory.PURCHASE: (Route.ESCALATE, "占位规则：购买问题，升级处理"),
     InquiryCategory.DATA_TRANSFER: (Route.ESCALATE, "占位规则：数据迁移问题，升级处理"),
-    InquiryCategory.FEEDBACK: (Route.AUTO_SEND, "占位规则：意见建议，可直接发送（仍需客服点击）"),
+    InquiryCategory.FEEDBACK: (Route.AUTO_SEND, "占位规则：意见建议，可直接发送"),
 }
 _DEFAULT_ROUTE = (Route.REVIEW, "占位规则：需要客服审核")
 
@@ -96,7 +96,7 @@ class StubDrafter:
 
     所有文字以“【占位】”开头，分流理由写明“占位规则”，避免被误认为真实结果。分流只按案件的
     类别判断，覆盖三种分流结果，方便界面开发：购买和数据迁移升级处理，意见建议 `auto_send`
-    （仍由客服点击发送），其他人工审核。
+    （开启自动发送时由系统发出），其他人工审核。
     """
 
     def __init__(self, *, clock: Callable[[], datetime] = _now) -> None:

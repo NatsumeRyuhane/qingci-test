@@ -1044,7 +1044,8 @@ export interface components {
             sent_at: string;
             /**
              * Sent By
-             * @description 点击发送的客服，与对应 `Feedback.actor` 相同。
+             * @description 发送人，与对应 `Feedback.actor` 相同：点击发送的客服；自动发送（D-018）时为
+             *     “系统（自动发送）”。
              */
             sent_by: string;
         };
