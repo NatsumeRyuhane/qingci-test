@@ -16,7 +16,9 @@ def app(tmp_path: Path) -> FastAPI:
     """连接一个已迁移的临时 SQLite 数据库、使用占位起草服务的应用。"""
     url = f"sqlite:///{tmp_path / 'copilot.db'}"
     upgrade_database(url)
-    return create_app(Settings(database_url=url, workbench_drafter="stub"))
+    return create_app(
+        Settings(database_url=url, workbench_drafter="stub", workbench_auto_draft=False)
+    )
 
 
 @pytest.fixture

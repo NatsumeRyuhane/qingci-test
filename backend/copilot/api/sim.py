@@ -5,11 +5,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel, Field
 
 from copilot.api.cases import MAX_BODY_CHARS, CaseIdQuery
-from copilot.api.deps import Repo
+from copilot.api.deps import AutoDrafterDep, Repo
 from copilot.contracts import CaseId, CaseStatus, InquiryForm, OutboundMail
 from copilot.workbench import receive_mail
 
@@ -41,9 +41,17 @@ def router() -> APIRouter:
     r = APIRouter(prefix="/sim", tags=["sim"])
 
     @r.post("/inbox", status_code=201)
-    def inbox(repo: Repo, body: InboundMailRequest) -> InboundMailResponse:
-        """投递一封玩家来信：新建线程，或对已有案件追问。案件随之出现在工作台的收件箱中。"""
+    def inbox(
+        repo: Repo,
+        autodrafter: AutoDrafterDep,
+        background: BackgroundTasks,
+        body: InboundMailRequest,
+    ) -> InboundMailResponse:
+        """投递一封玩家来信：新建线程，或对已有案件追问。案件随之出现在工作台的收件箱中，
+        开启自动起草时立即开始分析和起草。"""
         case = receive_mail(repo, body=body.body, case_id=body.case_id, form=body.form)
+        if autodrafter is not None:
+            background.add_task(autodrafter.wake)  # 响应发出（事务已提交）之后再唤醒
         return InboundMailResponse(
             case_id=case.id, message_seq=case.messages[-1].seq, case_status=case.status
         )

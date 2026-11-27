@@ -87,12 +87,22 @@ class Settings(BaseSettings):
     用于前端开发和预览。"""
     workbench_draft_tools: bool = False
     """工作台起草时是否用“流水线 + 工具”模式。"""
+    workbench_auto_draft: bool = True
+    """来信进入收件箱后自动分析和起草（后台进行），客服打开案件时草稿已经准备好。"""
+    workbench_auto_draft_workers: int = Field(default=2, ge=1, le=8)
+    """同时进行的自动起草数。"""
+    workbench_auto_send: bool = False
+    """为真时，自动起草得到的 `auto_send` 草稿由系统直接发送（进入发件箱）。默认关闭（D-018）。"""
+    workbench_background_service_tier: ServiceTier | None = "flex"
+    """自动起草使用的服务等级（D-017：后台任务用 flex 降本）。留空则不发送。"""
 
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"
     database_url: str = "sqlite:///data/copilot.db"
 
-    @field_validator("llm_service_tier", "llm_log_dir", mode="before")
+    @field_validator(
+        "llm_service_tier", "llm_log_dir", "workbench_background_service_tier", mode="before"
+    )
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         # 直接复制 .env.example 时值为空字符串，表示不指定。

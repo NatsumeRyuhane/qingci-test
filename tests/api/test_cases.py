@@ -179,3 +179,25 @@ def test_drafter_errors_map_to_503_and_502(app: FastAPI, client: TestClient, see
     assert response.json()["error"]["code"] == "upstream_error"
     # 失败的起草没有留下半个结果
     assert client.get("/v1/cases/SYN-1").json()["draft"]["id"] == draft_id
+
+
+def test_drafting_status_and_busy_guard(app: FastAPI, client: TestClient, seed: Seed) -> None:
+    """自动起草排队中时，列表和详情显示状态；不能同时手动起草。"""
+    from copilot.storage import create_engine_for
+    from copilot.workbench.autodraft import AutoDrafter
+
+    seed(case("SYN-1"))
+    engine = create_engine_for(app.state.database_url)
+    auto = AutoDrafter(engine, StubDrafter())
+    app.state.autodrafter = auto
+    auto.scan()
+
+    assert client.get("/v1/cases").json()["items"][0]["drafting"]["state"] == "queued"
+    assert client.get("/v1/cases/SYN-1").json()["drafting"]["state"] == "queued"
+    busy = client.post("/v1/cases/SYN-1/drafts")
+    assert busy.status_code == 409 and "自动" in busy.json()["error"]["message"]
+
+    auto.run_job("SYN-1", 1)
+    detail = client.get("/v1/cases/SYN-1").json()
+    assert detail["drafting"] is None and detail["draft"] is not None
+    engine.dispose()

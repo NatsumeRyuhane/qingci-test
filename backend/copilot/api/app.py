@@ -9,9 +9,11 @@ from pydantic import BaseModel
 from copilot import __version__
 from copilot.api import cases, knowledge, sim
 from copilot.api.auth import authorize
+from copilot.api.deps import app_engine
 from copilot.api.errors import ERROR_RESPONSES, install_error_handling
 from copilot.config import Settings, get_settings
 from copilot.workbench import Drafter, StubDrafter
+from copilot.workbench.autodraft import AutoDrafter
 
 API_PREFIX = "/v1"
 
@@ -59,12 +61,23 @@ def create_app(settings: Settings | None = None, *, drafter: Drafter | None = No
 
     数据库引擎在第一次用到时才创建（见 `copilot.api.deps`），只生成 OpenAPI 时不碰数据库。
     `drafter` 默认按 `WORKBENCH_DRAFTER` 选择：#6 的起草流水线，或不调用 LLM 的占位实现。
+    `WORKBENCH_AUTO_DRAFT` 开启时，应用启动后在后台自动起草（`copilot.workbench.autodraft`）。
     """
     settings = settings or get_settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if settings.workbench_auto_draft:
+            app.state.autodrafter = AutoDrafter(
+                app_engine(app),
+                app.state.drafter,
+                workers=settings.workbench_auto_draft_workers,
+                auto_send=settings.workbench_auto_send,
+            )
+            app.state.autodrafter.start()
         yield
+        if app.state.autodrafter is not None:
+            app.state.autodrafter.stop()
         if app.state.engine is not None:
             app.state.engine.dispose()
 
@@ -79,6 +92,7 @@ def create_app(settings: Settings | None = None, *, drafter: Drafter | None = No
     app.state.database_url = settings.database_url
     app.state.engine = None
     app.state.drafter = drafter or _default_drafter(settings)
+    app.state.autodrafter = None
     install_error_handling(app)
     app.include_router(_v1_router())
     return app

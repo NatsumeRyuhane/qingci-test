@@ -202,7 +202,8 @@ export interface paths {
         put?: never;
         /**
          * Inbox
-         * @description 投递一封玩家来信：新建线程，或对已有案件追问。案件随之出现在工作台的收件箱中。
+         * @description 投递一封玩家来信：新建线程，或对已有案件追问。案件随之出现在工作台的收件箱中，
+         *     开启自动起草时立即开始分析和起草。
          */
         post: operations["inbox_v1_sim_inbox_post"];
         delete?: never;
@@ -434,6 +435,7 @@ export interface components {
             analysis: components["schemas"]["CaseAnalysis"] | null;
             case: components["schemas"]["Case"];
             draft: components["schemas"]["Draft"] | null;
+            drafting?: components["schemas"]["DraftingStatus"] | null;
             /** Feedback */
             feedback: components["schemas"]["Feedback"][];
         };
@@ -456,6 +458,7 @@ export interface components {
          */
         CaseSummary: {
             category: components["schemas"]["InquiryCategory"] | null;
+            drafting?: components["schemas"]["DraftingStatus"] | null;
             /** Id */
             id: string;
             /** Last Message At */
@@ -628,6 +631,24 @@ export interface components {
          * @enum {string}
          */
         DraftMode: "pipeline" | "pipeline_with_tools";
+        /**
+         * DraftingStatus
+         * @description 后台自动起草的状态。没有在进行、也没有失败时为空。
+         */
+        DraftingStatus: {
+            /** Error */
+            error?: string | null;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "failed";
+        };
         /** EditResult */
         EditResult: {
             /** Body Ja */

@@ -1,11 +1,11 @@
 """案件与草稿的端点（#8）。只做请求和响应的转换，流程在 `copilot.workbench` 中。"""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path, Query
 from pydantic import AwareDatetime, BaseModel, Field
 
-from copilot.api.deps import DrafterDep, Repo
+from copilot.api.deps import AutoDrafterDep, DrafterDep, Repo
 from copilot.contracts import (
     Case,
     CaseAnalysis,
@@ -28,11 +28,13 @@ from copilot.storage import NotFoundError
 from copilot.storage.repository import Sort
 from copilot.workbench import (
     ACTIONABLE_STATUSES,
+    ConflictError,
     edited_checks,
     generate_draft,
     latest_player_message,
     submit_feedback,
 )
+from copilot.workbench.autodraft import AutoDrafter
 
 PREVIEW_CHARS = 80
 MAX_BODY_CHARS = 20_000
@@ -41,6 +43,23 @@ MAX_BODY_CHARS = 20_000
 CaseIdPath = Annotated[str, Path(pattern=rf"^{CASE_ID_CHARS}$")]
 CaseIdQuery = Annotated[str | None, Query(pattern=rf"^{CASE_ID_CHARS}$")]
 DraftIdPath = Annotated[str, Path(min_length=1, max_length=64)]
+
+
+class DraftingStatus(BaseModel):
+    """后台自动起草的状态。没有在进行、也没有失败时为空。"""
+
+    state: Literal["queued", "running", "failed"]
+    """排队中、起草中，或失败（不会自动重试，可以手动生成）。"""
+    since: AwareDatetime
+    error: str | None = None
+    """失败的原因（中文），不含邮件内容。"""
+
+
+def _drafting(autodrafter: AutoDrafter | None, case_id: str) -> DraftingStatus | None:
+    job = autodrafter.status(case_id) if autodrafter else None
+    if job is None:
+        return None
+    return DraftingStatus(state=job.state, since=job.updated_at, error=job.error)
 
 
 class CaseSummary(BaseModel):
@@ -61,6 +80,8 @@ class CaseSummary(BaseModel):
     message_count: int
     last_message_at: AwareDatetime | None
     """最新一封邮件的发送时间，未知时为空。"""
+    drafting: DraftingStatus | None = None
+    """后台自动起草的状态。"""
 
 
 class CaseList(BaseModel):
@@ -77,6 +98,8 @@ class CaseDetail(BaseModel):
     draft: Draft | None
     feedback: list[Feedback]
     """最新草稿收到的反馈，按时间顺序。"""
+    drafting: DraftingStatus | None = None
+    """后台自动起草的状态。"""
 
 
 class BacktranslateRequest(BaseModel):
@@ -130,7 +153,7 @@ class FeedbackResponse(BaseModel):
     """处理后的案件状态。"""
 
 
-def _summary(repo: Repo, case: Case) -> CaseSummary:
+def _summary(repo: Repo, case: Case, autodrafter: AutoDrafter | None = None) -> CaseSummary:
     analysis = repo.latest_analysis(case.id)
     draft = repo.latest_draft(case.id)
     try:
@@ -148,6 +171,7 @@ def _summary(repo: Repo, case: Case) -> CaseSummary:
         preview_ja=" ".join(body.split())[:PREVIEW_CHARS],
         message_count=len(case.messages),
         last_message_at=case.messages[-1].sent_at,
+        drafting=_drafting(autodrafter, case.id),
     )
 
 
@@ -158,7 +182,7 @@ def _require_draft(repo: Repo, draft_id: str) -> Draft:
     return draft
 
 
-def _detail(repo: Repo, case_id: str) -> CaseDetail:
+def _detail(repo: Repo, case_id: str, autodrafter: AutoDrafter | None = None) -> CaseDetail:
     case = repo.get_case(case_id)
     if case is None:
         raise NotFoundError(f"案件不存在：{case_id}")
@@ -168,6 +192,7 @@ def _detail(repo: Repo, case_id: str) -> CaseDetail:
         analysis=repo.latest_analysis(case_id),
         draft=draft,
         feedback=repo.list_feedback(draft_id=draft.id) if draft else [],
+        drafting=_drafting(autodrafter, case_id),
     )
 
 
@@ -177,6 +202,7 @@ def router() -> APIRouter:
     @r.get("/cases")
     def list_cases(
         repo: Repo,
+        autodrafter: AutoDrafterDep,
         status: CaseStatus | None = None,
         category: InquiryCategory | None = None,
         route: Route | None = None,
@@ -196,22 +222,30 @@ def router() -> APIRouter:
             limit=limit,
             offset=offset,
         )
-        return CaseList(items=[_summary(repo, case) for case in page.items], total=page.total)
+        return CaseList(
+            items=[_summary(repo, case, autodrafter) for case in page.items], total=page.total
+        )
 
     @r.get("/cases/{case_id}")
-    def get_case(repo: Repo, case_id: CaseIdPath) -> CaseDetail:
+    def get_case(repo: Repo, autodrafter: AutoDrafterDep, case_id: CaseIdPath) -> CaseDetail:
         """案件详情。"""
-        return _detail(repo, case_id)
+        return _detail(repo, case_id, autodrafter)
 
     @r.post("/cases/{case_id}/drafts", status_code=201)
-    def create_draft(repo: Repo, drafter: DrafterDep, case_id: CaseIdPath) -> CaseDetail:
+    def create_draft(
+        repo: Repo, drafter: DrafterDep, autodrafter: AutoDrafterDep, case_id: CaseIdPath
+    ) -> CaseDetail:
         """为最新一封玩家邮件（重新）生成分析和草稿。
 
         “不回复”自动生效时没有草稿，案件变为 `no_reply_needed`。已结案的案件返回 409；
         起草服务未配置时返回 503，调用失败时返回 502。
         """
+        if autodrafter is not None and autodrafter.busy(case_id):
+            raise ConflictError("正在自动分析和起草，请稍候")
         generate_draft(repo, drafter, case_id)
-        return _detail(repo, case_id)
+        if autodrafter is not None:
+            autodrafter.forget(case_id)
+        return _detail(repo, case_id, autodrafter)
 
     @r.post("/drafts/{draft_id}/backtranslate")
     def backtranslate(

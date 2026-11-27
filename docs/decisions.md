@@ -145,3 +145,12 @@
   - **服务等级**：批处理与异步任务（离线评测、知识库标注、后台预起草）优先使用 `flex` 降本；界面交互式重新生成使用 `default` 控制尾延迟。
 - 影响：已将 `backend/copilot/config.py`、`backend/copilot/draft/service.py` 与 `.env.example` 的默认阈值更新为 `0.92`，并同步更新 [eval.md](eval.md) 和 [claims.md](claims.md)（P-06）；两个留待改进项已拆出为独立 issue（[#34](https://github.com/NatsumeRyuhane/qingci-test/issues/34)、[#35](https://github.com/NatsumeRyuhane/qingci-test/issues/35)）。
 
+
+## D-018：来信后自动起草；工作台可以自动发送；允许两类低风险意图的模板自动发送
+- 日期：2026-11-27 · 状态：已采纳（修订 D-017 中“全部模板继续保持 `auto_send_allowed = False`”一句） · 来源：[#8](https://github.com/NatsumeRyuhane/qingci-test/issues/8)（仓库所有者的决定）
+- 背景：工作台原来要客服打开案件后手动“生成草稿”，用真实模型起草一个案件需要几十秒到一分多钟；`auto_send` 只是界面上的建议（#6、D-001）。D-017 在低风险意图专项校准之前让所有模板都不能自动发送，所以分流永远不会给出 `auto_send`。演示和日常使用都需要更高的自动化：来信即起草，最低风险的答复可以直接发出。
+- 决定：
+  - **来信后自动起草**：来信进入收件箱后，后台立即分析和起草（`WORKBENCH_AUTO_DRAFT`，默认开启），客服打开案件时草稿已经准备好。后台起草使用 `WORKBENCH_BACKGROUND_SERVICE_TIER`（默认 `flex`，与 D-017 的服务等级决定一致）；界面中的交互操作仍用 `LLM_SERVICE_TIER`。失败时记录原因、不自动重试，客服可以手动生成。
+  - **自动发送开关**：`WORKBENCH_AUTO_SEND`（默认关闭）开启时，后台起草得到的、被 #6 分流为 `auto_send` 的草稿由系统直接发送，`Feedback.actor` 和发件人记为“系统（自动发送）”。是否 `auto_send` 仍完全由 #6 的分流决定（意图在允许清单中、模板已批准且低风险并允许自动发送、置信度不低于 `DRAFT_AUTO_SEND_MIN_CONFIDENCE`、没有敏感标签、情绪不负面、是第一封客服回复、全部自检通过、没有疑似注入）。MVP 中发件箱是模拟的，不会真正发出邮件。
+  - **允许自动发送的模板**：`knowledge/intents.yaml` 中已经列入允许清单的 `thanks_reply`、`feedback_acknowledgement` 两个意图下，**已批准、风险为 low、证据为 strong**（不是 `repeated_only`）的模板，在审核覆盖层中设 `auto_send_allowed: true`（`copilot kb review import` 后 `copilot kb publish`）。其他意图保持 D-017 的规定，等待低风险意图的专项校准。
+- 影响：D-017 的阈值（0.92）和服务等级决定不变。审核覆盖层不在 git 中（`data/` 被忽略），具体开启了哪些模板在 PR 中列出。自动发送的效果在指标页的“按分流结果”中按 `auto_send` 统计；发现问题时关闭 `WORKBENCH_AUTO_SEND` 即可回到人工发送。

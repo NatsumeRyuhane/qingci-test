@@ -83,7 +83,8 @@ class PipelineDrafter:
         """`clock` 决定生成时间；`now` 决定起草时的“现在”，默认（None）为系统时间，
         测试中可以固定。"""
         self._settings = settings
-        self._llm = llm
+        self._llm_override = llm
+        self._clients: dict[str, LLMClient] = {}
         self._embedder = embedder if embedder is not None else _embedding_client(settings)
         self._knowledge_dir = knowledge_dir
         self._cases_path = cases_path
@@ -116,10 +117,19 @@ class PipelineDrafter:
             max_tool_steps=self._settings.draft_max_tool_steps,
         )
 
-    def _client(self) -> LLMClient:
-        if self._llm is None:
-            self._llm = OpenAICompatibleClient(self._settings)
-        return self._llm
+    def _client(self, *, background: bool = False) -> LLMClient:
+        """LLM 客户端。后台自动起草用 `WORKBENCH_BACKGROUND_SERVICE_TIER`（默认 flex，D-017），
+        界面中的交互操作用 `LLM_SERVICE_TIER`。测试注入的客户端两者共用。"""
+        if self._llm_override is not None:
+            return self._llm_override
+        key = "background" if background else "interactive"
+        if key not in self._clients:
+            settings = self._settings
+            if background:
+                tier = self._settings.workbench_background_service_tier
+                settings = settings.model_copy(update={"llm_service_tier": tier})
+            self._clients[key] = OpenAICompatibleClient(settings)
+        return self._clients[key]
 
     def _snapshot(self) -> KnowledgeSnapshot:
         if self._store is None:
@@ -176,7 +186,7 @@ class PipelineDrafter:
 
     # --- Drafter ---
 
-    def draft(self, case: Case) -> DraftOutcome:
+    def draft(self, case: Case, *, background: bool = False) -> DraftOutcome:
         params = self._params()
         snapshot = self._snapshot()
         guide, history, corpus = self._load()
@@ -189,7 +199,7 @@ class PipelineDrafter:
                 case,
                 snapshot=snapshot,
                 guide=guide,
-                llm=self._client(),
+                llm=self._client(background=background),
                 params=params,
                 history=history,
                 retriever=retriever,

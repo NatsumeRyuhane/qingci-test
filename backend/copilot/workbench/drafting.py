@@ -40,9 +40,10 @@ class DrafterFailedError(RuntimeError):
 class Drafter(Protocol):
     """分析一个案件并起草回复（#6）。"""
 
-    def draft(self, case: Case) -> DraftOutcome:
+    def draft(self, case: Case, *, background: bool = False) -> DraftOutcome:
         """分析最新一封玩家邮件并起草。“不回复”自动生效时 `draft` 为空。
 
+        `background` 为真时是来信后自动起草，可以用更便宜、优先级更低的服务等级（D-017）。
         案件中没有玩家邮件时抛出 `ValueError`。
         """
         ...
@@ -95,7 +96,7 @@ class StubDrafter:
     def __init__(self, *, clock: Callable[[], datetime] = _now) -> None:
         self._clock = clock
 
-    def draft(self, case: Case) -> DraftOutcome:
+    def draft(self, case: Case, *, background: bool = False) -> DraftOutcome:
         message = latest_player_message(case)
         now = self._clock()
         form_category = case.form.category if case.form else None

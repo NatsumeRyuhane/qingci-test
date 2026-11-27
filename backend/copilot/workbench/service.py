@@ -87,7 +87,12 @@ def generate_draft(repo: Repository, drafter: Drafter, case_id: str) -> DraftOut
         outcome = drafter.draft(case)
     except ValueError as exc:  # 例如线程中没有玩家邮件
         raise ConflictError(str(exc)) from exc
+    apply_outcome(repo, case, outcome)
+    return outcome
 
+
+def apply_outcome(repo: Repository, case: Case, outcome: DraftOutcome) -> None:
+    """保存起草结果并推进案件（规则见 `generate_draft`）。`case` 是起草时读到的案件。"""
     analysis = outcome.analysis
     if outcome.no_reply is not None:
         analysis = analysis.model_copy(update={"no_reply": outcome.no_reply})
@@ -98,7 +103,6 @@ def generate_draft(repo: Repository, drafter: Drafter, case_id: str) -> DraftOut
     if case.status is not CaseStatus.ESCALATED:
         update["status"] = outcome.proposed_status or CaseStatus.DRAFTED
     repo.save_case(case.model_copy(update=update))
-    return outcome
 
 
 def submit_feedback(
