@@ -78,6 +78,8 @@ class Settings(BaseSettings):
     # --- 起草与分流（#6） ---
     draft_auto_send_min_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     draft_problem_time_lookback_days: int = Field(default=7, ge=1)
+    draft_max_tool_steps: int = Field(default=4, ge=1, le=10)
+    """“流水线 + 工具”模式中，模型最多调用几次工具（提案 0003 §10）。"""
 
     # --- 数据与存储 ---
     sample_data_path: str = "data/raw/脱敏数据2026.2.10.xlsx"

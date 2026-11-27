@@ -3,6 +3,9 @@
 
     时间上下文 → 可用知识 → 分析 → “不回复” → 候选模板 → 相似案件 → 起草 → 自检 → 回译 → 分流
 
+起草有两种方式（#7 对比）：固定流水线（一次调用），或“流水线 + 工具”（`agent.compose_with_tools`，
+失败时回退到固定流水线）。两种方式之后的自检和分流完全相同。
+
 **每个草稿都经过 `run_checks` 和 `route`**（docs/claims.md C-27）：这是生成 `Draft` 的唯一
 途径，`Draft` 的分流和理由只来自 `route`。“不回复”自动生效时不生成草稿。
 """
@@ -28,6 +31,7 @@ from copilot.contracts import (
     TimeContext,
 )
 from copilot.contracts.base import Contract
+from copilot.draft.agent import DEFAULT_MAX_STEPS, compose_with_tools
 from copilot.draft.analyze import analyze
 from copilot.draft.checks import CheckContext, run_checks
 from copilot.draft.compose import back_translate, compose, provided_entries
@@ -35,6 +39,7 @@ from copilot.draft.retrieval import KnowledgeSnapshot, KnowledgeView, build_view
 from copilot.draft.route import RouteInput, decide_no_reply, route
 from copilot.draft.similar import SimilarCaseRetriever, case_text, corpus_before
 from copilot.draft.timectx import DEFAULT_LOOKBACK_DAYS, build_time_context, known_at_for
+from copilot.draft.tools import ToolBox
 from copilot.kb.cluster import ClusterIndex
 from copilot.kb.knowledge import StyleGuide
 from copilot.llm import LLMClient
@@ -66,6 +71,9 @@ class DraftParams:
     draft_model: str
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     lookback_days: int = DEFAULT_LOOKBACK_DAYS
+    tools: bool = False
+    """为真时是“流水线 + 工具”（`DraftMode.PIPELINE_WITH_TOOLS`），否则是固定流水线。"""
+    max_tool_steps: int = DEFAULT_MAX_STEPS
 
 
 class TemplateMatcher:
@@ -128,18 +136,34 @@ async def draft_case(
     candidates = view.candidates(analysis.intent)
     similar: list[tuple[SimilarCaseRef, list[str]]] = []
     foreign: list[str] = []
+    matcher = TemplateMatcher(view)
     if retriever is not None:
         corpus = {c.id: c for c in retriever.corpus}
-        matcher = TemplateMatcher(view)
         for ref in await retriever.similar_to(case):
             other = corpus[ref.case_id]
             similar.append((ref, matcher.templates_used(other)))
             foreign.append(case_text(other))
 
-    composition = await compose(
-        case, analysis, view, guide, llm, candidates=candidates, similar=similar
-    )
-    provided = provided_entries(view)
+    if params.tools:
+        toolbox = ToolBox(
+            case=case, view=view, retriever=retriever, templates_used=matcher.templates_used
+        )
+        composition = await compose_with_tools(
+            case,
+            analysis,
+            view,
+            guide,
+            llm,
+            toolbox=toolbox,
+            candidates=candidates,
+            similar=similar,
+            max_steps=params.max_tool_steps,
+        )
+    else:
+        composition = await compose(
+            case, analysis, view, guide, llm, candidates=candidates, similar=similar
+        )
+    provided = provided_entries(view) | composition.tool_entries
     checks = run_checks(
         composition.draft,
         CheckContext(
@@ -197,7 +221,9 @@ async def draft_case(
             for c in composition.draft.citations
             if (c.entry_type, c.entry_id, c.entry_version) in provided
         ],
-        mode=DraftMode.PIPELINE,
+        mode=DraftMode.PIPELINE_WITH_TOOLS if composition.tools_used else DraftMode.PIPELINE,
+        trace=list(composition.trace),
+        fallback_reason=composition.fallback_reason,
         time_context=time_ctx,
         model=params.draft_model,
         created_at=created_at,
