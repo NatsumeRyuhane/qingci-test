@@ -29,7 +29,7 @@ from copilot.contracts import (
 from copilot.eval.split import Split, SplitManifest
 from copilot.ingest.pipeline import thread_order
 from copilot.ingest.timestamps import JST
-from copilot.kb.evidence import recompute_cross_thread_evidence
+from copilot.kb.evidence import CROSS_THREAD_KINDS, recompute_cross_thread_evidence
 
 if TYPE_CHECKING:
     from copilot.kb.labels import NoReplyLabel, ReplyLabel
@@ -141,15 +141,23 @@ def _case_status(messages: Sequence[Message]) -> CaseStatus:
     return CaseStatus.UNDETERMINED
 
 
-def _strip_unavailable_local_evidence(messages: Sequence[Message]) -> list[Message]:
-    """移除来源邮件未在截断窗口内的线程内角色证据（如之后邮件提供的引用佐证）。"""
+def _strip_unavailable_local_evidence(
+    messages: Sequence[Message], *, drop_cross_thread: bool = False
+) -> list[Message]:
+    """移除来源邮件未在截断窗口内的角色证据（未提供可见线程集时一并剥离未验证的跨线程证据）。"""
     kept_ids = {m.id for m in messages}
     cleaned: list[Message] = []
     for m in messages:
         filtered = [
             e
             for e in m.role_evidence
-            if e.kind is not RoleEvidenceKind.QUOTE_CORROBORATION or e.source_message_id in kept_ids
+            if not (
+                (
+                    e.kind is RoleEvidenceKind.QUOTE_CORROBORATION
+                    and e.source_message_id not in kept_ids
+                )
+                or (drop_cross_thread and e.kind in CROSS_THREAD_KINDS)
+            )
         ]
         cleaned.append(
             m
@@ -167,13 +175,28 @@ def _rebuild_visible_cases(cases: Sequence[Case]) -> list[Case]:
     return [c.model_copy(update={"status": _case_status(c.messages)}) for c in rebuilt]
 
 
-def truncate_case(case: Case, before_seq: int) -> Case:
-    """只保留 `seq < before_seq` 的邮件，去掉未来佐证并重新判断状态（同 `ingest/pipeline.py`）。"""
+def truncate_case(
+    case: Case,
+    before_seq: int,
+    *,
+    visible_cases: Sequence[Case] | None = None,
+) -> Case:
+    """只保留 `seq < before_seq` 的邮件，去掉不可见的角色佐证并重新判断状态。
+
+    - 传入 `visible_cases`（当前重放时刻已截断的可见线程）时，基于该集合重算跨线程证据，
+      保留来自已可见来源的 `CORROBORATED_TEXT` / `REPEATED_TEXT` 并移除不可见来源。
+    - 未传入 `visible_cases` 时，无法核实跨线程证据的来源是否已可见，因此保守移除
+      `CORROBORATED_TEXT` 与 `REPEATED_TEXT`。
+    """
     kept = [m for m in case.messages if m.seq < before_seq]
     if not kept:
         raise ValueError(f"案件 {case.id} 在 seq {before_seq} 之前没有邮件")
-    messages = _strip_unavailable_local_evidence(kept)
-    return case.model_copy(update={"messages": messages, "status": _case_status(messages)})
+    messages = _strip_unavailable_local_evidence(kept, drop_cross_thread=(visible_cases is None))
+    truncated = case.model_copy(update={"messages": messages, "status": _case_status(messages)})
+    if visible_cases is None:
+        return truncated
+    others = [c for c in visible_cases if c.id != case.id]
+    return _rebuild_visible_cases([*others, truncated])[-1]
 
 
 def _truncate_by_cutoff(case: Case, cutoff: datetime | None) -> Case | None:
@@ -290,7 +313,9 @@ def build_reply_items(
     rebuilt_items: list[ReplyEvalItem] = []
     for item in selected:
         visible_earlier = replay_history(cases, item.case, item.now)
-        rebuilt_case = _rebuild_visible_cases([*visible_earlier, item.case])[-1]
+        rebuilt_case = truncate_case(
+            by_id[item.case.id], item.before_seq, visible_cases=visible_earlier
+        )
         rebuilt_items.append(
             ReplyEvalItem(
                 label=item.label,

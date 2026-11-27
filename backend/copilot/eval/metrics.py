@@ -267,12 +267,12 @@ def compute_slice(records: Sequence[CaseEvalRecord]) -> SliceMetrics:
                     m.visible_template_top1_hits += 1
                 if in_top3:
                     m.visible_template_top3_hits += 1
-            if r.no_reply_auto:
-                # 应回复案件被误抑制为自动“不回复”属于已知失败，计入主成功指标分母。
+            if r.no_reply_auto or (not in_top3):
+                # 误判为自动“不回复”或标准答案不在 Top-3 时，成功指标已确定失败。
                 m.combined_success_total += 1
             elif r.judge is not None:
                 m.combined_success_total += 1
-                if r.expected_template_id in r.top3_template_ids and r.judge.solution_agrees:
+                if r.judge.solution_agrees:
                     m.combined_success_hits += 1
             else:
                 m.combined_success_unknown += 1
@@ -429,7 +429,7 @@ def render_markdown(
         m = compute_slice(subset)
         ok = m.total - m.errors
         combined_val = _rate(m.combined_success_hits, m.combined_success_total)
-        if m.combined_success_total > 0 and m.combined_success_unknown > 0:
+        if m.combined_success_unknown > 0:
             combined_val += f"（另有 {m.combined_success_unknown} 条无评审结果）"
         lines.extend(
             [

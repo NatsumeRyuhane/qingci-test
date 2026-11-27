@@ -361,6 +361,37 @@ def test_replay_strips_unavailable_role_evidence_at_cutoff() -> None:
     assert hist[0].status is CaseStatus.UNDETERMINED
     assert hist[1].status is CaseStatus.UNDETERMINED
 
+    # 直接调用 truncate_case（未传 visible_cases）时应剥离不可核实的跨线程证据；
+    # 传入 visible_cases 时，仅保留来自可见来源的跨线程证据。
+    c_target = case(
+        "4",
+        player("4", 1, "【合成】p").model_copy(update={"sent_at": T1}),
+        agent("4", 2, THANKS_BODY, RoleEvidenceKind.CORROBORATED_TEXT, source="1:2").model_copy(
+            update={"sent_at": T1}
+        ),
+        agent("4", 3, "【合成】followup"),
+    )
+    standalone = truncate_case(c_target, before_seq=3)
+    assert standalone.messages[1].role_strength is not RoleEvidenceStrength.STRONG
+    assert standalone.status is CaseStatus.UNDETERMINED
+
+    invisible_src = truncate_case(c_target, before_seq=3, visible_cases=hist)
+    assert invisible_src.messages[1].role_strength is not RoleEvidenceStrength.STRONG
+    assert invisible_src.status is CaseStatus.UNDETERMINED
+
+    c_visible_anchor = case(
+        "1",
+        player("1", 1, "【合成】p1").model_copy(update={"sent_at": T1}),
+        agent("1", 2, THANKS_BODY, RoleEvidenceKind.QUOTE_CORROBORATION, source="1:3").model_copy(
+            update={"sent_at": T1}
+        ),
+        agent("1", 3, "【合成】a2").model_copy(update={"sent_at": T1}),
+    )
+    visible_hist = replay_history([c_visible_anchor, c_target], c_target, now)
+    kept_src = truncate_case(c_target, before_seq=3, visible_cases=visible_hist)
+    assert kept_src.messages[1].role_strength is RoleEvidenceStrength.STRONG
+    assert kept_src.status is CaseStatus.REPLIED
+
 
 def test_append_and_read_recover_incomplete_tail_and_split_utf8(tmp_path: Path) -> None:
     rec1 = CaseEvalRecord(
@@ -426,14 +457,28 @@ def test_combined_success_counts_false_no_reply_and_separates_unknown() -> None:
     judge_err = ok_rec.model_copy(
         update={"case_id": "3", "message_id": "3:2", "judge": None, "judge_error": "TimeoutError"}
     )
-    sl = compute_slice([ok_rec, suppressed, judge_err])
-    assert sl.combined_success_total == 2
+    missed_top3_no_judge = ok_rec.model_copy(
+        update={
+            "case_id": "4",
+            "message_id": "4:2",
+            "chosen_template_id": "tpl-other",
+            "top3_template_ids": ["tpl-other"],
+            "judge": None,
+            "judge_error": "TimeoutError",
+        }
+    )
+    sl = compute_slice([ok_rec, suppressed, judge_err, missed_top3_no_judge])
+    assert sl.combined_success_total == 3
     assert sl.combined_success_hits == 1
     assert sl.combined_success_unknown == 1
-    assert sl.judge_errors == 1
-    md = render_markdown([ok_rec, suppressed, judge_err])
-    assert "1/2 (50.0%)" in md
+    assert sl.judge_errors == 2
+    md = render_markdown([ok_rec, suppressed, judge_err, missed_top3_no_judge])
+    assert "1/3 (33.3%)" in md
     assert "另有 1 条无评审结果" in md
+
+    # 全部样本缺少评审结果（combined_success_total=0）时，报告也必须展示未知数量
+    all_unknown_md = render_markdown([judge_err])
+    assert "0/0 (—)（另有 1 条无评审结果）" in all_unknown_md
 
 
 def test_summarize_citations_includes_template_guidance_and_body() -> None:
