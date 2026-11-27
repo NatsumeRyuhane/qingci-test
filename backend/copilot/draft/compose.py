@@ -14,13 +14,20 @@ prompt 的顺序（`prompts` 模块）：静态前缀（指令、风格指南、
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, create_model
 
 from copilot.config import LLMTask
-from copilot.contracts import Case, CaseAnalysis, EntryType, GlossaryEntry, SimilarCaseRef
+from copilot.contracts import (
+    Case,
+    CaseAnalysis,
+    EntryType,
+    GlossaryEntry,
+    SimilarCaseRef,
+    TraceStep,
+)
 from copilot.contracts.base import Contract
 from copilot.draft.checks import CitedClaim, ComposedDraft, assemble
 from copilot.draft.prompts import UNTRUSTED_RULES, case_block, time_block
@@ -207,23 +214,35 @@ class Composition:
     draft: ComposedDraft
     template_reason_zh: str
     confidence: float
+    tools_used: bool = False
+    """是否经过工具循环（`DraftMode.PIPELINE_WITH_TOOLS`），包括回退的情况。"""
+    trace: tuple[TraceStep, ...] = ()
+    fallback_reason: str | None = None
+    """工具循环失败、回退到固定流水线的原因。"""
+    tool_entries: frozenset[tuple[EntryType, str, int]] = frozenset()
+    """工具结果中出现、可以被引用的条目。"""
+
+    def with_tools(
+        self,
+        *,
+        trace: Sequence[TraceStep],
+        fallback_reason: str | None,
+        entries: frozenset[tuple[EntryType, str, int]],
+    ) -> "Composition":
+        return replace(
+            self,
+            tools_used=True,
+            trace=tuple(trace),
+            fallback_reason=fallback_reason,
+            tool_entries=entries,
+        )
 
 
-async def compose(
-    case: Case,
-    analysis: CaseAnalysis,
-    view: KnowledgeView,
-    guide: StyleGuide,
-    llm: LLMClient,
-    *,
-    candidates: Sequence[Candidate],
-    similar: Sequence[tuple[SimilarCaseRef, Sequence[str]]] = (),
+def finish(
+    out: ComposeOutput, view: KnowledgeView, guide: StyleGuide, analysis: CaseAnalysis
 ) -> Composition:
-    """起草答复并由代码组装全文。模型输出无法通过校验时抛出 `LLMOutputError`。"""
-    output_type: type[BaseModel] = output_model(view, guide)
-    messages = build_messages(case, analysis, view, guide, candidates, similar)
-    raw = await llm.complete_json(LLMTask.DRAFT, messages, output_type)
-    out = ComposeOutput.model_validate(raw.model_dump())
+    """把模型的答复变成待检查的草稿：由代码组装全文，模板只能是可见的模板。"""
+    out = ComposeOutput.model_validate(out.model_dump())
     candidate = view.candidate(out.template_id, analysis.intent) if out.template_id else None
     body = assemble(
         guide,
@@ -246,6 +265,23 @@ async def compose(
     return Composition(
         draft=draft, template_reason_zh=out.template_reason_zh, confidence=out.confidence
     )
+
+
+async def compose(
+    case: Case,
+    analysis: CaseAnalysis,
+    view: KnowledgeView,
+    guide: StyleGuide,
+    llm: LLMClient,
+    *,
+    candidates: Sequence[Candidate],
+    similar: Sequence[tuple[SimilarCaseRef, Sequence[str]]] = (),
+) -> Composition:
+    """固定流水线的起草：一次调用。模型输出无法通过校验时抛出 `LLMOutputError`。"""
+    output_type: type[BaseModel] = output_model(view, guide)
+    messages = build_messages(case, analysis, view, guide, candidates, similar)
+    raw = await llm.complete_json(LLMTask.DRAFT, messages, output_type)
+    return finish(ComposeOutput.model_validate(raw.model_dump()), view, guide, analysis)
 
 
 BACKTRANSLATE_PROMPT = """把 <draft> 中的日语客服回复忠实地翻译成中文，

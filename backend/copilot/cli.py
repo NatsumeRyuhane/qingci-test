@@ -665,6 +665,14 @@ def draft_command(
             help="历史重放：只保留 seq 小于它的邮件，例如在真实的第一封客服回复之前起草。",
         ),
     ] = None,
+    tools: Annotated[
+        bool,
+        typer.Option(
+            "--tools",
+            help="“流水线 + 工具”：起草时模型可以调用只读工具（最多 DRAFT_MAX_TOOL_STEPS 次），"
+            "失败时回退到固定流水线。",
+        ),
+    ] = False,
     as_json: Annotated[bool, typer.Option("--json", help="输出完整结果的 JSON。")] = False,
     out: Annotated[
         Path | None, typer.Option("--out", help="把完整结果的 JSON 写到这个文件。")
@@ -734,6 +742,8 @@ def draft_command(
         draft_model=models[LLMTask.DRAFT],
         min_confidence=settings.draft_auto_send_min_confidence,
         lookback_days=settings.draft_problem_time_lookback_days,
+        tools=tools,
+        max_tool_steps=settings.draft_max_tool_steps,
     )
     started = time.perf_counter()
     outcome = asyncio.run(
@@ -793,7 +803,7 @@ def _outcome_lines(outcome: "DraftOutcome") -> list[str]:
             f"建议状态：{outcome.proposed_status.value if outcome.proposed_status else '无'}"
         )
         return lines
-    lines += ["", f"分流：{draft.route.value}"]
+    lines += ["", f"方式：{draft.mode.value}", f"分流：{draft.route.value}"]
     lines += [f"  - {reason}" for reason in draft.route_reasons]
     template = draft.template_refs[0] if draft.template_refs else None
     lines.append(
@@ -807,6 +817,12 @@ def _outcome_lines(outcome: "DraftOutcome") -> list[str]:
         + (f"：{c.detail_zh}" if c.detail_zh else "")
         for c in draft.checks
     ]
+    for step in draft.trace:
+        args = ", ".join(f"{k}={v}" for k, v in step.arguments.items())
+        result = step.error or step.result_summary_zh or ""
+        lines.append(f"工具 {step.step}：{step.tool}({args}) → {result}")
+    if draft.fallback_reason:
+        lines.append(f"回退到固定流水线：{draft.fallback_reason}")
     if draft.similar_case_refs:
         lines.append("相似案件：" + "、".join(r.case_id for r in draft.similar_case_refs))
     lines += ["", "草稿：", draft.body_ja, "", "回译：", draft.back_translation_zh]

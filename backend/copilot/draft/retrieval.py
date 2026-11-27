@@ -140,6 +140,8 @@ class KnowledgeView:
     """每个可见模板在“现在”的有效期匹配结果。"""
     linked: dict[str, tuple[NoticeMatch, ...]] = field(default_factory=dict)
     """限时模板 id → 链接它、并与本案件匹配的公告与事件。"""
+    valid_notices: list[Notice] = field(default_factory=list)
+    """在“现在”有效的全部公告与事件，不按问题发生时间过滤（供工具 `lookup_events` 查询）。"""
 
     @property
     def forbidden_promises(self) -> list[Policy]:
@@ -243,4 +245,5 @@ def build_view(
         glossary=[g for g, _ in _visible(snapshot.glossary, time_ctx, known_at).values()],
         template_validity={i: v for i, (_, v) in templates.items()},
         linked={i: tuple(m) for i, m in linked.items()},
+        valid_notices=[n for n, _ in notices.values()],
     )

@@ -58,6 +58,8 @@
 | C-25 | 模型只能选可见的模板和目录中的意图；缺失信息只能来自意图的清单；线程判断只用于 `undetermined` 案件；模型不能指定重复提交对应的线程 | `compose.output_model`、`analyze.analyze` | `tests/draft/test_service.py::test_unapproved_or_unknown_template_is_rejected` · `tests/draft/test_analyze.py::test_intent_outside_catalog_is_rejected` · `tests/draft/test_analyze.py::test_missing_info_is_limited_to_the_intents_list` · `tests/draft/test_analyze.py::test_thread_judgement_only_for_undetermined_cases` · `tests/draft/test_analyze.py::test_model_cannot_name_a_duplicate_thread` | 单元 |
 | C-26 | 疑似注入的信号由代码独立检测，与模型的判断取并集：模型照做了注入、又不报告时，信号仍然在 | `analyze.injection_signals` | `tests/draft/test_analyze.py::test_code_detects_injection_signals` · `tests/draft/test_analyze.py::test_compromised_model_hiding_injection_still_has_code_signal` · `tests/draft/test_analyze.py::test_model_flag_is_added_to_code_signals` | 单元、对抗、`llm-live` |
 | C-27 | **每个草稿都经过 `run_checks` 和 `route`**：`draft_case` 是生成 `Draft` 的唯一途径，无论模型输出什么，草稿都有全部检查的结果 | `copilot/draft/service.py` | `tests/draft/test_service.py::test_every_draft_goes_through_all_checks_and_routing` · `tests/draft/test_service.py::test_compromised_model_refund_promise_is_blocked` · `tests/live/test_draft_live.py::test_injection_samples_are_never_auto_sent` | 单元、对抗、`llm-live`；PR3 结束、#7 开始前统一复核 |
+| C-28 | 工具只读、范围受限：越权或畸形的调用在执行前被拒绝，原因记在轨迹中；超出步数、输出无法校验或工具出错时回退到固定流水线，草稿照常检查和分流 | `copilot/draft/tools.py`、`agent.py` | `tests/draft/test_tools.py::test_out_of_scope_or_malformed_calls_are_rejected` · `tests/draft/test_tools.py::test_read_thread_reads_only_the_current_case` · `tests/draft/test_agent.py::test_rejected_call_is_traced_and_the_loop_continues` · `tests/draft/test_agent.py::test_exhausting_steps_falls_back_to_the_fixed_pipeline` · `tests/draft/test_agent.py::test_tool_error_falls_back` · `tests/draft/test_agent.py::test_invalid_output_falls_back` | 单元、对抗 |
+| C-29 | `lookup_events` 的结果只作参考，不改变 `template_window` 检查使用的问题发生时间 | `ToolBox` 不修改知识视图；检查只看代码计算的时间上下文 | `tests/draft/test_tools.py::test_lookup_events_does_not_change_the_problem_time` | 单元 |
 
 ### 起草：分流与“不回复”（#6）
 
@@ -80,7 +82,6 @@
 
 | # | 主张 | 由谁补上 |
 |---|---|---|
-| P-03 | 工具只读、范围受限：越权的调用被拒绝，超出步数时回退到固定流水线 | PR3 |
 | P-04 | 注入成功率、“玩家被误判为客服或系统”的比例接近零；高风险案件不会被分流为 `auto_send` | #7（合成注入样本）、`llm-live` |
 | P-05 | 自检的启发式规则（敬体、政策短语）误报和漏报都低 | #7 在 dev 上报告 |
 | P-06 | 自动发送的阈值（`DRAFT_AUTO_SEND_MIN_CONFIDENCE`）合理：通过全部关卡的草稿确实正确 | #7 在 dev 上校准，之后所有者才在审核中打开任何模板的 `auto_send_allowed` |

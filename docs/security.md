@@ -21,7 +21,7 @@
 | L3 可见知识 | 只有已批准、当前有效的条目提供给模型；限时模板只在事件匹配时注入 | `copilot/draft/retrieval.py` | 已实现（PR #28） |
 | L4 prompt 隔离 | 不可信的文本只作为数据放在分隔标记内，`<` 全部转义，不可见字符和方向控制符被去掉；时间块由代码生成、放在最后；相似案件只给编号和模板 | `copilot/llm/prompt.py`、`copilot/draft/prompts.py` | 已实现（#6） |
 | L5 时间由代码决定 | “现在”由代码确定；问题发生时间只决定候选，不决定补偿；窗口由代码检查，无法确定即不通过 | `copilot/draft/timectx.py` | 已实现（PR #28） |
-| L6 工具范围 | 工具只读，只限当前案件、知识库和“现在”之前的案件；参数先校验；有步数上限 | — | 随 PR3 |
+| L6 工具范围 | 工具只读，只限当前案件、知识库和“现在”之前的案件；参数先按各自的模型校验；有步数上限，失败时回退到固定流水线 | `copilot/draft/tools.py`、`agent.py` | 已实现（#6） |
 | L7 自检 | 结构、语体、不允许的承诺、时间窗口、占位符、引用、内容安全 | `copilot/draft/checks.py` | 已实现（PR #28） |
 | L8 分流关卡 | 升级条件；自动发送的 12 个关卡一个不过全部不过；“不回复”只在两种情况下自动生效 | `copilot/draft/route.py` | 已实现（PR #28） |
 | L9 契约兜底 | 非法状态无法构造：有未通过检查的草稿不能 `auto_send`，只有已批准、低风险的模板能允许自动发送 | `copilot/contracts/` | 已实现（#3、#19） |
@@ -92,11 +92,11 @@
 
 | 编号 | 攻击 | 应当拦截的层 | 现状 | CI 测试 | 修补位置 |
 |---|---|---|---|---|---|
-| ATK-50 | 读取其他案件（`read_thread` 传入别的案件 ID） | L6 | 待实现（PR3） | — | L6 |
-| ATK-51 | 查询“现在”之后的数据（`lookup_events` 传入未来时间） | L6 | 待实现（PR3） | — | L6 |
-| ATK-52 | 超长或畸形参数 | L6 | 待实现（PR3） | — | L6 |
-| ATK-53 | 耗尽步数，或让工具出错 | L6 | 待实现（PR3：回退到固定流水线） | — | L6 |
-| ATK-54 | 工具结果中含有注入（例如相似案件的正文） | L4、L6 | 待实现（PR3） | — | L4 |
+| ATK-50 | 读取其他案件（`read_thread` 传入别的案件 ID） | L6 | 拦截：`read_thread` 只有 `seq` 参数，多余的参数被拒绝 | `tests/draft/test_tools.py::test_out_of_scope_or_malformed_calls_are_rejected` · `tests/draft/test_agent.py::test_rejected_call_is_traced_and_the_loop_continues` | L6 |
+| ATK-51 | 查询“现在”之后的数据（`lookup_events` 传入未来时间） | L6 | 拦截 | `tests/draft/test_tools.py::test_out_of_scope_or_malformed_calls_are_rejected` · `tests/draft/test_tools.py::test_lookup_events_does_not_change_the_problem_time` | L6 |
+| ATK-52 | 超长或畸形参数、不存在的工具 | L6 | 拦截 | `tests/draft/test_tools.py::test_out_of_scope_or_malformed_calls_are_rejected` · `tests/draft/test_agent.py::test_unknown_tool_name_falls_back` | L6 |
+| ATK-53 | 耗尽步数，或让工具出错 | L6 | 拦截：回退到固定流水线，轨迹保留，草稿照常检查和分流 | `tests/draft/test_agent.py::test_exhausting_steps_falls_back_to_the_fixed_pipeline` · `tests/draft/test_agent.py::test_tool_error_falls_back` · `tests/draft/test_agent.py::test_invalid_output_falls_back` | L6 |
+| ATK-54 | 工具结果中含有注入（例如当前案件中某封邮件的正文） | L4、L6 | 拦截：工具结果在 `<tool_result>` 数据块内，`<` 已转义；相似案件只返回编号和模板 | `tests/draft/test_agent.py::test_injection_inside_a_tool_result_stays_data` · `tests/draft/test_tools.py::test_similar_cases_return_ids_and_templates_not_text` | L4 |
 
 ### G. 资源与下游
 
@@ -116,7 +116,7 @@
 | H-01 | **政策短语只做 NFKC 后的子串匹配。** 本地核对：「返金致します」、加半角或全角空格、平假名、同义改写（「代金をお返しいたします」）都漏过；升级政策的短语同理。 | 模型新增的这句话没有引用时，`citations` 检查不通过；即使有引用，自动发送也只用于已批准的通用模板，其余都经人工审核（L8、L10）。 | 匹配前去掉空白、补充常见变体；#7 用 LLM 评审检查承诺 |
 | H-02 | **已修补（PR #28）。** 原来按句式白名单豁免“索要信息”的句子，前置的陈述分句（「サーバーが復旧したことに伴い、…お知らせください」）能绕过它，每补一种句式就有下一种。改为不设任何豁免：模型新增的每一句都要引用，索要信息的句子引用分类出的意图。 | — | 不再按句式判断；绕过白名单的句子保留为回归样本 |
 | H-03 | **引用只核对“条目已提供、句子整句对应”，不核对条目是否支持这句话。** | 引用会出现在界面中，供客服核对（L10）。 | #7 的 LLM 评审检查引用是否成立 |
-| H-04 | **其他案件的信息只按至少 20 个字完全相同检测**，改写或摘要后的泄露检测不到。**已部分修补（#6）：** 起草时相似案件只给模型编号和当时用过的模板，不给别的玩家的正文，模型手里没有可以泄露的原文。 | 工具读取其他案件由 L6 拒绝（PR3）；工具结果中的相似案件正文仍需处理。 | PR3：工具结果同样只给摘要或模板 ID |
+| H-04 | **其他案件的信息只按至少 20 个字完全相同检测**，改写或摘要后的泄露检测不到。**已部分修补（#6）：** 起草时相似案件只给模型编号和当时用过的模板，不给别的玩家的正文，模型手里没有可以泄露的原文。 | 工具读取其他案件由 L6 拒绝；工具 `search_similar_cases` 同样只返回编号和模板。剩下的是改写后的泄露检测不到。 | #7 用 LLM 评审检查 |
 | H-05 | **语体检查只看句尾**，并且只检查带句末标点的新增句子。 | 客服审核（L10）。 | #7 评审语体 |
 | H-06 | **模板原文的豁免依赖所有者的审核**：已批准的模板本身有问题时，各层都会把它当作可信的措辞。 | 信任根是所有者（[claims.md](claims.md) A-02）。 | 审核；政策变化时把引用它的模板转为 `needs_rereview` |
 | H-07 | **整段粘贴其他线程的常见回复，会得到“与有佐证的回复正文相同”的强证据**，案件显示为已回复。 | 不会给知识库带来新内容（L2）；但案件可能离开待处理队列。提案 0003 记录的残留风险。 | 发件人元数据（[claims.md](claims.md) A-01） |
