@@ -1,12 +1,15 @@
 """`copilot` 命令行入口。各模块的子命令（ingest、kb、draft、eval 等）随各自的 issue 加入。"""
 
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from copilot import __version__
 from copilot.config import get_settings
+
+if TYPE_CHECKING:
+    from copilot.kb.knowledge import Knowledge
 
 app = typer.Typer(help="面向中文客服的日语客服坐席助手。", no_args_is_help=True)
 db_app = typer.Typer(help="数据库管理。", no_args_is_help=True)
@@ -15,6 +18,8 @@ contracts_app = typer.Typer(help="共享数据契约（#3）。", no_args_is_hel
 app.add_typer(contracts_app, name="contracts")
 kb_app = typer.Typer(help="知识库（#5）。", no_args_is_help=True)
 app.add_typer(kb_app, name="kb")
+review_app = typer.Typer(help="模板的人工审核（#5）。", no_args_is_help=True)
+kb_app.add_typer(review_app, name="review")
 
 
 @app.callback()
@@ -407,4 +412,165 @@ def kb_label(
     write_jsonl(no_reply, out / NO_REPLY_FILE)
     typer.echo(f"已写入 {out}：客服回复 {len(replies)} · 不回复 {len(no_reply)}")
     for line in summarize(replies, no_reply).lines():
+        typer.echo(line)
+
+
+KbDirOption = Annotated[
+    Path | None, typer.Option("--kb-dir", help="知识库目录。默认 data/processed/kb。")
+]
+KnowledgeOption = Annotated[
+    Path | None, typer.Option("--knowledge", help="人工编写的知识。默认 knowledge/。")
+]
+
+
+def _load_review_inputs(
+    kb_dir: Path | None, knowledge_dir: Path | None
+) -> "tuple[Path, Knowledge]":
+    """读取知识目录；有问题时退出。"""
+    from copilot.kb.build import DEFAULT_KB_DIR
+    from copilot.kb.knowledge import KNOWLEDGE_DIR, KnowledgeError, load_knowledge
+
+    try:
+        knowledge = load_knowledge(knowledge_dir or KNOWLEDGE_DIR)
+    except KnowledgeError as exc:
+        typer.echo(f"knowledge/ 校验失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
+    return kb_dir or DEFAULT_KB_DIR, knowledge
+
+
+@review_app.command("decisions")
+def kb_review_decisions(
+    path: Annotated[Path, typer.Argument(help="审核工具写出的决定（JSONL）。")],
+    kb_dir: KbDirOption = None,
+) -> None:
+    """把审核工具的决定（批准 / 拒绝）导入覆盖层。之后运行 copilot kb publish。"""
+    from copilot.kb.annotate import TEMPLATES_FILE, read_templates
+    from copilot.kb.build import DEFAULT_KB_DIR
+    from copilot.kb.review import (
+        OVERLAY_FILE,
+        ReviewError,
+        import_decisions,
+        read_overlay,
+        write_overlay,
+    )
+
+    directory = kb_dir or DEFAULT_KB_DIR
+    if not path.is_file():
+        typer.echo(f"找不到 {path}", err=True)
+        raise typer.Exit(1)
+    overlay = read_overlay(directory / OVERLAY_FILE)
+    try:
+        report = import_decisions(overlay, path, read_templates(directory / TEMPLATES_FILE))
+    except ReviewError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    write_overlay(overlay, directory / OVERLAY_FILE)
+    for line in report.lines():
+        typer.echo(line)
+
+
+@review_app.command("export")
+def kb_review_export(
+    kb_dir: KbDirOption = None,
+    force: Annotated[bool, typer.Option("--force", help="覆盖已存在的审核文件。")] = False,
+) -> None:
+    """把每个模板的最新版本导出为审核文件 <kb-dir>/review/<模板 ID>.yaml。"""
+    from copilot.contracts import ReplyTemplate
+    from copilot.kb.annotate import TEMPLATES_FILE, read_templates
+    from copilot.kb.build import DEFAULT_KB_DIR
+    from copilot.kb.review import REVIEW_DIR, review_yaml
+    from copilot.kb.store import KnowledgeStore
+    from copilot.storage import create_engine_for, upgrade_database
+
+    directory = kb_dir or DEFAULT_KB_DIR
+    url = get_settings().database_url
+    upgrade_database(url)
+    latest = KnowledgeStore(create_engine_for(url)).latest(ReplyTemplate)
+    if not latest:
+        typer.echo("数据库中还没有模板（先运行 copilot kb publish）", err=True)
+        raise typer.Exit(1)
+    info = {t.template.id: t for t in read_templates(directory / TEMPLATES_FILE)}
+    out = directory / REVIEW_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    written = skipped = 0
+    for template in sorted(
+        latest.values(), key=lambda t: info[t.id].rank if t.id in info else 10**6
+    ):
+        path = out / f"{template.id}.yaml"
+        if path.exists() and not force:
+            skipped += 1
+            continue
+        meta = info.get(template.id)
+        details = {"状态": template.review_status.value, "意图": template.intent}
+        if meta is not None:
+            details |= {
+                "覆盖率名次": f"#{meta.rank}（{meta.coverage:.1%}）",
+                "证据": meta.evidence.value,
+                "限定事故或期间": "是" if meta.time_bound else "否",
+                "建议的公告": meta.suggested_notice_id or "无",
+            }
+        path.write_text(review_yaml(template, details), encoding="utf-8")
+        written += 1
+    typer.echo(f"已写入 {out}：{written} 个审核文件 · 已存在而跳过 {skipped} 个（--force 覆盖）")
+
+
+@review_app.command("import")
+def kb_review_import(kb_dir: KbDirOption = None, knowledge_dir: KnowledgeOption = None) -> None:
+    """导入 <kb-dir>/review/ 中修改过的审核文件。之后运行 copilot kb publish。"""
+    from datetime import datetime
+
+    from copilot.ingest.timestamps import JST
+    from copilot.kb.review import (
+        OVERLAY_FILE,
+        REVIEW_DIR,
+        ReviewError,
+        import_review_files,
+        read_overlay,
+        write_overlay,
+    )
+
+    directory, knowledge = _load_review_inputs(kb_dir, knowledge_dir)
+    overlay = read_overlay(directory / OVERLAY_FILE)
+    try:
+        report = import_review_files(
+            overlay, directory / REVIEW_DIR, knowledge, datetime.now(JST).replace(microsecond=0)
+        )
+    except ReviewError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    write_overlay(overlay, directory / OVERLAY_FILE)
+    for line in report.lines():
+        typer.echo(line)
+
+
+@kb_app.command("publish")
+def kb_publish(kb_dir: KbDirOption = None, knowledge_dir: KnowledgeOption = None) -> None:
+    """把 knowledge/、模板草稿和覆盖层合并后写入数据库（DATABASE_URL）。只插入新版本。"""
+    from copilot.contracts import ReplyTemplate
+    from copilot.kb.annotate import TEMPLATES_FILE, read_templates
+    from copilot.kb.review import OVERLAY_FILE, ReviewError, merge, read_overlay
+    from copilot.kb.store import ImmutableEntryError, KnowledgeStore
+    from copilot.storage import create_engine_for, upgrade_database
+
+    directory, knowledge = _load_review_inputs(kb_dir, knowledge_dir)
+    drafts = read_templates(directory / TEMPLATES_FILE)
+    if not drafts:
+        typer.echo(
+            f"找不到模板：{directory / TEMPLATES_FILE}（先运行 copilot kb annotate）", err=True
+        )
+        raise typer.Exit(1)
+    url = get_settings().database_url
+    upgrade_database(url)
+    store = KnowledgeStore(create_engine_for(url))
+    try:
+        knowledge_counts = store.add_all(knowledge.entries())
+        new, report = merge(
+            drafts, read_overlay(directory / OVERLAY_FILE), knowledge, store.latest(ReplyTemplate)
+        )
+        store.add_all(new)
+    except (ImmutableEntryError, ReviewError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    report.knowledge = knowledge_counts
+    for line in report.lines():
         typer.echo(line)
