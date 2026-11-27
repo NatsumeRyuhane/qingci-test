@@ -209,3 +209,50 @@ def kb_build(
     typer.echo(f"已写入 {target}：{len(candidates)} 个模板候选")
     for line in report.lines():
         typer.echo(line)
+
+
+@kb_app.command("knowledge")
+def kb_knowledge(
+    directory: Annotated[
+        Path | None, typer.Option("--dir", help="人工编写的知识。默认 knowledge/。")
+    ] = None,
+    check_leaks: Annotated[
+        bool,
+        typer.Option(
+            "--check-leaks", help="检查是否有一段与样本相同（需要 copilot ingest 的结果）。"
+        ),
+    ] = False,
+    cases_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--cases", help="导入结果，--check-leaks 时使用。默认 data/interim/cases.jsonl。"
+        ),
+    ] = None,
+) -> None:
+    """校验 knowledge/ 中人工编写的知识（#5）。有问题时退出码为 1。"""
+    from copilot.ingest import DEFAULT_OUTPUT, read_cases
+    from copilot.kb.knowledge import KNOWLEDGE_DIR, KnowledgeError, find_leaks, load_knowledge
+
+    try:
+        knowledge = load_knowledge(directory or KNOWLEDGE_DIR)
+    except KnowledgeError as exc:
+        typer.echo(f"校验失败：{exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"校验通过：意图 {len(knowledge.intents)} · 政策 {len(knowledge.policies)}"
+        f" · 公告与事件 {len(knowledge.notices)} · 术语 {len(knowledge.glossary)} · 风格指南"
+    )
+    if not check_leaks:
+        return
+    source = cases_path or DEFAULT_OUTPUT
+    if not source.is_file():
+        typer.echo(f"找不到导入结果：{source}（先运行 copilot ingest）", err=True)
+        raise typer.Exit(1)
+    leaks = find_leaks(knowledge, read_cases(source))
+    if not leaks:
+        typer.echo("没有发现与样本相同的文本")
+        return
+    labels = {"player_text": "与玩家写的内容相同", "agent_reply": "与客服回复（模板原文）相同"}
+    for leak in leaks:
+        typer.echo(f"{labels[leak.kind.value]}：{leak.source}（{leak.threads} 个线程）", err=True)
+    raise typer.Exit(1)

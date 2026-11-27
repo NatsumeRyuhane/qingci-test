@@ -46,6 +46,7 @@
 - **知识库条目。** 模板、意图、事实、政策、术语表条目、公告与事件都继承 `KnowledgeEntry`，共用：有效期 `[valid_from, valid_to)`、`known_from`（运营方何时知道）、`recorded_at`（审计）、来源方式、审核状态、`source_message_ids`、`supersedes`。
 - **版本选择。** （`id`, `version`）是编辑历史，每次修改都新建版本，行不可改写；草稿通过（`id`, `version`）引用，旧草稿引用的内容不变。每个条目以**最新版本**为准（`current_version`），最新版本为 `retired` 时整个条目下线，旧版本不会重新被选中；再由有效期决定在时间 T 是否适用（`select_valid`）。现实中的变化用一个新条目表示，记录 `supersedes`。历史重放（#7）只看 `known_from` 不晚于模拟的“现在”的版本。
 - **只有已批准的条目提供给模型**（`KnowledgeEntry.model_visible`）。未审核的条目只作为客服的参考。
+- **人工编写的条目**（意图、政策、公告与事件、术语表）以 YAML 放在 [`knowledge/`](../knowledge/README.md)，由 `copilot.kb.knowledge.load_knowledge` 读取并校验；固定的风格指南（`StyleGuide`）也在那里，它不是知识库条目，没有版本和有效期。
 - **模板占位符。** `ReplyTemplate.body_ja` 中的占位符写作 `{{slot_name}}`，必须与 `slots` 一一对应。
 - **安全不变量。** 只有已批准、`risk` 为 `low` 的模板才能 `auto_send_allowed`；只有 `default_risk` 为 `low` 的意图才能列入自动发送允许清单；有未通过检查的草稿不能分流为 `auto_send`（D-001）。这些在模型校验中强制执行。
 - **政策由代码检查。** `Policy` 用 NFKC 规范化后的固定日语短语做子串匹配（`matching_phrases`），不用正则，避免构造的输入引起回溯（#18）。

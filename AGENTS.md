@@ -170,6 +170,7 @@ uv run copilot db upgrade          # 创建或迁移数据库（DATABASE_URL）
 uv run copilot ingest --stats      # 清洗样本表格（SAMPLE_DATA_PATH），写出 data/interim/cases.jsonl
 uv run copilot split --stats       # 切分为 train/dev/test（D-012），写出 data/processed/split.json
 uv run copilot kb build            # 只用 train 构建模板候选（#5），写出 data/processed/kb/candidates.jsonl
+uv run copilot kb knowledge --check-leaks   # 校验 knowledge/，并检查是否混入样本原文
 uv run copilot serve --reload      # 后端：http://127.0.0.1:8000，API 文档在 /v1/docs
 (cd frontend && pnpm dev)          # 前端：http://localhost:5173，/v1 由 Vite 代理到后端
 ```
@@ -217,6 +218,7 @@ frontend/            React 前端（Vite + TypeScript），src/api/schema.d.ts �
 scripts/             辅助脚本（导出 requirements、生成 API 类型）
 .github/workflows/   CI
 data/                仅限本地的数据目录（内容被 git 忽略），见 data/README.md
+knowledge/           人工编写、不含客户原文的知识（意图、政策、公告、术语、风格指南），见 knowledge/README.md
 docs/
   requirements.md    原始测试题说明
   data.md            样本数据概况与发现
